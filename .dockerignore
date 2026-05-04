@@ -25,6 +25,7 @@ Thumbs.db
 Dockerfile*
 docker-compose*.yml
 /.devspace/
+devspace.yaml
 tmp/
 
 # Ignore git files

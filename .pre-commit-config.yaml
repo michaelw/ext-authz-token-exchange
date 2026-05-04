@@ -7,5 +7,6 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: ^charts/ext-authz-token-exchange/templates/
         args: [--unsafe]
       - id: check-added-large-files

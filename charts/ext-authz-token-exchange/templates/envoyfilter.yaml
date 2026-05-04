@@ -1,0 +1,32 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}-authz
+  namespace: istio-ingress
+spec:
+  workloadSelector:
+    labels:
+      gateway.networking.k8s.io/gateway-name: gateway
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        # XXX: route-specific matching, not the entire gateway
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.ext_authz
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+            clear_route_cache: true
+            failure_mode_allow: false
+            grpc_service:
+              envoy_grpc:
+                cluster_name: outbound|3001||ext-authz-token-exchange.{{ .Release.Namespace }}.svc.cluster.local
+              timeout: 1s

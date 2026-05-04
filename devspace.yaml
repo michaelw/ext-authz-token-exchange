@@ -1,37 +1,48 @@
 version: v2beta1
-name: ext-authz-router
+name: ext-authz-token-exchange
+
+require:
+  commands:
+    - name: yq
+      versionArgs: ["--version"]
+      versionRegEx: "yq \\(https://github.com/mikefarah/yq/\\) version (v\\d+\\.\\d+\\.\\d+)"
+      version: ">= 4"
 
 # Variables for configuration
 vars:
   DEVSPACE_USER: $(tr -d '._' <<< ${USER:-$(whoami)})
-  CONTAINER_USER_HOME: /home/gouser
+  CONTAINER_USER_HOME: /home/devuser
   REGISTRY:
     value: "ghcr.io/michaelw"
   DEV_REGISTRY:
     value: "ghcr.io/michaelw"
   IMAGE_NAME:
-    value: "ext-authz-router-api"
+    value: "ext-authz-token-exchange"
   DEV_TAG:
     value: "dev-${DEVSPACE_USER}-${DEVSPACE_TIMESTAMP}"
   PROD_TAG:
     value: "latest" # XXX versioning scheme for production images
 
+profiles:
+  - name: with-infra
+    merge:
+      dependencies:
+        infra:
+          git: https://github.com/michaelw/devspace-starter-pack
+
+
 # Images to build and push
 images:
   # Development image - not pushed to production registry
   dev:
-    image: ${DEV_REGISTRY}/${IMAGE_NAME}
+    image: ${DEV_REGISTRY}/${IMAGE_NAME}-dev
     dockerfile: ./Dockerfile
     target: dev
-    docker: &docker
-      args:
-        - "--platform=linux/amd64" # Ensure compatibility with local dev environment
+    buildKit: &buildKit
+      {}
     tags:
       - ${DEV_TAG}
       - dev
-    buildArgs:
-      WORKSPACE: /workspace
-
     skipPush: true # Never push dev images to registry
 
   # Production image - for deployment and dependencies
@@ -39,29 +50,27 @@ images:
     image: ${REGISTRY}/${IMAGE_NAME}
     dockerfile: ./Dockerfile
     target: prod
-    docker: *docker
+    buildKit: *buildKit
     tags:
-      - ${PROD_TAG}
       - "${DEVSPACE_GIT_COMMIT}"
-    buildArgs:
-      WORKSPACE: /workspace
+      - ${PROD_TAG}
     # This will be pushed to registry for others to use
 
 # Deployments - Kubernetes manifests
 deployments:
-  ext-authz-router:
+  ext-authz-token-exchange:
     helm:
       # https://www.devspace.sh/component-chart/docs/
       chart:
-        name: ./charts/ext-authz-router
+        name: ./charts/ext-authz-token-exchange
 
 # Development configuration
 dev:
-  ext-authz-router:
+  ext-authz-token-exchange:
     imageSelector: ${REGISTRY}/${IMAGE_NAME}
-    devImage: ${DEV_REGISTRY}/${IMAGE_NAME}
+    devImage: ${DEV_REGISTRY}/${IMAGE_NAME}-dev
 
-    env: {}
+    env: []
 
     resources:
       requests:
@@ -79,28 +88,28 @@ dev:
     sync:
       - path: ./
         startContainer: true
-        excludeFile: .gitignore
       - path: "${DEVSPACE_USER_HOME}/.gitconfig:${CONTAINER_USER_HOME}/.gitconfig"
         file: true
         disableDownload: true
 
     # Port forwarding for development
     ports:
-      - port: "3000" # API service
+      - port: "3001" # gRPC ext-authz service
 
     persistPaths:
     - path: /go-cache
+      skipPopulate: true
       # Optional path on the persistent volume to mount
       # volumePath: my-volume/app
 
     ssh:
-      localHostname: ext-authz-router.devspace
+      localHostname: ${DEVSPACE_NAME}.devspace
 
     proxyCommands:
       - gitCredentials: true
       - command: kubectl
 
-    workingDir: /workspace
+    workingDir: /workspaces/${DEVSPACE_NAME}
 
     terminal:
       command: bash .devcontainer/start.sh
@@ -132,15 +141,16 @@ pipelines:
       create_deployments --all
       start_dev --all --set "terminal.enabled=$TERMINAL_ENABLED" --set "logs.enabled=$LOGS_ENABLED"
       if [ $(get_flag "vscode") == "true" ]; then
-        code --folder-uri vscode-remote://ssh-remote+ext-authz-router.devspace/workspace
+        code --folder-uri vscode-remote://ssh-remote+${DEVSPACE_NAME}.devspace/workspaces/${DEVSPACE_NAME}
       fi
 
   # Pipeline for regular deployment
-  deploy: |
-    run_dependencies --all
-    ensure_pull_secrets --all
-    build_images --all --except dev
-    create_deployments --all
+  deploy:
+    run: |-
+      run_dependencies --all
+      ensure_pull_secrets --all
+      build_images --all --except dev
+      create_deployments --all
 
 commands:
   # sections:
@@ -163,7 +173,6 @@ commands:
     section: build
     command: |
       echo "I: target=generate"
-      go generate -x ./...
       go mod download
 
   compile:
@@ -188,7 +197,7 @@ commands:
     command: |
       echo "I: target=start"
       if ! pgrep air >/dev/null; then
-        go run ./cmd/ext-authz-router-service $@
+        go run ./cmd/ext-authz-token-exchange-service $@
       else
         echo "I: using air, nothing to do here"
       fi

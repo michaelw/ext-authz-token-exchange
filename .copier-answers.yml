@@ -3,8 +3,8 @@ _src_path: https://github.com/michaelw/template-go-api-service
 api_resource: Namespaces
 dev_registry: ghcr.io/michaelw
 github_org: michaelw
-go_module: github.com/michaelw/ext-authz-router
-project_description: Envoy Ext AuthZ Plugin for header-based routing to environments
-project_name: Ext AuthZ Routing Plugin
-project_slug: ext-authz-router
+go_module: github.com/michaelw/ext-authz-token-exchange
+project_description: Envoy Ext AuthZ Plugin for Token Exchange
+project_name: Ext AuthZ Token Exchange Plugin
+project_slug: ext-authz-token-exchange
 registry: ghcr.io/michaelw

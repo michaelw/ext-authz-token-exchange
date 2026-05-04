@@ -29,7 +29,7 @@ This will:
 - Deploy to Kubernetes
 - Set up file synchronization
 - Enable hot reloading with Air
-- Forward ports (3000 for API)
+- Forward ports (3001 for gRPC)
 - Open a terminal in the container
 
 This will take some time, you can follow progress in another terminal:

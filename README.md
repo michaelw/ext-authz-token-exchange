@@ -1,55 +1,45 @@
-# Ext AuthZ Routing Plugin
+# Ext AuthZ Token Exchange Plugin
 
-Envoy Ext AuthZ Plugin for header-based routing to environments
+Envoy Ext-AuthZ plugin template for token exchange.
+
+The current service intentionally keeps only the gRPC external authorization
+service stub. Business logic will be added in `internal/server/grpc_authz.go`.
 
 ## Project Overview
 
-- `cmd/ext-authz-router-service/main.go` — main entrypoint
-- `internal/server/` — server logic
-- `api/openapi.yaml` — OpenAPI spec
-- `db/` — Database related code
-- `Dockerfile`, `docker-compose.yaml` — containerization
+- `cmd/ext-authz-token-exchange-service/main.go` — gRPC service entrypoint
+- `internal/server/` — Envoy ext-authz gRPC server stub
 
 For a detailed overview, refer to the [Implementation Guide](docs/implementation.md).
 
 ## Running the Services
 
-Users who want to run the service **without modifying the code** can use Docker Compose directly.
-
-### Running with Docker Compose
-
-1. Clone the repository.
-
-2. Run:
-
-   ```bash
-   docker-compose up --build -d
-   ```
-
-3. This spins up all required services.
-
-4. Service runs by default at http://localhost:3000/
-
-**Notes**
-
-* No source code or build dependencies are required locally.
-* All services run as pre-built images.
-* Configuration is driven by docker-compose.yaml and overrides.
+Users who want to run the service **without modifying the code** can use DevSpace directly.
 
 ### Running with DevSpace
 
-If you have a running Kubernetes cluster, [DevSpace](https://devspace.sh/) is all you need:
+If you have a local Kubernetes cluster available, [DevSpace](https://devspace.sh/) is all you need:
+
+For a preview of what gets deployed:
 
 ```bash
-devspace dev
+devspace deploy --render --skip-build
 ```
 
-Refer to the [DevSpace](docs/devspace.md) documentation for more details.
+If you do not yet have Gateway API CRDs, a cluster-wide gateway named `gateway`, external-dns, cert-manager, etc. installed:
 
+```bash
+devspace deploy -p with-infra
+```
 
-## Usage
+The command will setup a fully functionioning self-contained demo environment.
 
+Refer to the [DevSpace](docs/devspace.md) and [devspace-starter-pack](https://github.com/michaelw/devspace-starter-pack) documentation
+for more information.
 
+### Uninstall
+
+- `devspace purge` or `devspace purge -p with-infra`
 
 ## Development Quickstart Guide
 
@@ -57,38 +47,14 @@ This project uses Docker-based devcontainers and a multi-stage Docker build for 
 
 For further information, refer to the [Development Guide](docs/development.md).
 
-- Build: `docker-compose build`
-- Run: `docker-compose up --build`
 - K8s: `devspace dev`
-- API Spec: see `api/openapi.yaml`
+- gRPC: `GRPC_PORT=3001 go run ./cmd/ext-authz-token-exchange-service`
 
 ### Getting Started in VSCode
 
-1. **Open the project in VS Code.**
-   Make sure you have the [Remote - Containers](https://code.visualstudio.com/docs/remote/containers) extension installed.
+Deploy a development container and connect it to VSCode
 
-2. **Rebuild and open the devcontainer**
-   Use the command palette:
-   `Dev Containers: Rebuild and Reopen in Container`
-
-3. **Initial setup runs automatically**:
-   - `go generate ./...` runs to update any generated Go code
-   - `go mod tidy` runs to clean up module dependencies
-
-4. **Source code is mounted as a workspace volume**, allowing live editing without rebuilding the container.
-
-5. **File watching and live reload:**
-   The project uses [`air`](https://github.com/air-verse/air) for fast live rebuilds and restarts on code changes.
-   - Generated files (e.g., `*.gen.go`) are excluded from triggering rebuilds to avoid infinite loops.
-
-### Other IDEs
-
-We can spin up the build environment and then connect to it like so:
-
-```bash
-docker compose -f docker-compose.yaml -f docker-compose.dev.override.yaml up --build -d
-docker compose exec ext-authz-router-service bash
-```
+- `devspace dev --vscode`
 
 # TODO
 

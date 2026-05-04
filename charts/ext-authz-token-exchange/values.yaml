@@ -1,0 +1,31 @@
+service:
+  annotations:
+    eloader.stakater.com/auto: "true"
+  containers:
+    - name: ext-authz-token-exchange-service
+      image: ghcr.io/michaelw/ext-authz-token-exchange
+      # use locally built images if available
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: GRPC_PORT
+          value: "3001"
+      ports:
+        - name: grpc-authz
+          containerPort: 3001
+      resources:
+        requests:
+          cpu: 200m
+          memory: 128Mi
+        limits:
+          cpu: 1000m
+          memory: 1024Mi
+  volumes:
+    - name: tmp-dir
+      emptyDir: {}
+  service:
+    type: LoadBalancer
+    ports:
+      - name: grpc-api
+        port: 3001
+        containerPort: grpc-authz
+        appProtocol: grpc

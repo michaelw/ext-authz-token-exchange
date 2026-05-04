@@ -1,6 +1,0 @@
-openapi: 3.0.3
-servers: []
-info:
-  title: "Ext AuthZ Routing Plugin"
-  version: 0.1.0
-  description: "Envoy Ext AuthZ Plugin for header-based routing to environments"
