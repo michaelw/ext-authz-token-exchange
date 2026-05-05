@@ -81,6 +81,8 @@ function renderSelected() {
   $("plugin-detail").textContent = scenario.expect?.status === 200 ? "allow or exchange" : "deny or map error";
   $("policy-detail").textContent = scenario.policy || "-";
   $("issuer-detail").textContent = scenario.exchange || "-";
+  $("issuer-summary").textContent = scenario.behavior?.summary || "-";
+  $("issuer-behavior-detail").textContent = scenario.behavior?.detail || "No issuer behavior metadata for this scenario.";
   $("httpbin-detail").textContent = scenario.expect?.upstreamAuthorization || "upstream";
   $("request-method").textContent = scenario.request.method;
   $("request-path").textContent = scenario.request.path;

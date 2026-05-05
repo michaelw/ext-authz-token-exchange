@@ -96,6 +96,9 @@ func printScenario(result demo.Result) {
 	}
 	fmt.Printf("Policy:    %s\n", sc.Policy)
 	fmt.Printf("Exchange:  %s\n", sc.Exchange)
+	if sc.Behavior.Summary != "" {
+		fmt.Printf("Issuer:    %s\n", sc.Behavior.Summary)
+	}
 	fmt.Printf("Expected:  HTTP %d\n", sc.Expect.Status)
 	if sc.Expect.Auth != "" {
 		fmt.Printf("Expected:  upstream Authorization: %s\n", sc.Expect.Auth)
