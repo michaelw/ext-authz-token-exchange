@@ -61,6 +61,7 @@ teams:
       - name: denied
         action: deny
         pathPrefix: /anything/denied
+        methods: ["*"]
 
 plugin:
   service:
