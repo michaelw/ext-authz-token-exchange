@@ -87,7 +87,8 @@ kubectl get cm -A -w -l ext-authz-token-exchange.magneticflux.net/enabled=true
 
 The runner covers the non-mutating scenarios: yellow/red/blue success, missing
 bearer, CORS preflight, plain `OPTIONS` without bearer, `OPTIONS` with bearer,
-unmatched pass-through, and token endpoint error responses. The
+unmatched pass-through, explicit deny, opt-in default-deny for unmatched traffic,
+and token endpoint error responses. The
 `expired-subject-token` scenario demonstrates the compatibility-friendly path
 where the authorization server returns RFC6749 `invalid_grant` for an expired
 but validly shaped subject token, even though RFC8693 points invalid
@@ -146,6 +147,12 @@ sequenceDiagram
     Gateway->>Httpbin: "OPTIONS /anything/yellow"
     Httpbin-->>Browser: "200 CORS response headers"
 ```
+
+When `TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=true`, this pass-through applies
+only after the preflight matches a healthy policy region. Unmatched preflights
+receive `403 Forbidden` with `policy_denied`, like other unmatched traffic.
+Routes matched by `action: deny` also return `policy_denied`, and the plugin
+logs whether the denial was explicit or caused by default deny.
 
 ### Token Endpoint Error Mapping
 

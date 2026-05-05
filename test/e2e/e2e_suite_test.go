@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/client-go/util/retry"
 )
 
 const (
@@ -238,6 +239,8 @@ plugin:
             value: %q
           - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
             value: "false"
+          - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
+            value: "false"
           # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
           - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS
             value: "true"
@@ -408,6 +411,33 @@ func deleteConfigMapIgnoreNotFound(ctx context.Context, namespace, name string) 
 		return
 	}
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func setPluginEnv(ctx context.Context, name, value string) {
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		deployment, err := env.kube.AppsV1().Deployments(env.systemNamespace).Get(ctx, env.releaseName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for i := range deployment.Spec.Template.Spec.Containers {
+			container := &deployment.Spec.Template.Spec.Containers[i]
+			if container.Name != "ext-authz-token-exchange-service" {
+				continue
+			}
+			for j := range container.Env {
+				if container.Env[j].Name == name {
+					container.Env[j].Value = value
+					_, err = env.kube.AppsV1().Deployments(env.systemNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
+					return err
+				}
+			}
+			container.Env = append(container.Env, corev1.EnvVar{Name: name, Value: value})
+			_, err = env.kube.AppsV1().Deployments(env.systemNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
+			return err
+		}
+		return fmt.Errorf("deployment %s/%s does not contain ext-authz-token-exchange-service", env.systemNamespace, env.releaseName)
+	})).To(Succeed())
+	waitForDeployment(ctx, env.systemNamespace, env.releaseName)
 }
 
 func waitForDeployment(ctx context.Context, namespace, name string) {

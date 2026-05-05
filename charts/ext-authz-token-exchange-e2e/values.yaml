@@ -58,6 +58,9 @@ teams:
         scope: malformed
         pathPrefix: /anything/error-malformed
         tokenPath: /token/malformed
+      - name: denied
+        action: deny
+        pathPrefix: /anything/denied
 
 plugin:
   service:
@@ -100,6 +103,8 @@ plugin:
           - name: TOKEN_EXCHANGE_BEARER_REALM
             value: "ext-authz-token-exchange-e2e"
           - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
+            value: "false"
+          - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
             value: "false"
           # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
           - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS

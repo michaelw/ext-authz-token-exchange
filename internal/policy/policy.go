@@ -20,6 +20,7 @@ type Source struct {
 // Entry is a validated app-owned token exchange policy entry.
 type Entry struct {
 	Source        Source
+	Action        Action
 	Host          string
 	PathPrefix    string
 	Methods       []string
@@ -28,6 +29,16 @@ type Entry struct {
 	Audiences     []string
 	TokenEndpoint string
 }
+
+// Action describes what to do with a matched policy entry.
+type Action string
+
+const (
+	// ActionExchange is the default action and preserves existing token exchange behavior.
+	ActionExchange Action = "exchange"
+	// ActionDeny intentionally rejects matched requests without token exchange.
+	ActionDeny Action = "deny"
+)
 
 // Region is a host/path/method area that must fail closed because its policy
 // source was invalid or ambiguous.
@@ -64,6 +75,7 @@ type file struct {
 }
 
 type rawEntry struct {
+	Action        string   `json:"action"`
 	Host          string   `json:"host"`
 	PathPrefix    string   `json:"pathPrefix"`
 	Methods       []string `json:"methods"`
@@ -158,6 +170,7 @@ func parseConfig(source Source, data string, cfg config.RuntimeConfig) ([]Entry,
 }
 
 func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entry, Region, bool) {
+	action := normalizeAction(raw.Action)
 	region := Region{
 		Source:     source,
 		Host:       normalizeHost(raw.Host),
@@ -170,6 +183,22 @@ func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entr
 	}
 	if region.PathPrefix == "" {
 		problems = append(problems, "pathPrefix is required")
+	}
+	if action == "" {
+		problems = append(problems, "action must be exchange or deny")
+	}
+	if len(problems) > 0 {
+		region.Reason = strings.Join(problems, "; ")
+		return Entry{}, region, false
+	}
+	if action == ActionDeny {
+		return Entry{
+			Source:     source,
+			Action:     action,
+			Host:       region.Host,
+			PathPrefix: region.PathPrefix,
+			Methods:    region.Methods,
+		}, Region{}, true
 	}
 
 	resources := compact(append(raw.Resources, raw.Resource))
@@ -196,6 +225,7 @@ func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entr
 	}
 	return Entry{
 		Source:        source,
+		Action:        action,
 		Host:          region.Host,
 		PathPrefix:    region.PathPrefix,
 		Methods:       region.Methods,
@@ -204,6 +234,19 @@ func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entr
 		Audiences:     audiences,
 		TokenEndpoint: tokenEndpoint,
 	}, Region{}, true
+}
+
+func normalizeAction(action string) Action {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return ActionExchange
+	}
+	switch Action(action) {
+	case ActionExchange, ActionDeny:
+		return Action(action)
+	default:
+		return ""
+	}
 }
 
 func (e Entry) matches(host, path, method string) bool {

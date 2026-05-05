@@ -162,6 +162,56 @@ func TestAuthzServerLogsTokensWhenInsecureLoggingEnabled(t *testing.T) {
 	}
 }
 
+func TestAuthzServerLogsDenialReasonsWithoutSensitiveValues(t *testing.T) {
+	var logs bytes.Buffer
+	restoreLogger := captureLogger(&logs)
+	defer restoreLogger()
+
+	srv := NewAuthzGRPCServer(
+		config.RuntimeConfig{BearerRealm: "example", DefaultDenyUnmatched: true},
+		policy.NewStaticStore(loggingDenyIndex()),
+		&loggingExchanger{},
+	)
+
+	resp, err := srv.Check(context.Background(), loggingCheckRequestWithHeaders("GET", "orders.example.com", "/api/orders?token=secret", map[string]string{
+		"authorization": "Bearer subject-token",
+	}))
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if resp.GetDeniedResponse() == nil {
+		t.Fatalf("expected denied response: %v", resp)
+	}
+
+	resp, err = srv.Check(context.Background(), loggingCheckRequestWithHeaders("GET", "orders.example.com", "/api/customers?token=secret", map[string]string{
+		"authorization": "Bearer subject-token",
+	}))
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if resp.GetDeniedResponse() == nil {
+		t.Fatalf("expected denied response: %v", resp)
+	}
+
+	got := logs.String()
+	for _, want := range []string{
+		"DENY reason=explicit_policy",
+		"policy=orders/token-exchange",
+		"DENY reason=unmatched_default_deny",
+		"path=/api/orders",
+		"path=/api/customers",
+	} {
+		if !bytes.Contains([]byte(got), []byte(want)) {
+			t.Fatalf("log did not contain %q: %s", want, got)
+		}
+	}
+	for _, sensitive := range []string{"subject-token", "secret"} {
+		if bytes.Contains([]byte(got), []byte(sensitive)) {
+			t.Fatalf("log contained sensitive value %q: %s", sensitive, got)
+		}
+	}
+}
+
 func captureLogger(logs *bytes.Buffer) func() {
 	originalWriter := customLogger.Writer()
 	customLogger.SetOutput(logs)
@@ -211,6 +261,27 @@ entries:
     methods: ["GET"]
     resource: https://orders.example.com/api/
     tokenEndpoint: http://issuer.example/token
+`}, config.RuntimeConfig{
+		ClientID:                "client",
+		ClientSecret:            "secret",
+		TokenEndpointAuthMethod: config.AuthMethodClientSecretBasic,
+		GrantType:               config.DefaultGrantType,
+		SubjectTokenType:        config.DefaultSubjectTokenType,
+		LabelSelector:           config.DefaultConfigMapLabelSelector,
+		AllowHTTPTokenEndpoint:  true,
+		RequireIssuedTokenType:  true,
+		ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+	})
+}
+
+func loggingDenyIndex() *policy.Index {
+	return policy.BuildIndex(map[policy.Source]string{{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
 `}, config.RuntimeConfig{
 		ClientID:                "client",
 		ClientSecret:            "secret",

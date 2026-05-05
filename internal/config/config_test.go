@@ -76,12 +76,25 @@ var _ = Describe("RuntimeConfig", func() {
 		setenv("OAUTH_CLIENT_ID", "client")
 		setenv("OAUTH_CLIENT_SECRET", "secret")
 		unsetenv("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS")
+		unsetenv("TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED")
 
 		cfg, err := config.LoadFromEnv()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.NamespaceSelector).To(Equal(config.DefaultConfigMapNamespaceSelector))
 		Expect(cfg.InsecureLogTokens).To(BeFalse())
+		Expect(cfg.DefaultDenyUnmatched).To(BeFalse())
+	})
+
+	It("loads default deny for unmatched requests only when explicitly enabled", func() {
+		setenv("OAUTH_CLIENT_ID", "client")
+		setenv("OAUTH_CLIENT_SECRET", "secret")
+		setenv("TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", "true")
+
+		cfg, err := config.LoadFromEnv()
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.DefaultDenyUnmatched).To(BeTrue())
 	})
 
 	It("loads insecure token logging only when explicitly enabled", func() {

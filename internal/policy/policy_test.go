@@ -63,6 +63,87 @@ entries:
 		Expect(decision.Entry.PathPrefix).To(Equal("/api/orders"))
 	})
 
+	It("defaults policy action to exchange", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: read:orders
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeFalse())
+		Expect(decision.Entry.Action).To(Equal(policy.ActionExchange))
+	})
+
+	It("accepts explicit exchange action", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: exchange
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: read:orders
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeFalse())
+		Expect(decision.Entry.Action).To(Equal(policy.ActionExchange))
+	})
+
+	It("accepts deny action without exchange fields", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeFalse())
+		Expect(decision.Entry.Action).To(Equal(policy.ActionDeny))
+	})
+
+	It("ignores exchange-only fields on deny entries", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: ignored
+    resource: https://orders.example.com/api/
+    audience: ignored
+    tokenEndpoint: not-a-url
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeFalse())
+		Expect(decision.Entry.Action).To(Equal(policy.ActionDeny))
+	})
+
 	It("allows requests without matching configured policy", func() {
 		index := policy.BuildIndex(nil, cfg)
 
@@ -89,6 +170,55 @@ entries:
 		Expect(decision.Reason).To(ContainSubstring("tokenEndpoint is required"))
 	})
 
+	It("fails closed for unknown actions", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: reject
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring("action must be exchange or deny"))
+	})
+
+	It("uses the most-specific action when deny and exchange overlap", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api
+    methods: ["GET"]
+  - action: exchange
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: read:orders
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeFalse())
+		Expect(decision.Entry.Action).To(Equal(policy.ActionExchange))
+
+		decision = index.Match("orders.example.com", "/api/customers/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeFalse())
+		Expect(decision.Entry.Action).To(Equal(policy.ActionDeny))
+	})
+
 	It("fails closed when entries tie for most-specific match", func() {
 		index := policy.BuildIndex(map[policy.Source]string{
 			{Namespace: "orders", Name: "one"}: `
@@ -103,6 +233,34 @@ entries:
 version: v1
 entries:
   - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    resource: https://orders.example.com/api/
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring("tie"))
+	})
+
+	It("fails closed when deny and exchange entries tie for most-specific match", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "one"}: `
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+`,
+			{Namespace: "orders", Name: "two"}: `
+version: v1
+entries:
+  - action: exchange
+    host: orders.example.com
     pathPrefix: /api/orders
     methods: ["GET"]
     resource: https://orders.example.com/api/

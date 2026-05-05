@@ -42,6 +42,8 @@ service:
           value: "ext-authz-token-exchange"
         - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
           value: "false"
+        - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
+          value: "false"
         - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
           value: "5s"
         - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
@@ -88,6 +90,7 @@ tokenExchange:
   tokenEndpointAllowlist: ""
   bearerRealm: ext-authz-token-exchange
   allowUnauthenticatedOptions: false
+  defaultDenyUnmatched: false
   httpClient:
     requestTimeout: 5s
     dialTimeout: 3s

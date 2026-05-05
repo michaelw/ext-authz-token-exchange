@@ -49,6 +49,14 @@ namespaces are labeled with the default policy namespace selector
 `ext-authz-token-exchange.magneticflux.net/policy=enabled`; ConfigMaps in
 unlabeled namespaces are ignored by the plugin.
 
+By default, requests that do not match any app-owned policy pass through
+unchanged. Set `TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=true` or
+`tokenExchange.defaultDenyUnmatched=true` in the Helm values to return
+`403 Forbidden` for unmatched traffic, including unmatched CORS preflights.
+Individual routes can also be rejected with `action: deny` policy entries,
+while omitted `action` and `action: exchange` keep the normal token exchange
+behavior.
+
 Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra
 -p local-test` to install required infrastructure plus the local demo/e2e stack.
 

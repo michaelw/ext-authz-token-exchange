@@ -107,6 +107,37 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer original-token"))
 	})
 
+	It("denies unmatched requests when default deny is enabled", func(ctx SpecContext) {
+		setPluginEnv(ctx, "TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", "true")
+		DeferCleanup(func(ctx SpecContext) {
+			setPluginEnv(ctx, "TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", "false")
+		})
+
+		Eventually(func(g Gomega) {
+			resp, body := request(ctx, http.MethodGet, "/anything/no-policy-match", "original-token", nil)
+			g.Expect(resp.StatusCode).To(Equal(http.StatusForbidden), string(body))
+
+			var parsed map[string]string
+			g.Expect(json.Unmarshal(body, &parsed)).To(Succeed())
+			g.Expect(parsed).To(HaveKeyWithValue("error", "policy_denied"))
+		}, 45*time.Second, time.Second).Should(Succeed())
+
+		resp, body := request(ctx, http.MethodOptions, "/anything/no-policy-match", "", map[string]string{
+			"Origin":                        "https://client.example.test",
+			"Access-Control-Request-Method": "GET",
+		})
+		Expect(resp.StatusCode).To(Equal(http.StatusForbidden), string(body))
+	})
+
+	It("denies explicitly denied routes without default deny", func(ctx SpecContext) {
+		resp, body := request(ctx, http.MethodGet, "/anything/denied", "denied-token", nil)
+		Expect(resp.StatusCode).To(Equal(http.StatusForbidden), string(body))
+
+		var parsed map[string]string
+		Expect(json.Unmarshal(body, &parsed)).To(Succeed())
+		Expect(parsed).To(HaveKeyWithValue("error", "policy_denied"))
+	})
+
 	It("ignores policies from namespaces that do not match the namespace selector", func(ctx SpecContext) {
 		namespace := createUnlabeledTeamNamespace(ctx, "black")
 		policy := createEphemeralPolicy(ctx, namespace, "black-unselected", "black", "/token/black")

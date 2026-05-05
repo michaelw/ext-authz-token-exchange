@@ -50,6 +50,7 @@ type RuntimeConfig struct {
 	ExpectedIssuedTokenType            string
 	BearerRealm                        string
 	AllowUnauthenticatedOptions        bool
+	DefaultDenyUnmatched               bool
 	TokenEndpointRequestTimeout        time.Duration
 	TokenEndpointDialTimeout           time.Duration
 	TokenEndpointTLSHandshakeTimeout   time.Duration
@@ -79,6 +80,7 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		ExpectedIssuedTokenType:            envDefault("TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE", DefaultIssuedTokenType),
 		BearerRealm:                        envDefault("TOKEN_EXCHANGE_BEARER_REALM", "ext-authz-token-exchange"),
 		AllowUnauthenticatedOptions:        envBool("TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS", false),
+		DefaultDenyUnmatched:               envBool("TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", false),
 		TokenEndpointRequestTimeout:        envDuration("TOKEN_ENDPOINT_REQUEST_TIMEOUT", 5*time.Second),
 		TokenEndpointDialTimeout:           envDuration("TOKEN_ENDPOINT_DIAL_TIMEOUT", 3*time.Second),
 		TokenEndpointTLSHandshakeTimeout:   envDuration("TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT", 3*time.Second),

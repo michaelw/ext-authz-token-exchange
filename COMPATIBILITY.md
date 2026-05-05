@@ -105,3 +105,44 @@ TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS=true
 
 If an `OPTIONS` request includes an `Authorization: Bearer ...` header, the
 plugin treats it like a protected request and performs token exchange.
+
+Requests that do not match any healthy or unhealthy policy region pass through
+unchanged by default. Deployments that need policy coverage to be an explicit
+allow-list can enable catch-all denial for unmatched requests:
+
+```text
+TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=true
+```
+
+With default deny enabled, unmatched requests receive `403 Forbidden` with
+`policy_denied`. This also applies to unmatched true CORS preflights. Matched
+healthy CORS preflights still bypass token exchange and continue to the resource
+server. The plugin logs whether a `policy_denied` response came from unmatched
+default-deny behavior or from an explicit deny policy.
+
+Policy entries may now include an `action`. Omitted `action` and
+`action: exchange` both preserve the original token exchange behavior:
+
+```yaml
+version: v1
+entries:
+  - host: api.example.com
+    pathPrefix: /orders
+    methods: ["GET"]
+    action: exchange
+    resource: https://api.example.com/orders
+```
+
+Use `action: deny` to intentionally reject a matched route even when
+`TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=false`:
+
+```yaml
+version: v1
+entries:
+  - host: api.example.com
+    pathPrefix: /admin
+    methods: ["*"]
+    action: deny
+```
+
+Unknown action values make the affected host/path/method region fail closed.

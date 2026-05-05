@@ -18,7 +18,14 @@ entries:
   - host: {{ $.Values.host }}
     pathPrefix: {{ .pathPrefix }}
     methods: ["GET", "POST", "OPTIONS"]
+{{- if eq .action "deny" }}
+    action: deny
+{{- else }}
+{{- if .action }}
+    action: {{ .action }}
+{{- end }}
     scope: {{ .scope }}
     resource: {{ $.Values.policy.httpbinResourceBase }}{{ .pathPrefix }}
     tokenEndpoint: {{ include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
+{{- end }}
 {{- end }}

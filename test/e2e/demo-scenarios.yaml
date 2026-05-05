@@ -84,7 +84,7 @@ scenarios:
       status: 200
 
   - name: unmatched
-    summary: unmatched traffic passes through unchanged
+    summary: unmatched traffic passes through unchanged when default deny is disabled
     request:
       method: GET
       path: /anything/no-policy-match
@@ -92,6 +92,17 @@ scenarios:
     expect:
       status: 200
       upstreamAuthorization: Bearer original-token
+
+  - name: explicit-deny
+    summary: explicit deny policy rejects a matched route without token exchange
+    request:
+      method: GET
+      path: /anything/denied
+      bearer: denied-token
+    policy: "{{ .NamespacePrefix }}-red/denied-policy"
+    expect:
+      status: 403
+      error: policy_denied
 
   - name: invalid-target
     summary: token endpoint invalid_target maps to downstream OAuth error

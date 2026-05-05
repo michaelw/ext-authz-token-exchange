@@ -49,6 +49,142 @@ entries:
 		Expect(exchanger.calls).To(Equal(0))
 	})
 
+	It("allows unmatched requests through unchanged by default", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: read:orders
+    tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", map[string]string{
+			"authorization": "Bearer original",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.GetOkResponse()).NotTo(BeNil())
+	})
+
+	It("denies unmatched requests when default deny is enabled", func() {
+		cfg.DefaultDenyUnmatched = true
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: read:orders
+    tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", map[string]string{
+			"authorization": "Bearer original",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("Forbidden"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"policy_denied"}`))
+	})
+
+	It("denies unmatched CORS preflight requests when default deny is enabled", func() {
+		cfg.DefaultDenyUnmatched = true
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["OPTIONS"]
+    scope: read:orders
+    tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{})
+
+		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/customers/1", map[string]string{
+			"origin":                        "https://app.example.com",
+			"access-control-request-method": "GET",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("Forbidden"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"policy_denied"}`))
+	})
+
+	It("denies explicit deny policies without token exchange", func() {
+		exchanger := &fakeExchanger{}
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+`)), exchanger)
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("Forbidden"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"policy_denied"}`))
+		Expect(exchanger.calls).To(Equal(0))
+	})
+
+	It("denies explicit deny CORS preflight requests", func() {
+		exchanger := &fakeExchanger{}
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - action: deny
+    host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["OPTIONS"]
+`)), exchanger)
+
+		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
+			"origin":                        "https://app.example.com",
+			"access-control-request-method": "GET",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("Forbidden"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"policy_denied"}`))
+		Expect(exchanger.calls).To(Equal(0))
+	})
+
+	It("allows matched CORS preflight requests when default deny is enabled", func() {
+		cfg.DefaultDenyUnmatched = true
+		exchanger := &fakeExchanger{}
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["OPTIONS"]
+    scope: read:orders
+    tokenEndpoint: http://issuer.example/token
+`)), exchanger)
+
+		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
+			"origin":                        "https://app.example.com",
+			"access-control-request-method": "GET",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.GetOkResponse()).NotTo(BeNil())
+		Expect(exchanger.calls).To(Equal(0))
+	})
+
 	It("challenges non-preflight OPTIONS requests without bearer tokens by default", func() {
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1

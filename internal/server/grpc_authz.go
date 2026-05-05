@@ -49,9 +49,6 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 	method := strings.ToUpper(httpReq.GetMethod())
 	headers := httpReq.GetHeaders()
 	subjectToken, hasBearerToken := bearerToken(header(headers, "authorization"))
-	if shouldBypassOptions(method, headers, s.cfg.AllowUnauthenticatedOptions, hasBearerToken) {
-		return allowResponse(nil), nil
-	}
 
 	host := header(headers, ":authority")
 	if host == "" {
@@ -63,6 +60,12 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 
 	decision := s.store.Index().Match(host, httpReq.GetPath(), method)
 	if !decision.Matched {
+		if s.cfg.DefaultDenyUnmatched {
+			s.logDeny("unmatched_default_deny", method, host, httpReq.GetPath(), policy.Entry{})
+			return s.denyJSON(http.StatusForbidden, map[string]string{
+				"error": "policy_denied",
+			}, nil), nil
+		}
 		return allowResponse(nil), nil
 	}
 	if decision.Unhealthy {
@@ -70,6 +73,15 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 			"error":             "server_error",
 			"error_description": "internal server error",
 		}, nil), nil
+	}
+	if decision.Entry.Action == policy.ActionDeny {
+		s.logDeny("explicit_policy", method, host, httpReq.GetPath(), decision.Entry)
+		return s.denyJSON(http.StatusForbidden, map[string]string{
+			"error": "policy_denied",
+		}, nil), nil
+	}
+	if shouldBypassOptions(method, headers, s.cfg.AllowUnauthenticatedOptions, hasBearerToken) {
+		return allowResponse(nil), nil
 	}
 
 	if !hasBearerToken {
@@ -86,6 +98,19 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 	}
 	s.logTokensIfInsecureEnabled(method, host, httpReq.GetPath(), decision.Entry, subjectToken, result.AccessToken)
 	return allowResponse([]headerPair{{Name: "authorization", Value: "Bearer " + result.AccessToken}}), nil
+}
+
+func (s *AuthzGRPCServer) logDeny(reason, method, host, path string, entry policy.Entry) {
+	policyName := "-"
+	if entry.Source.Namespace != "" || entry.Source.Name != "" {
+		policyName = logField(entry.Source.Namespace) + "/" + logField(entry.Source.Name)
+	}
+	customLogger.Printf("DENY reason=%s method=%s host=%s path=%s policy=%s",
+		logField(reason),
+		logField(method),
+		logField(host),
+		logPath(path),
+		policyName)
 }
 
 func (s *AuthzGRPCServer) logTokensIfInsecureEnabled(method, host, path string, entry policy.Entry, subjectToken, exchangedToken string) {
