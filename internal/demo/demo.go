@@ -231,23 +231,8 @@ func (sc Scenario) WithDefaults() Scenario {
 
 // ExchangeBehavior returns demo metadata for a fake token endpoint path.
 func ExchangeBehavior(exchange string, req Request, expect Expectation) Behavior {
-	if exchange == "" || exchange == "-" {
-		if strings.EqualFold(req.Method, http.MethodOptions) && req.Headers["Origin"] != "" && req.Headers["Access-Control-Request-Method"] != "" {
-			return Behavior{
-				Summary: "Preflight bypasses token exchange.",
-				Detail:  "This is a true CORS preflight request, so the plugin allows it through without calling the token endpoint.",
-			}
-		}
-		if expect.Status >= http.StatusBadRequest {
-			return Behavior{
-				Summary: "Denied before token exchange.",
-				Detail:  "The plugin returns this denial directly, so the fake issuer is not called.",
-			}
-		}
-		return Behavior{
-			Summary: "Passes through without token exchange.",
-			Detail:  "The plugin allows this request through unchanged, so the fake issuer is not called.",
-		}
+	if noExchangeConfigured(exchange) {
+		return noExchangeBehavior(req, expect)
 	}
 	switch strings.TrimPrefix(exchange, "/token/") {
 	case "success", "yellow", "red", "blue":
@@ -320,6 +305,31 @@ func ExchangeBehavior(exchange string, req Request, expect Expectation) Behavior
 			Summary: "Unknown fake token scenario.",
 			Detail:  "The fake issuer will return HTTP 400 invalid_request for an unknown /token/ scenario.",
 		}
+	}
+}
+
+func noExchangeConfigured(exchange string) bool {
+	return exchange == "" || exchange == "-"
+}
+
+func noExchangeBehavior(req Request, expect Expectation) Behavior {
+	if strings.EqualFold(req.Method, http.MethodOptions) && req.Headers["Origin"] != "" && req.Headers["Access-Control-Request-Method"] != "" {
+		return Behavior{
+			Summary: "Preflight bypasses token exchange.",
+			Detail:  "This is a true CORS preflight request, so the plugin allows it through without calling the token endpoint.",
+		}
+	}
+	// A no-exchange scenario with an error status is a local plugin denial.
+	// Token endpoint error scenarios set exchange to a /token/... path instead.
+	if expect.Status >= http.StatusBadRequest {
+		return Behavior{
+			Summary: "Denied before token exchange.",
+			Detail:  "The plugin returns this denial directly, so the fake issuer is not called.",
+		}
+	}
+	return Behavior{
+		Summary: "Passes through without token exchange.",
+		Detail:  "The plugin allows this request through unchanged, so the fake issuer is not called.",
 	}
 }
 
