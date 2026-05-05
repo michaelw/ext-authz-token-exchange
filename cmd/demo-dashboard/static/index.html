@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Token Exchange Demo</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Token Exchange Demo</h1>
+        <p id="subtitle">RFC8693 ext-authz flow through the local Gateway API host</p>
+      </div>
+      <div class="status-strip">
+        <label class="theme-picker">
+          <span>Theme</span>
+          <select id="theme-select" aria-label="Theme">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <span class="chip" id="gateway-chip">Gateway</span>
+        <span class="chip good">Plugin ready</span>
+        <span class="chip good">Fake issuer ready</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2>Scenarios</h2>
+          <button id="run-all" type="button">Run all</button>
+        </div>
+        <div id="scenario-list" class="scenario-list"></div>
+      </aside>
+
+      <section class="stage">
+        <div class="flow-header">
+          <div>
+            <h2 id="scenario-title">Select a scenario</h2>
+            <p id="scenario-summary">Run a demo scenario to watch the request move through the plugin.</p>
+          </div>
+          <div class="flow-actions">
+            <button id="run-selected" type="button">Run selected</button>
+            <div class="result-pill" id="result-pill">Idle</div>
+          </div>
+        </div>
+
+        <div class="flow" id="flow">
+          <div class="node client" data-step="client">
+            <span>Client</span>
+            <strong id="client-detail">HTTP request</strong>
+          </div>
+          <div class="arrow"></div>
+          <div class="node gateway" data-step="gateway">
+            <span>Gateway API</span>
+            <strong>httpbin.int.kube</strong>
+          </div>
+          <div class="arrow"></div>
+          <div class="node plugin" data-step="plugin">
+            <span>ext-authz plugin</span>
+            <strong id="plugin-detail">match policy</strong>
+          </div>
+          <div class="arrow"></div>
+          <div class="node policy" data-step="policy">
+            <span>ConfigMap policy</span>
+            <strong id="policy-detail">-</strong>
+          </div>
+          <div class="arrow exchange-arrow"></div>
+          <div class="node issuer" data-step="issuer">
+            <span>Fake token endpoint</span>
+            <strong id="issuer-detail">-</strong>
+          </div>
+          <div class="arrow final-arrow"></div>
+          <div class="node httpbin" data-step="httpbin">
+            <span>go-httpbin</span>
+            <strong id="httpbin-detail">upstream</strong>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <section class="panel">
+            <h3>Request</h3>
+            <dl>
+              <dt>Method</dt><dd id="request-method">-</dd>
+              <dt>Path</dt><dd id="request-path">-</dd>
+              <dt>Input token</dt><dd id="request-token">-</dd>
+            </dl>
+          </section>
+          <section class="panel">
+            <h3>Observed</h3>
+            <dl>
+              <dt>Status</dt><dd id="observed-status">-</dd>
+              <dt>Authorization</dt><dd id="observed-auth">-</dd>
+              <dt>Error</dt><dd id="observed-error">-</dd>
+              <dt>Elapsed</dt><dd id="observed-elapsed">-</dd>
+            </dl>
+          </section>
+          <section class="panel">
+            <h3>Headers</h3>
+            <dl>
+              <dt>WWW-Authenticate</dt><dd id="observed-www">-</dd>
+              <dt>CORS origin</dt><dd id="observed-cors">-</dd>
+              <dt>Content-Type</dt><dd id="observed-content-type">-</dd>
+            </dl>
+          </section>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="tabs">
+          <button class="tab active" data-tab="curl" type="button">curl</button>
+          <button class="tab" data-tab="response" type="button">response</button>
+          <button class="tab" data-tab="policy" type="button">policy</button>
+          <button class="tab" data-tab="logs" type="button">logs</button>
+        </div>
+        <pre id="tab-curl" class="tab-panel active">Select a scenario.</pre>
+        <div id="tab-response" class="tab-panel response-panel">
+          <section>
+            <h3>Raw</h3>
+            <pre id="response-raw">-</pre>
+          </section>
+          <section class="response-preview-section">
+            <div class="preview-header">
+              <h3>Preview</h3>
+              <div id="response-format-toggle" class="format-toggle" hidden>
+                <button class="format-button active" data-format="json" type="button">JSON</button>
+                <button class="format-button" data-format="yaml" type="button">YAML</button>
+              </div>
+            </div>
+            <div id="response-preview" class="response-preview">Run a scenario to render the response.</div>
+          </section>
+        </div>
+        <div id="tab-policy" class="tab-panel policy-panel">
+          <div class="policy-header">
+            <h3 id="policy-title">Policy</h3>
+            <button id="refresh-policy" type="button">Refresh</button>
+          </div>
+          <pre id="policy-text">Select a scenario.</pre>
+        </div>
+        <div id="tab-logs" class="tab-panel logs">
+          <button id="refresh-logs" type="button">Refresh logs</button>
+          <h3>Plugin</h3>
+          <pre id="plugin-logs"></pre>
+          <h3>Fake issuer</h3>
+          <pre id="issuer-logs"></pre>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
