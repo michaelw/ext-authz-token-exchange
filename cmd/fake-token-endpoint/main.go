@@ -55,7 +55,7 @@ func tokenHandler(clientID, clientSecret string) http.HandlerFunc {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid form")
 			return
 		}
-		log.Printf("token request scenario=%s subject_token=%q", strings.TrimPrefix(r.URL.Path, "/token/"), r.FormValue("subject_token"))
+		log.Printf("token request scenario=%s", strings.TrimPrefix(r.URL.Path, "/token/"))
 
 		switch strings.TrimPrefix(r.URL.Path, "/token/") {
 		case "success", "yellow", "red", "blue":

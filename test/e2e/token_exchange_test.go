@@ -88,7 +88,8 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		Eventually(func(g Gomega) {
 			after := strings.TrimPrefix(tokenEndpointLogs(ctx), before)
 			g.Expect(after).To(ContainSubstring(`scenario=yellow`))
-			g.Expect(after).To(ContainSubstring(`subject_token="options-token"`))
+			g.Expect(after).NotTo(ContainSubstring(`subject_token=`))
+			g.Expect(after).NotTo(ContainSubstring(`options-token`))
 		}, 30*time.Second, time.Second).Should(Succeed())
 	})
 
