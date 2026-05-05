@@ -5,16 +5,20 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/demo"
+	"github.com/pkg/browser"
 )
 
 //go:embed static
@@ -27,6 +31,9 @@ type server struct {
 }
 
 func main() {
+	openBrowser := flag.Bool("open", false, "open the demo dashboard in the system browser")
+	flag.Parse()
+
 	opts := demo.LoadOptionsFromEnv()
 	addr := envDefault("DEMO_DASHBOARD_ADDR", defaultAddr)
 
@@ -41,9 +48,26 @@ func main() {
 	mux.HandleFunc("GET /favicon.ico", favicon)
 	mux.Handle("/", staticHandler())
 
-	log.Printf("demo dashboard listening on http://%s", addr)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	browserURL, err := dashboardURL(addr)
+	if err != nil {
+		_ = listener.Close()
+		log.Fatal(err)
+	}
+
+	log.Printf("demo dashboard listening on %s", browserURL)
 	log.Printf("using gateway %s and scenario config %s", opts.BaseURL, opts.ConfigPath)
-	if err := http.ListenAndServe(addr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if *openBrowser {
+		if err := browser.OpenURL(browserURL); err != nil {
+			log.Printf("warning: failed to open browser for %s: %v", browserURL, err)
+		}
+	}
+
+	srv := &http.Server{Handler: mux}
+	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }
@@ -202,6 +226,22 @@ func envDefault(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func dashboardURL(addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("parse dashboard address %q: %w", addr, err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	u := url.URL{
+		Scheme: "http",
+		Host:   net.JoinHostPort(host, port),
+		Path:   "/",
+	}
+	return u.String(), nil
 }
 
 func validKubernetesName(value string) bool {
