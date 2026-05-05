@@ -154,8 +154,13 @@ func (c *Client) mapErrorResponse(resp *http.Response, body []byte) *OAuthError 
 	// RFC6749 Section 5.2 defines token endpoint error responses.
 	// https://www.rfc-editor.org/rfc/rfc6749#section-5.2
 	//
-	// RFC8693 Section 2.2.2 adds invalid_target for resource/audience failures.
+	// RFC8693 Section 2.2.2 says invalid subject_token cases use
+	// invalid_request, and adds invalid_target for resource/audience failures.
 	// https://www.rfc-editor.org/rfc/rfc8693#section-2.2.2
+	//
+	// Compatibility note: RFC6749 invalid_grant includes expired/revoked grants.
+	// We preserve recognized AS errors such as invalid_grant, while sanitizing
+	// descriptions unless TOKEN_EXCHANGE_ERROR_PASSTHROUGH is enabled.
 	parsed, valid := parseOAuthError(body)
 	wwwAuthenticate := resp.Header.Values("WWW-Authenticate")
 	if valid && c.cfg.ErrorPassthrough {

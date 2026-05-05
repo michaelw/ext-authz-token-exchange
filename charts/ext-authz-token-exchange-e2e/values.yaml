@@ -35,6 +35,14 @@ teams:
         scope: errors
         pathPrefix: /anything/error-invalid-target
         tokenPath: /token/invalid-target
+      - name: error-invalid-grant
+        scope: invalid-grant
+        pathPrefix: /anything/error-invalid-grant
+        tokenPath: /token/invalid-grant
+      - name: error-expired-subject-token
+        scope: expired-subject-token
+        pathPrefix: /anything/error-expired-subject-token
+        tokenPath: /token/expired-subject-token
       - name: error-unauthorized
         scope: unauthorized
         pathPrefix: /anything/error-unauthorized

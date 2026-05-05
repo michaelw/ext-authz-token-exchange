@@ -40,6 +40,154 @@ The production plugin image intentionally contains only
 the separate Dockerfile `fake-token-endpoint` target and should be pushed as its
 own image.
 
+## Recorded Demo
+
+Use the Go demo runner for a terminal-friendly walkthrough once
+`devspace deploy -p local-test` has installed the demo stack. It uses typed HTTP
+and JSON handling, and renders `test/e2e/demo-scenarios.yaml` as a Go template:
+
+```sh
+go run ./cmd/demo-scenario list
+go run ./cmd/demo-scenario yellow-success
+go run ./cmd/demo-scenario all
+```
+
+To try alternate scenarios or namespace names, pass a different config file or
+override the template values:
+
+```sh
+go run ./cmd/demo-scenario --config test/e2e/demo-scenarios.yaml --namespace-prefix service all
+```
+
+For a recorded demo, a useful four-terminal layout is:
+
+```sh
+# 1. Scenario runner.
+go run ./cmd/demo-scenario all
+
+# 2. Central plugin logs.
+kubectl logs -f -n ext-authz-token-exchange-e2e deploy/ext-authz-token-exchange-e2e
+
+# 3. Fake token endpoint logs.
+kubectl logs -f -n ext-authz-token-exchange-e2e deploy/fake-token-endpoint
+
+# 4. App-owned policy watch across namespaces.
+kubectl get cm -A -w -l ext-authz-token-exchange.magneticflux.net/enabled=true
+```
+
+The runner covers the non-mutating scenarios: yellow/red/blue success, missing
+bearer, CORS preflight, plain `OPTIONS` without bearer, `OPTIONS` with bearer,
+unmatched pass-through, and token endpoint error responses. The
+`expired-subject-token` scenario demonstrates the compatibility-friendly path
+where the authorization server returns RFC6749 `invalid_grant` for an expired
+but validly shaped subject token, even though RFC8693 points invalid
+`subject_token` cases toward `invalid_request`. `go-httpbin` does not echo
+request headers in its `OPTIONS` response body, so use the fake token endpoint
+log pane to show the `OPTIONS` with bearer exchange. Ginkgo remains the
+authoritative runner for mutating fail-closed scenarios such as temporary
+cross-namespace conflicts and invalid policy ConfigMaps.
+
+### Successful Token Exchange
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway as "Gateway API pod"
+    participant Plugin as "ext-authz plugin"
+    participant Issuer as "fake token endpoint"
+    participant Httpbin as "go-httpbin"
+
+    Client->>Gateway: "GET /anything/yellow<br/>Authorization: Bearer incoming-yellow"
+    Gateway->>Plugin: "Envoy ext_authz Check"
+    Plugin->>Plugin: "Match service-yellow/yellow-policy"
+    Plugin->>Issuer: "POST /token/yellow<br/>subject_token=incoming-yellow"
+    Issuer-->>Plugin: "200 access_token=exchanged-yellow-incoming-yellow"
+    Plugin-->>Gateway: "OK, replace Authorization"
+    Gateway->>Httpbin: "GET /anything/yellow<br/>Authorization: Bearer exchanged-yellow-incoming-yellow"
+    Httpbin-->>Client: "200 JSON echoed headers"
+```
+
+### Missing Bearer Challenge
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway as "Gateway API pod"
+    participant Plugin as "ext-authz plugin"
+
+    Client->>Gateway: "GET /anything/yellow"
+    Gateway->>Plugin: "Envoy ext_authz Check"
+    Plugin->>Plugin: "Match service-yellow/yellow-policy"
+    Plugin-->>Client: "401 WWW-Authenticate: Bearer<br/>{"error":"bearer_token_required"}"
+```
+
+### CORS Preflight Pass-Through
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Gateway as "Gateway API pod"
+    participant Plugin as "ext-authz plugin"
+    participant Httpbin as "go-httpbin"
+
+    Browser->>Gateway: "OPTIONS /anything/yellow<br/>Origin + Access-Control-Request-Method"
+    Gateway->>Plugin: "Envoy ext_authz Check"
+    Plugin-->>Gateway: "OK without token exchange"
+    Gateway->>Httpbin: "OPTIONS /anything/yellow"
+    Httpbin-->>Browser: "200 CORS response headers"
+```
+
+### Token Endpoint Error Mapping
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway as "Gateway API pod"
+    participant Plugin as "ext-authz plugin"
+    participant Issuer as "fake token endpoint"
+
+    Client->>Gateway: "GET /anything/error-invalid-target<br/>Authorization: Bearer incoming-error"
+    Gateway->>Plugin: "Envoy ext_authz Check"
+    Plugin->>Plugin: "Match service-red/error-invalid-target-policy"
+    Plugin->>Issuer: "POST /token/invalid-target"
+    Issuer-->>Plugin: "400 {"error":"invalid_target"}"
+    Plugin-->>Client: "400 sanitized OAuth error"
+```
+
+### Multi-Namespace Policy Discovery
+
+```mermaid
+sequenceDiagram
+    participant Yellow as "service-yellow ConfigMap"
+    participant Red as "service-red ConfigMaps"
+    participant Blue as "service-blue ConfigMap"
+    participant Plugin as "ext-authz plugin"
+    participant Gateway as "Gateway API pod"
+
+    Yellow-->>Plugin: "yellow-policy"
+    Red-->>Plugin: "red-policy + error policies"
+    Blue-->>Plugin: "blue-policy"
+    Plugin->>Plugin: "Build atomic host/path/method index"
+    Gateway->>Plugin: "Check /anything/red"
+    Plugin-->>Gateway: "Use service-red/red-policy"
+```
+
+### Fail-Closed Policy Regions
+
+```mermaid
+sequenceDiagram
+    participant TeamA as "team ConfigMap A"
+    participant TeamB as "team ConfigMap B"
+    participant Plugin as "ext-authz plugin"
+    participant Client
+
+    TeamA-->>Plugin: "host/path/method entry"
+    TeamB-->>Plugin: "same most-specific host/path/method or invalid policy"
+    Plugin->>Plugin: "Mark affected region unhealthy or ambiguous"
+    Client->>Plugin: "Request matching affected region"
+    Plugin-->>Client: "500 generic fail-closed response"
+```
+
 By default the suite creates:
 
 - `ext-authz-token-exchange-e2e` for the central ext-authz plugin and fake token endpoint.

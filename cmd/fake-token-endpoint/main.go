@@ -68,6 +68,10 @@ func tokenHandler(clientID, clientSecret string) http.HandlerFunc {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid token exchange request")
 		case "invalid-target":
 			writeOAuthError(w, http.StatusBadRequest, "invalid_target", "resource or audience is invalid")
+		case "invalid-grant":
+			writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "subject token is invalid")
+		case "expired-subject-token":
+			writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "subject_token_expired")
 		case "unauthorized":
 			w.Header().Add("WWW-Authenticate", `Bearer realm="issuer", error="invalid_token"`)
 			writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "client rejected")

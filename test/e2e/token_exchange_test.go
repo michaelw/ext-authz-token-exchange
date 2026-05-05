@@ -69,6 +69,17 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		Expect(resp.Header.Get("Access-Control-Allow-Headers")).To(Equal("Authorization"))
 	})
 
+	It("returns a bearer challenge for OPTIONS requests without bearer or CORS preflight headers", func(ctx SpecContext) {
+		resp, body := request(ctx, http.MethodOptions, "/anything/yellow", "", nil)
+		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized), string(body))
+		Expect(resp.Header.Values("WWW-Authenticate")).NotTo(BeEmpty())
+		Expect(resp.Header.Get("WWW-Authenticate")).To(ContainSubstring(`Bearer realm="ext-authz-token-exchange-e2e"`))
+
+		var parsed map[string]string
+		Expect(json.Unmarshal(body, &parsed)).To(Succeed())
+		Expect(parsed).To(HaveKeyWithValue("error", "bearer_token_required"))
+	})
+
 	It("exchanges bearer tokens on OPTIONS requests that are not CORS preflight", func(ctx SpecContext) {
 		before := tokenEndpointLogs(ctx)
 		resp, body := request(ctx, http.MethodOptions, "/anything/yellow", "options-token", nil)
@@ -133,6 +144,8 @@ entries:
 			wantWWW    bool
 		}{
 			{path: "/anything/error-invalid-target", statusCode: http.StatusBadRequest, errorCode: "invalid_target"},
+			{path: "/anything/error-invalid-grant", statusCode: http.StatusBadRequest, errorCode: "invalid_grant"},
+			{path: "/anything/error-expired-subject-token", statusCode: http.StatusBadRequest, errorCode: "invalid_grant"},
 			{path: "/anything/error-unauthorized", statusCode: http.StatusUnauthorized, errorCode: "invalid_client", wantWWW: true},
 			{path: "/anything/error-forbidden", statusCode: http.StatusInternalServerError, errorCode: "invalid_target"},
 			{path: "/anything/error-malformed", statusCode: http.StatusInternalServerError, errorCode: "invalid_request"},

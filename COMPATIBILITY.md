@@ -49,9 +49,19 @@ explicit compatibility setting:
 TOKEN_EXCHANGE_ERROR_PASSTHROUGH=true
 ```
 
-Recognized OAuth error codes, including RFC8693 `invalid_target`, are preserved
-when safe. Full upstream error detail should be observed in service logs rather
-than exposed downstream.
+Recognized OAuth error codes, including RFC8693 `invalid_target` and RFC6749
+`invalid_grant`, are preserved when safe. Default sanitized responses replace
+authorization-server `error_description` values with a diagnostic message, so a
+client will see `invalid_grant` but not a detail like `subject_token_expired`.
+Set `TOKEN_EXCHANGE_ERROR_PASSTHROUGH=true` only when clients must receive a
+documented, machine-readable authorization-server detail.
+
+There is a deliberate compatibility choice for expired incoming subject tokens:
+RFC8693 Section 2.2.2 says invalid or unacceptable `subject_token` cases use
+`invalid_request`, while RFC6749 Section 5.2 defines `invalid_grant` for grants
+that are invalid, expired, or revoked. The plugin preserves an authorization
+server's `invalid_grant` response so deployments can use it for refreshable
+expired-token UX.
 
 ## Policy Safety
 

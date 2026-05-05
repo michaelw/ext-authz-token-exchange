@@ -1,0 +1,167 @@
+version: v1
+scenarios:
+  - name: yellow-success
+    summary: baseline yellow policy exchanges the incoming bearer token
+    request:
+      method: GET
+      path: /anything/yellow
+      bearer: incoming-yellow
+    policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    exchange: /token/yellow
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer exchanged-yellow-incoming-yellow
+
+  - name: red-success
+    summary: baseline red policy exchanges the incoming bearer token
+    request:
+      method: GET
+      path: /anything/red
+      bearer: incoming-red
+    policy: "{{ .NamespacePrefix }}-red/red-policy"
+    exchange: /token/red
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer exchanged-red-incoming-red
+
+  - name: blue-success
+    summary: baseline blue policy exchanges the incoming bearer token
+    request:
+      method: GET
+      path: /anything/blue
+      bearer: incoming-blue
+    policy: "{{ .NamespacePrefix }}-blue/blue-policy"
+    exchange: /token/blue
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer exchanged-blue-incoming-blue
+
+  - name: missing-bearer
+    summary: matched request without Authorization receives a bearer challenge
+    request:
+      method: GET
+      path: /anything/yellow
+    policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    expect:
+      status: 401
+      error: bearer_token_required
+      wwwAuthenticateContains: 'Bearer realm="ext-authz-token-exchange-e2e"'
+
+  - name: cors-preflight
+    summary: true CORS preflight bypasses token exchange and reaches httpbin
+    request:
+      method: OPTIONS
+      path: /anything/yellow
+      headers:
+        Origin: https://client.example.test
+        Access-Control-Request-Method: GET
+        Access-Control-Request-Headers: Authorization
+    policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    expect:
+      status: 200
+      corsOrigin: https://client.example.test
+
+  - name: options-missing-bearer
+    summary: OPTIONS without bearer and without CORS preflight headers receives a bearer challenge
+    request:
+      method: OPTIONS
+      path: /anything/yellow
+    policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    expect:
+      status: 401
+      error: bearer_token_required
+      wwwAuthenticateContains: 'Bearer realm="ext-authz-token-exchange-e2e"'
+
+  - name: options-bearer
+    summary: OPTIONS with a bearer token is not preflight; watch fake endpoint logs for the exchange
+    request:
+      method: OPTIONS
+      path: /anything/yellow
+      bearer: options-token
+    policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    exchange: /token/yellow
+    expect:
+      status: 200
+
+  - name: unmatched
+    summary: unmatched traffic passes through unchanged
+    request:
+      method: GET
+      path: /anything/no-policy-match
+      bearer: original-token
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer original-token
+
+  - name: invalid-target
+    summary: token endpoint invalid_target maps to downstream OAuth error
+    request:
+      method: GET
+      path: /anything/error-invalid-target
+      bearer: incoming-error
+    policy: "{{ .NamespacePrefix }}-red/error-invalid-target-policy"
+    exchange: /token/invalid-target
+    expect:
+      status: 400
+      error: invalid_target
+
+  - name: invalid-grant
+    summary: token endpoint rejects the incoming subject token as invalid
+    request:
+      method: GET
+      path: /anything/error-invalid-grant
+      bearer: incoming-invalid-grant
+    policy: "{{ .NamespacePrefix }}-red/error-invalid-grant-policy"
+    exchange: /token/invalid-grant
+    expect:
+      status: 400
+      error: invalid_grant
+
+  - name: expired-subject-token
+    summary: token endpoint rejects an expired but validly shaped subject token
+    request:
+      method: GET
+      path: /anything/error-expired-subject-token
+      bearer: eyJhbGciOiJub25lIn0.eyJleHAiOjF9.
+    policy: "{{ .NamespacePrefix }}-red/error-expired-subject-token-policy"
+    exchange: /token/expired-subject-token
+    expect:
+      status: 400
+      error: invalid_grant
+
+  - name: unauthorized
+    summary: token endpoint 401 preserves WWW-Authenticate
+    request:
+      method: GET
+      path: /anything/error-unauthorized
+      bearer: incoming-error
+    policy: "{{ .NamespacePrefix }}-red/error-unauthorized-policy"
+    exchange: /token/unauthorized
+    expect:
+      status: 401
+      error: invalid_client
+      wwwAuthenticateContains: 'Bearer realm="issuer"'
+
+  - name: forbidden
+    summary: token endpoint 403 is treated as token-service failure
+    request:
+      method: GET
+      path: /anything/error-forbidden
+      bearer: incoming-error
+    policy: "{{ .NamespacePrefix }}-red/error-forbidden-policy"
+    exchange: /token/forbidden
+    expect:
+      status: 500
+      error: invalid_target
+
+  - name: malformed
+    summary: malformed token success response is rejected
+    request:
+      method: GET
+      path: /anything/error-malformed
+      bearer: incoming-error
+    policy: "{{ .NamespacePrefix }}-red/error-malformed-policy"
+    exchange: /token/malformed
+    expect:
+      status: 500
+      error: invalid_request
