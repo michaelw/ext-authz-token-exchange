@@ -3,6 +3,7 @@ package exchange_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -115,7 +116,7 @@ var _ = Describe("Client", func() {
 
 		Expect(oauthErr).NotTo(BeNil())
 		Expect(oauthErr.StatusCode).To(Equal(http.StatusInternalServerError))
-		Expect(oauthErr.ErrorDescription).To(Equal("internal server error"))
+		Expect(oauthErr.ErrorDescription).To(Equal("internal server error (TXE-3003)"))
 	})
 
 	It("preserves recognized OAuth error codes while sanitizing bodies by default", func() {
@@ -135,8 +136,96 @@ var _ = Describe("Client", func() {
 		Expect(oauthErr.StatusCode).To(Equal(http.StatusBadRequest))
 		Expect(oauthErr.Error).To(Equal("invalid_target"))
 		Expect(oauthErr.Body).To(BeEmpty())
-		Expect(oauthErr.ErrorDescription).To(HavePrefix("request failed ("))
+		Expect(oauthErr.ErrorDescription).To(Equal("request failed (TXE-2001)"))
 		Expect(oauthErr.WWWAuthenticate).To(Equal([]string{`Bearer realm="issuer"`}))
+	})
+
+	It("uses stable diagnostic codes for non-OAuth token endpoint errors", func() {
+		cases := []struct {
+			status          int
+			wantStatus      int
+			wantError       string
+			wantDescription string
+		}{
+			{status: http.StatusBadRequest, wantStatus: http.StatusBadRequest, wantError: "invalid_request", wantDescription: "request failed (TXE-2002)"},
+			{status: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized, wantError: "invalid_client", wantDescription: "request failed (TXE-2003)"},
+			{status: http.StatusForbidden, wantStatus: http.StatusInternalServerError, wantError: "server_error", wantDescription: "internal server error (TXE-2004)"},
+			{status: http.StatusBadGateway, wantStatus: http.StatusInternalServerError, wantError: "server_error", wantDescription: "internal server error (TXE-2005)"},
+		}
+		for _, tc := range cases {
+			tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`not-oauth-json`))
+			}))
+
+			_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
+				TokenEndpoint: tokenEndpoint.URL,
+				Scope:         "read",
+			}, "subject")
+			tokenEndpoint.Close()
+
+			Expect(oauthErr).NotTo(BeNil())
+			Expect(oauthErr.StatusCode).To(Equal(tc.wantStatus))
+			Expect(oauthErr.Error).To(Equal(tc.wantError))
+			Expect(oauthErr.ErrorDescription).To(Equal(tc.wantDescription))
+		}
+	})
+
+	It("uses stable diagnostic codes for invalid token success responses", func() {
+		cases := []struct {
+			body            string
+			wantDescription string
+		}{
+			{body: `{"access_token":`, wantDescription: "internal server error (TXE-3001)"},
+			{body: `{"token_type":"Bearer","issued_token_type":"` + config.DefaultIssuedTokenType + `"}`, wantDescription: "internal server error (TXE-3002)"},
+			{body: `{"access_token":"exchanged","token_type":"N_A","issued_token_type":"` + config.DefaultIssuedTokenType + `"}`, wantDescription: "internal server error (TXE-3003)"},
+			{body: `{"access_token":"exchanged","token_type":"Bearer","issued_token_type":"urn:ietf:params:oauth:token-type:refresh_token"}`, wantDescription: "internal server error (TXE-3004)"},
+		}
+		for _, tc := range cases {
+			tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+
+			_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
+				TokenEndpoint: tokenEndpoint.URL,
+				Scope:         "read",
+			}, "subject")
+			tokenEndpoint.Close()
+
+			Expect(oauthErr).NotTo(BeNil())
+			Expect(oauthErr.StatusCode).To(Equal(http.StatusInternalServerError))
+			Expect(oauthErr.Error).To(Equal("invalid_request"))
+			Expect(oauthErr.ErrorDescription).To(Equal(tc.wantDescription))
+		}
+	})
+
+	It("uses stable diagnostic codes for operational failures", func() {
+		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(context.Background(), policy.Entry{
+			TokenEndpoint: "ftp://issuer.example/token",
+			Scope:         "read",
+		}, "subject")
+		Expect(oauthErr).NotTo(BeNil())
+		Expect(oauthErr.Message).To(Equal("invalid token endpoint (TXE-1001)"))
+		Expect(oauthErr.Message).NotTo(ContainSubstring("ftp://issuer.example/token"))
+
+		_, oauthErr = exchange.NewClient(cfg, clientWithRoundTripper(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.Canceled
+		}))).Exchange(context.Background(), policy.Entry{
+			TokenEndpoint: "http://issuer.example/token",
+			Scope:         "read",
+		}, "subject")
+		Expect(oauthErr).NotTo(BeNil())
+		Expect(oauthErr.Message).To(Equal("token exchange request failed (TXE-1003)"))
+
+		_, oauthErr = exchange.NewClient(cfg, clientWithRoundTripper(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return responseWithReadError(http.StatusOK), nil
+		}))).Exchange(context.Background(), policy.Entry{
+			TokenEndpoint: "http://issuer.example/token",
+			Scope:         "read",
+		}, "subject")
+		Expect(oauthErr).NotTo(BeNil())
+		Expect(oauthErr.Message).To(Equal("failed to read token exchange response (TXE-1004)"))
 	})
 
 	It("passes through OAuth error bodies only when enabled", func() {
@@ -178,3 +267,31 @@ var _ = Describe("Client", func() {
 		Expect(transport.TLSClientConfig.MinVersion).NotTo(BeZero())
 	})
 })
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func clientWithRoundTripper(rt http.RoundTripper) *http.Client {
+	return &http.Client{Transport: rt}
+}
+
+func responseWithReadError(status int) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       readErrorBody{},
+		Header:     http.Header{},
+	}
+}
+
+type readErrorBody struct{}
+
+func (readErrorBody) Read([]byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (readErrorBody) Close() error {
+	return nil
+}

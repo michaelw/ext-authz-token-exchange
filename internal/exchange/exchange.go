@@ -3,9 +3,7 @@ package exchange
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +20,27 @@ import (
 const (
 	contentTypeForm = "application/x-www-form-urlencoded"
 	contentTypeJSON = "application/json"
+)
+
+const (
+	// Diagnostic codes are stable grep-able operational markers. Allocate new
+	// codes intentionally; do not derive them from file names, line numbers, or
+	// generated/random values.
+	diagInvalidTokenEndpoint       = "TXE-1001"
+	diagCreateExchangeRequest      = "TXE-1002"
+	diagExchangeRequestFailed      = "TXE-1003"
+	diagReadExchangeResponseFailed = "TXE-1004"
+
+	diagRecognizedOAuthError = "TXE-2001"
+	diagNonOAuthBadRequest   = "TXE-2002"
+	diagNonOAuthUnauthorized = "TXE-2003"
+	diagForbiddenFailure     = "TXE-2004"
+	diagOtherNonOKFailure    = "TXE-2005"
+
+	diagMalformedSuccessJSON = "TXE-3001"
+	diagMissingAccessToken   = "TXE-3002"
+	diagNonBearerTokenType   = "TXE-3003"
+	diagWrongIssuedTokenType = "TXE-3004"
 )
 
 // Client exchanges incoming subject tokens for upstream bearer tokens.
@@ -80,7 +99,7 @@ func NewHTTPClient(cfg config.RuntimeConfig) *http.Client {
 // Exchange performs an RFC8693 token exchange request for entry.
 func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken string) (Result, *OAuthError) {
 	if err := c.cfg.ValidateTokenEndpoint(entry.TokenEndpoint); err != nil {
-		return Result{}, internalError("invalid token endpoint")
+		return Result{}, internalError("invalid token endpoint", diagInvalidTokenEndpoint)
 	}
 
 	form := url.Values{}
@@ -106,7 +125,7 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, entry.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return Result{}, internalError("failed to create token exchange request")
+		return Result{}, internalError("failed to create token exchange request", diagCreateExchangeRequest)
 	}
 	req.Header.Set("Content-Type", contentTypeForm)
 	req.Header.Set("Accept", contentTypeJSON)
@@ -119,13 +138,13 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return Result{}, internalError("token exchange request failed")
+		return Result{}, internalError("token exchange request failed", diagExchangeRequestFailed)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Result{}, internalError("failed to read token exchange response")
+		return Result{}, internalError("failed to read token exchange response", diagReadExchangeResponseFailed)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -134,18 +153,18 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 
 	var success successResponse
 	if err := json.Unmarshal(body, &success); err != nil {
-		return Result{}, invalidTokenResponse()
+		return Result{}, invalidTokenResponse(diagMalformedSuccessJSON)
 	}
 	// RFC8693 Section 2.2.1 requires access_token, issued_token_type, and token_type.
 	// https://www.rfc-editor.org/rfc/rfc8693#section-2.2.1
 	if success.AccessToken == "" {
-		return Result{}, invalidTokenResponse()
+		return Result{}, invalidTokenResponse(diagMissingAccessToken)
 	}
 	if !strings.EqualFold(success.TokenType, "Bearer") {
-		return Result{}, invalidTokenResponse()
+		return Result{}, invalidTokenResponse(diagNonBearerTokenType)
 	}
 	if c.cfg.RequireIssuedTokenType && success.IssuedTokenType != c.cfg.ExpectedIssuedTokenType {
-		return Result{}, invalidTokenResponse()
+		return Result{}, invalidTokenResponse(diagWrongIssuedTokenType)
 	}
 	return Result{AccessToken: success.AccessToken}, nil
 }
@@ -173,18 +192,18 @@ func (c *Client) mapErrorResponse(resp *http.Response, body []byte) *OAuthError 
 		}
 	}
 	if valid {
-		return sanitizedOAuthError(downstreamStatus(resp.StatusCode), parsed.Error, "", wwwAuthenticate)
+		return sanitizedOAuthError(downstreamStatus(resp.StatusCode), parsed.Error, "", diagRecognizedOAuthError, wwwAuthenticate)
 	}
 
 	switch resp.StatusCode {
 	case http.StatusBadRequest:
-		return sanitizedOAuthError(http.StatusBadRequest, "invalid_request", "", wwwAuthenticate)
+		return sanitizedOAuthError(http.StatusBadRequest, "invalid_request", "", diagNonOAuthBadRequest, wwwAuthenticate)
 	case http.StatusUnauthorized:
-		return sanitizedOAuthError(http.StatusUnauthorized, "invalid_client", "", wwwAuthenticate)
+		return sanitizedOAuthError(http.StatusUnauthorized, "invalid_client", "", diagNonOAuthUnauthorized, wwwAuthenticate)
 	case http.StatusForbidden:
-		return sanitizedOAuthError(http.StatusInternalServerError, "server_error", "internal server error", wwwAuthenticate)
+		return sanitizedOAuthError(http.StatusInternalServerError, "server_error", "internal server error", diagForbiddenFailure, wwwAuthenticate)
 	default:
-		return sanitizedOAuthError(http.StatusInternalServerError, "server_error", "internal server error", wwwAuthenticate)
+		return sanitizedOAuthError(http.StatusInternalServerError, "server_error", "internal server error", diagOtherNonOKFailure, wwwAuthenticate)
 	}
 }
 
@@ -233,9 +252,12 @@ func downstreamStatus(upstream int) int {
 	}
 }
 
-func sanitizedOAuthError(status int, errorCode, description string, wwwAuthenticate []string) *OAuthError {
+func sanitizedOAuthError(status int, errorCode, description, diagnosticCode string, wwwAuthenticate []string) *OAuthError {
 	if description == "" {
-		description = fmt.Sprintf("request failed (%s)", diagnosticID())
+		description = "request failed"
+	}
+	if diagnosticCode != "" {
+		description = fmt.Sprintf("%s (%s)", description, diagnosticCode)
 	}
 	return &OAuthError{
 		StatusCode:       status,
@@ -245,28 +267,20 @@ func sanitizedOAuthError(status int, errorCode, description string, wwwAuthentic
 	}
 }
 
-func invalidTokenResponse() *OAuthError {
+func invalidTokenResponse(diagnosticCode string) *OAuthError {
 	return &OAuthError{
 		StatusCode:       http.StatusInternalServerError,
 		Error:            "invalid_request",
-		ErrorDescription: "internal server error",
+		ErrorDescription: fmt.Sprintf("internal server error (%s)", diagnosticCode),
 	}
 }
 
-func internalError(message string) *OAuthError {
+func internalError(message, diagnosticCode string) *OAuthError {
 	return &OAuthError{
 		StatusCode: http.StatusInternalServerError,
 		Error:      "server_error",
-		Message:    message,
+		Message:    fmt.Sprintf("%s (%s)", message, diagnosticCode),
 	}
-}
-
-func diagnosticID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "unavailable"
-	}
-	return hex.EncodeToString(b[:])
 }
 
 func durationDefault(value, fallback time.Duration) time.Duration {

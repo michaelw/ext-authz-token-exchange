@@ -63,6 +63,18 @@ that are invalid, expired, or revoked. The plugin preserves an authorization
 server's `invalid_grant` response so deployments can use it for refreshable
 expired-token UX.
 
+## Diagnostic Codes
+
+Sanitized plugin-generated errors include stable diagnostic codes such as
+`TXE-2001`. These are operational markers intended to map a client-visible
+error back to a source branch by grep. They are not random per-request
+correlation IDs.
+
+Diagnostic codes deliberately do not encode source file paths, line numbers,
+hostnames, token endpoint URLs, token contents, or authorization-server response
+details. Treat them as compatibility surface: change or retire an existing code
+only when the corresponding error branch is deliberately retired.
+
 ## Policy Safety
 
 Misconfigured app-owned policy now fails closed for the affected host, path, and
