@@ -235,6 +235,13 @@ commands:
       E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
       go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
 
+  demo-dashboard:
+    description: "Start the local token exchange demo dashboard"
+    section: build
+    command: |
+      echo "I: target=demo-dashboard"
+      go run ./cmd/demo-dashboard $@
+
   start:
     description: "Start the application"
     section: build

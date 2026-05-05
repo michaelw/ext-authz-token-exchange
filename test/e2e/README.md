@@ -59,6 +59,16 @@ override the template values:
 go run ./cmd/demo-scenario --config test/e2e/demo-scenarios.yaml --namespace-prefix service all
 ```
 
+For a browser-recorded walkthrough, start the local dashboard:
+
+```sh
+devspace run demo-dashboard
+```
+
+Then open `http://127.0.0.1:8088/`. The dashboard is a demo-only binary with
+embedded static assets. It is not copied into the production `prod` image; that
+image intentionally copies only `ext-authz-token-exchange-service`.
+
 For a recorded demo, a useful four-terminal layout is:
 
 ```sh
