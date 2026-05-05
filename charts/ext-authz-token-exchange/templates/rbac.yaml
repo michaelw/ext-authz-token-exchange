@@ -1,0 +1,35 @@
+{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.rbac.serviceAccountName | default "ext-authz-token-exchange" | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ext-authz-token-exchange.fullname" . | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.rbac.serviceAccountName | default "ext-authz-token-exchange" | quote }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}

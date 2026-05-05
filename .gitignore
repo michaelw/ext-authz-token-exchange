@@ -19,6 +19,7 @@ go.work
 
 # Build artifacts
 /ext-authz-router-service
+/ext-authz-token-exchange-service
 *.gen.go
 /tmp/
 node_modules/

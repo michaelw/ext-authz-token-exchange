@@ -1,4 +1,5 @@
 service:
+  serviceAccountName: ext-authz-token-exchange
   annotations:
     eloader.stakater.com/auto: "true"
   containers:
@@ -9,6 +10,50 @@ service:
       env:
         - name: GRPC_PORT
           value: "3001"
+        - name: OAUTH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: ext-authz-token-exchange-oauth
+              key: client_id
+        - name: OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: ext-authz-token-exchange-oauth
+              key: client_secret
+        - name: TOKEN_ENDPOINT_AUTH_METHOD
+          value: "client_secret_basic"
+        - name: TOKEN_EXCHANGE_GRANT_TYPE
+          value: "urn:ietf:params:oauth:grant-type:token-exchange"
+        - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
+          value: "urn:ietf:params:oauth:token-type:access_token"
+        - name: CONFIGMAP_LABEL_SELECTOR
+          value: "ext-authz-token-exchange.magneticflux.net/enabled=true"
+        - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
+          value: "false"
+        - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
+          value: "false"
+        - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
+          value: ""
+        - name: TOKEN_ENDPOINT_ALLOWLIST
+          value: ""
+        - name: TOKEN_EXCHANGE_BEARER_REALM
+          value: "ext-authz-token-exchange"
+        - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
+          value: "false"
+        - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
+          value: "5s"
+        - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
+          value: "3s"
+        - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
+          value: "3s"
+        - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
+          value: "5s"
+        - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
+          value: "90s"
+        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
+          value: "100"
+        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
+          value: "10"
       ports:
         - name: grpc-authz
           containerPort: 3001
@@ -29,3 +74,27 @@ service:
         port: 3001
         containerPort: grpc-authz
         appProtocol: grpc
+
+oauth:
+  existingSecret:
+    name: ext-authz-token-exchange-oauth
+    clientIDKey: client_id
+    clientSecretKey: client_secret
+
+tokenExchange:
+  defaultTokenEndpoint: ""
+  tokenEndpointAllowlist: ""
+  bearerRealm: ext-authz-token-exchange
+  allowUnauthenticatedOptions: false
+  httpClient:
+    requestTimeout: 5s
+    dialTimeout: 3s
+    tlsHandshakeTimeout: 3s
+    responseHeaderTimeout: 5s
+    idleConnTimeout: 90s
+    maxIdleConns: 100
+    maxIdleConnsPerHost: 10
+
+rbac:
+  create: true
+  serviceAccountName: ext-authz-token-exchange

@@ -1,0 +1,9 @@
+{{- if not .Values.oauth.existingSecret.name }}
+{{- fail "oauth.existingSecret.name is required" }}
+{{- end }}
+{{- if not .Values.oauth.existingSecret.clientIDKey }}
+{{- fail "oauth.existingSecret.clientIDKey is required" }}
+{{- end }}
+{{- if not .Values.oauth.existingSecret.clientSecretKey }}
+{{- fail "oauth.existingSecret.clientSecretKey is required" }}
+{{- end }}

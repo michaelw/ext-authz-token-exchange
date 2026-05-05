@@ -165,8 +165,8 @@ commands:
     section: build
     command: |
       echo "I: target=setup"
-      go install github.com/go-delve/delve/cmd/dlv@v1.25.0
-      go install github.com/air-verse/air@v1.62.0
+      go install github.com/go-delve/delve/cmd/dlv@v1.26.3
+      go install github.com/air-verse/air@v1.65.1
 
   generate:
     description: "Generate required code and download dependencies"
