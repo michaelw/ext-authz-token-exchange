@@ -38,6 +38,7 @@ func main() {
 	mux.HandleFunc("POST /api/scenarios/{name}/run", s.runOne)
 	mux.HandleFunc("GET /api/policies/{namespace}/{name}", s.policy)
 	mux.HandleFunc("GET /api/logs/{component}", s.logs)
+	mux.HandleFunc("GET /favicon.ico", favicon)
 	mux.Handle("/", staticHandler())
 
 	log.Printf("demo dashboard listening on http://%s", addr)
@@ -172,6 +173,15 @@ func staticHandler() http.Handler {
 		panic(err)
 	}
 	return http.FileServer(http.FS(sub))
+}
+
+func favicon(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#111827"/>
+  <path d="M16 18h32v8H26v8h18v8H26v8h23v8H16z" fill="#74a5ff"/>
+  <path d="M44 12l10 10-10 10v-7H31v-6h13z" fill="#50c878"/>
+</svg>`))
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

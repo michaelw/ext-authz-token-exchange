@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +20,13 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 			Eventually(func(g Gomega) {
 				resp, body := request(ctx, http.MethodGet, "/anything/"+color, "incoming-"+color, nil)
 				g.Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
-				g.Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer exchanged-" + color + "-incoming-" + color))
+				assertExchangedJWT(g, headerFromHTTPBin(body, "Authorization"), exchangedJWTWant{
+					Scenario: color,
+					Subject:  "incoming-" + color,
+					Scope:    color,
+					Resource: []string{env.httpbinResourceBase + "/anything/" + color},
+					Audience: []string{"httpbin-" + color},
+				})
 			}, 45*time.Second, time.Second).Should(Succeed())
 		}
 	})
@@ -30,7 +37,13 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		Eventually(func(g Gomega) {
 			resp, body := request(ctx, http.MethodGet, policy.Path, "incoming-red", nil)
 			g.Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
-			g.Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer exchanged-red-incoming-red"))
+			assertExchangedJWT(g, headerFromHTTPBin(body, "Authorization"), exchangedJWTWant{
+				Scenario: "red",
+				Subject:  "incoming-red",
+				Scope:    "red-v2",
+				Resource: []string{env.httpbinResourceBase + policy.Path},
+				Audience: []string{"httpbin-red"},
+			})
 		}, 45*time.Second, time.Second).Should(Succeed())
 
 		deleteConfigMapIgnoreNotFound(ctx, env.teamNamespace("red"), policy.Name)
@@ -43,7 +56,13 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 
 		resp, body := request(ctx, http.MethodGet, "/anything/yellow", "incoming-yellow", nil)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
-		Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer exchanged-yellow-incoming-yellow"))
+		assertExchangedJWT(NewWithT(GinkgoT()), headerFromHTTPBin(body, "Authorization"), exchangedJWTWant{
+			Scenario: "yellow",
+			Subject:  "incoming-yellow",
+			Scope:    "yellow",
+			Resource: []string{env.httpbinResourceBase + "/anything/yellow"},
+			Audience: []string{"httpbin-yellow"},
+		})
 	})
 
 	It("returns a bearer challenge when a matched request has no bearer token", func(ctx SpecContext) {
@@ -97,7 +116,13 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 			after := strings.TrimPrefix(pluginLogs(ctx), pluginBefore)
 			g.Expect(after).To(ContainSubstring(`INSECURE_LOG_TOKENS`))
 			g.Expect(after).To(ContainSubstring(`subject_token=options-token`))
-			g.Expect(after).To(ContainSubstring(`exchanged_token=exchanged-yellow-options-token`))
+			assertExchangedJWT(g, "Bearer "+exchangedTokenFromLogs(after), exchangedJWTWant{
+				Scenario: "yellow",
+				Subject:  "options-token",
+				Scope:    "yellow",
+				Resource: []string{env.httpbinResourceBase + "/anything/yellow"},
+				Audience: []string{"httpbin-yellow"},
+			})
 		}, 30*time.Second, time.Second).Should(Succeed())
 	})
 
@@ -153,7 +178,13 @@ entries:
 
 		resp, body := request(ctx, http.MethodGet, "/anything/blue", "incoming-blue", nil)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
-		Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer exchanged-blue-incoming-blue"))
+		assertExchangedJWT(NewWithT(GinkgoT()), headerFromHTTPBin(body, "Authorization"), exchangedJWTWant{
+			Scenario: "blue",
+			Subject:  "incoming-blue",
+			Scope:    "blue",
+			Resource: []string{env.httpbinResourceBase + "/anything/blue"},
+			Audience: []string{"httpbin-blue"},
+		})
 	})
 
 	It("maps token endpoint OAuth and protocol failures to downstream responses", func(ctx SpecContext) {
@@ -182,3 +213,73 @@ entries:
 		}
 	})
 })
+
+type exchangedJWTWant struct {
+	Scenario string
+	Subject  string
+	Scope    string
+	Resource []string
+	Audience []string
+}
+
+func assertExchangedJWT(g Gomega, auth string, want exchangedJWTWant) {
+	g.Expect(auth).To(HavePrefix("Bearer "))
+	header, payload, err := decodeUnsignedJWT(strings.TrimPrefix(auth, "Bearer "))
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(header).To(HaveKeyWithValue("alg", "none"))
+	g.Expect(header).To(HaveKeyWithValue("typ", "JWT"))
+	g.Expect(payload).To(HaveKeyWithValue("iss", "fake-token-endpoint"))
+	g.Expect(payload).To(HaveKeyWithValue("scenario", want.Scenario))
+	g.Expect(payload).To(HaveKeyWithValue("sub", want.Subject))
+	g.Expect(payload).To(HaveKeyWithValue("scope", want.Scope))
+	g.Expect(payload).To(HaveKeyWithValue("subject_token_type", "urn:ietf:params:oauth:token-type:access_token"))
+	g.Expect(payload).To(HaveKeyWithValue("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"))
+	g.Expect(payload).To(HaveKeyWithValue("client_id", defaultOAuthClientID))
+	g.Expect(stringArrayClaim(payload, "resource")).To(Equal(want.Resource))
+	g.Expect(stringArrayClaim(payload, "aud")).To(Equal(want.Audience))
+	g.Expect(payload).NotTo(HaveKey("client_secret"))
+}
+
+func decodeUnsignedJWT(token string) (map[string]any, map[string]any, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[2] != "" {
+		return nil, nil, fmt.Errorf("token is not an unsigned JWT")
+	}
+	var header map[string]any
+	if err := decodeBase64URLJSON(parts[0], &header); err != nil {
+		return nil, nil, err
+	}
+	var payload map[string]any
+	if err := decodeBase64URLJSON(parts[1], &payload); err != nil {
+		return nil, nil, err
+	}
+	return header, payload, nil
+}
+
+func decodeBase64URLJSON(part string, out any) error {
+	decoded, err := base64.RawURLEncoding.DecodeString(part)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(decoded, out)
+}
+
+func stringArrayClaim(payload map[string]any, key string) []string {
+	raw, _ := payload[key].([]any)
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if value, ok := item.(string); ok {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func exchangedTokenFromLogs(logs string) string {
+	const marker = "exchanged_token="
+	index := strings.LastIndex(logs, marker)
+	Expect(index).NotTo(Equal(-1), logs)
+	fields := strings.Fields(logs[index+len(marker):])
+	Expect(fields).NotTo(BeEmpty(), logs)
+	return fields[0]
+}

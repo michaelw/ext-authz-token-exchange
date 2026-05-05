@@ -20,5 +20,6 @@ entries:
     methods: ["GET", "POST", "OPTIONS"]
     scope: {{ .scope }}
     resource: {{ $.Values.policy.httpbinResourceBase }}{{ .pathPrefix }}
+    audience: {{ .audience | quote }}
     tokenEndpoint: {{ include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
 {{- end }}

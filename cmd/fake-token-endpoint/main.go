@@ -1,8 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -60,7 +60,7 @@ func tokenHandler(clientID, clientSecret string) http.HandlerFunc {
 		switch strings.TrimPrefix(r.URL.Path, "/token/") {
 		case "success", "yellow", "red", "blue":
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r),
+				"access_token":      exchangedToken(r, authenticatedClientID(r)),
 				"issued_token_type": accessTokenType,
 				"token_type":        "Bearer",
 			})
@@ -90,20 +90,20 @@ func tokenHandler(clientID, clientSecret string) http.HandlerFunc {
 			})
 		case "wrong-token-type":
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r),
+				"access_token":      exchangedToken(r, authenticatedClientID(r)),
 				"issued_token_type": accessTokenType,
 				"token_type":        "N_A",
 			})
 		case "wrong-issued-token-type":
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r),
+				"access_token":      exchangedToken(r, authenticatedClientID(r)),
 				"issued_token_type": "urn:ietf:params:oauth:token-type:refresh_token",
 				"token_type":        "Bearer",
 			})
 		case "delay":
 			time.Sleep(10 * time.Second)
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r),
+				"access_token":      exchangedToken(r, authenticatedClientID(r)),
 				"issued_token_type": accessTokenType,
 				"token_type":        "Bearer",
 			})
@@ -120,13 +120,62 @@ func validClient(r *http.Request, clientID, clientSecret string) bool {
 	return r.FormValue("client_id") == clientID && r.FormValue("client_secret") == clientSecret
 }
 
-func exchangedToken(r *http.Request) string {
+func authenticatedClientID(r *http.Request) string {
+	if clientID, _, ok := r.BasicAuth(); ok {
+		return clientID
+	}
+	return strings.TrimSpace(r.FormValue("client_id"))
+}
+
+func exchangedToken(r *http.Request, clientID string) string {
 	scenario := strings.TrimPrefix(r.URL.Path, "/token/")
 	subject := strings.TrimSpace(r.FormValue("subject_token"))
 	if subject == "" {
 		subject = "missing-subject"
 	}
-	return fmt.Sprintf("exchanged-%s-%s", scenario, subject)
+
+	payload := map[string]any{
+		"iss":                "fake-token-endpoint",
+		"scenario":           scenario,
+		"sub":                subject,
+		"subject_token_type": strings.TrimSpace(r.FormValue("subject_token_type")),
+		"grant_type":         strings.TrimSpace(r.FormValue("grant_type")),
+		"client_id":          clientID,
+	}
+	if scope := strings.TrimSpace(r.FormValue("scope")); scope != "" {
+		payload["scope"] = scope
+	}
+	if resources := compactFormValues(r.Form["resource"]); len(resources) > 0 {
+		payload["resource"] = resources
+	}
+	if audiences := compactFormValues(r.Form["audience"]); len(audiences) > 0 {
+		payload["aud"] = audiences
+	}
+	return unsignedJWT(payload)
+}
+
+func unsignedJWT(payload map[string]any) string {
+	header := map[string]string{"alg": "none", "typ": "JWT"}
+	return base64URLJSON(header) + "." + base64URLJSON(payload) + "."
+}
+
+func base64URLJSON(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func compactFormValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func writeOAuthError(w http.ResponseWriter, status int, code, description string) {

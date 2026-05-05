@@ -10,7 +10,6 @@ scenarios:
     exchange: /token/yellow
     expect:
       status: 200
-      upstreamAuthorization: Bearer exchanged-yellow-incoming-yellow
 
   - name: red-success
     summary: baseline red policy exchanges the incoming bearer token
@@ -22,7 +21,6 @@ scenarios:
     exchange: /token/red
     expect:
       status: 200
-      upstreamAuthorization: Bearer exchanged-red-incoming-red
 
   - name: blue-success
     summary: baseline blue policy exchanges the incoming bearer token
@@ -34,7 +32,6 @@ scenarios:
     exchange: /token/blue
     expect:
       status: 200
-      upstreamAuthorization: Bearer exchanged-blue-incoming-blue
 
   - name: missing-bearer
     summary: matched request without Authorization receives a bearer challenge

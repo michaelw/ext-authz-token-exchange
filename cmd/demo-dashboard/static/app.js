@@ -105,12 +105,14 @@ function renderSelected() {
   const observed = result.observed || {};
   setPill(result.passed ? "PASS" : "FAIL", result.passed ? "pass" : "fail");
   $("observed-status").textContent = observed.status || "-";
-  $("observed-auth").textContent = observed.upstreamAuthorization || "-";
+  setTokenDisplay($("observed-auth"), observed.upstreamAuthorization);
+  setHTTPBinDetail(observed.upstreamAuthorization || scenario.expect?.upstreamAuthorization);
   $("observed-error").textContent = observed.error || "-";
   $("observed-www").textContent = observed.wwwAuthenticate || "-";
   $("observed-cors").textContent = observed.corsOrigin || "-";
   $("observed-content-type").textContent = observed.contentType || "-";
   $("observed-elapsed").textContent = observed.elapsed || "-";
+  renderDecodedToken(observed.upstreamAuthorization);
   renderResponse(result);
   renderFlow(scenario, result);
 }
@@ -124,6 +126,14 @@ function clearObserved() {
     "observed-cors",
     "observed-content-type",
     "observed-elapsed",
+    "jwt-issuer",
+    "jwt-scenario",
+    "jwt-subject",
+    "jwt-scope",
+    "jwt-resource",
+    "jwt-audience",
+    "jwt-grant",
+    "jwt-client",
     "response-raw",
   ]) {
     $(id).textContent = "-";
@@ -405,10 +415,8 @@ function issuerSuccessLine(scenario, observed, expect) {
   const auth = observed.upstreamAuthorization || expect.upstreamAuthorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (token) {
-    return `200 access_token=${token}`;
-  }
-  if (scenario.exchange && scenario.request?.bearer) {
-    return `200 access_token=exchanged-${scenario.exchange.split("/").pop()}-${scenario.request.bearer}`;
+    const decoded = decodeUnsignedJWT(token);
+    return decoded ? `200 access_token=${compactTokenSummary(decoded.payload)}` : `200 access_token=${token}`;
   }
   return "200 access_token";
 }
@@ -425,7 +433,7 @@ function upstreamLine(request, observed, expect) {
   const parts = [`${request.method} ${request.path}`];
   const auth = observed.upstreamAuthorization || expect.upstreamAuthorization;
   if (auth) {
-    parts.push(`Authorization: ${auth}`);
+    parts.push(`Authorization: ${displayAuthorization(auth)}`);
   }
   return parts.join("<br/>");
 }
@@ -503,7 +511,7 @@ function renderResponse(result) {
 
   if (observed.prettyJSON || observed.prettyYAML) {
     toggle.hidden = false;
-    renderStructuredPreview("json", observed);
+    renderStructuredPreview("yaml", observed);
     return;
   }
 
@@ -525,6 +533,162 @@ function renderStructuredPreview(format, observed = state.results.get(state.sele
   $("response-preview").textContent = nextFormat === "yaml"
     ? observed.prettyYAML || observed.prettyJSON || "-"
     : observed.prettyJSON || observed.prettyYAML || "-";
+}
+
+function renderDecodedToken(auth) {
+  const decoded = decodeBearerAuthorization(auth);
+  const payload = decoded?.payload || {};
+  $("jwt-issuer").textContent = payload.iss || "-";
+  $("jwt-scenario").textContent = payload.scenario || "-";
+  $("jwt-subject").textContent = payload.sub || "-";
+  $("jwt-scope").textContent = payload.scope || "-";
+  $("jwt-resource").textContent = claimList(payload.resource);
+  $("jwt-audience").textContent = claimList(payload.aud);
+  $("jwt-grant").textContent = payload.grant_type || "-";
+  $("jwt-client").textContent = payload.client_id || "-";
+}
+
+function setHTTPBinDetail(auth) {
+  const detail = $("httpbin-detail");
+  if (!auth) {
+    detail.textContent = "upstream";
+    detail.removeAttribute("title");
+    detail.removeAttribute("tabindex");
+    return;
+  }
+  const decoded = decodeBearerAuthorization(auth);
+  if (!decoded) {
+    detail.textContent = auth;
+    detail.removeAttribute("title");
+    detail.removeAttribute("tabindex");
+    return;
+  }
+  detail.textContent = compactTokenSummary(decoded.payload);
+  detail.title = tokenTooltip(decoded);
+  detail.tabIndex = 0;
+}
+
+function setTokenDisplay(element, auth) {
+  element.textContent = "";
+  if (!auth) {
+    element.textContent = "-";
+    return;
+  }
+  const decoded = decodeBearerAuthorization(auth);
+  if (!decoded) {
+    element.textContent = truncateMiddle(auth, 96);
+    if (auth.length > 96) {
+      element.title = auth;
+    } else {
+      element.removeAttribute("title");
+    }
+    return;
+  }
+  const wrapper = document.createElement("span");
+  wrapper.className = "token-field";
+  const token = document.createElement("span");
+  token.className = "token-value";
+  token.tabIndex = 0;
+  token.textContent = truncateMiddle(auth, 96);
+  token.title = tokenTooltip(decoded);
+  token.setAttribute("aria-label", tokenTooltip(decoded));
+  const copy = document.createElement("button");
+  copy.className = "copy-token";
+  copy.type = "button";
+  copy.textContent = "Copy";
+  copy.setAttribute("aria-label", "Copy full Authorization header");
+  copy.addEventListener("click", () => copyText(auth, copy));
+  wrapper.append(token, copy);
+  element.appendChild(wrapper);
+}
+
+function displayAuthorization(auth) {
+  const decoded = decodeBearerAuthorization(auth);
+  return decoded ? `Bearer ${compactTokenSummary(decoded.payload)}` : auth;
+}
+
+function decodeBearerAuthorization(auth) {
+  if (!auth?.startsWith("Bearer ")) {
+    return null;
+  }
+  return decodeUnsignedJWT(auth.slice("Bearer ".length));
+}
+
+function decodeUnsignedJWT(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3 || parts[2] !== "") {
+    return null;
+  }
+  try {
+    const header = base64URLDecodeJSON(parts[0]);
+    const payload = base64URLDecodeJSON(parts[1]);
+    if (header?.alg !== "none" || header?.typ !== "JWT") {
+      return null;
+    }
+    return { header, payload };
+  } catch {
+    return null;
+  }
+}
+
+function base64URLDecodeJSON(value) {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function compactTokenSummary(payload = {}) {
+  return [
+    "JWT",
+    payload.scenario ? `scenario=${payload.scenario}` : "",
+    payload.sub ? `sub=${payload.sub}` : "",
+    payload.aud ? `aud=${claimList(payload.aud)}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function tokenTooltip(decoded) {
+  const payload = decoded?.payload || {};
+  return [
+    `iss: ${payload.iss || "-"}`,
+    `scenario: ${payload.scenario || "-"}`,
+    `sub: ${payload.sub || "-"}`,
+    `scope: ${payload.scope || "-"}`,
+    `resource: ${claimList(payload.resource)}`,
+    `aud: ${claimList(payload.aud)}`,
+    `grant_type: ${payload.grant_type || "-"}`,
+    `client_id: ${payload.client_id || "-"}`,
+  ].join("\n");
+}
+
+function claimList(value) {
+  if (Array.isArray(value)) {
+    return value.length ? value.join(", ") : "-";
+  }
+  return value || "-";
+}
+
+function truncateMiddle(value, maxLength) {
+  value = String(value || "");
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const keepStart = Math.ceil((maxLength - 1) * 0.65);
+  const keepEnd = Math.floor((maxLength - 1) * 0.35);
+  return `${value.slice(0, keepStart)}…${value.slice(value.length - keepEnd)}`;
+}
+
+async function copyText(value, button) {
+  try {
+    await navigator.clipboard.writeText(value);
+    const original = button.textContent;
+    button.textContent = "Copied";
+    window.setTimeout(() => {
+      button.textContent = original;
+    }, 1200);
+  } catch {
+    button.textContent = "Copy failed";
+  }
 }
 
 function isReasonableText(contentType, body) {
