@@ -1,6 +1,7 @@
 {{- range $team := .Values.teams }}
 {{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color) }}
-{{- $baseScenario := dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "tokenPath" (printf "/token/%s" $team.color) }}
+{{- $audience := printf "httpbin-%s" $team.color }}
+{{- $baseScenario := dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "tokenPath" (printf "/token/%s" $team.color) "audience" $audience }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,7 +25,7 @@ metadata:
     {{ $.Values.policy.labelKey }}: {{ $.Values.policy.labelValue | quote }}
 data:
   config.yaml: |
-{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values) $scenario) | indent 4 }}
+{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values "audience" $audience) $scenario) | indent 4 }}
 ---
 {{- end }}
 {{- end }}

@@ -396,7 +396,7 @@ h3 {
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   padding: 0 16px 16px;
 }
@@ -421,6 +421,36 @@ dt {
 dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.token-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.token-value {
+  display: inline-block;
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.token-value:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.copy-token {
+  padding: 3px 7px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .tabs {
@@ -531,13 +561,20 @@ dd {
 .preview-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
+  position: sticky;
+  left: 0;
+  width: max-content;
+  min-width: 100%;
+  z-index: 1;
+  background: var(--surface);
 }
 
 .format-toggle {
   display: flex;
   gap: 6px;
+  order: -1;
 }
 
 .format-button {

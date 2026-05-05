@@ -23,6 +23,7 @@ go.work
 /ext-authz-token-exchange-service
 *.gen.go
 /tmp/
+/output/
 node_modules/
 
 # Private keys and certificates
@@ -67,6 +68,9 @@ Thumbs.db
 .devspace/
 devspace_start.sh
 .vscode-remote-containers/
+
+# Browser automation artifacts
+.playwright-cli/
 
 # Helm
 *.tar.gz

@@ -112,9 +112,9 @@ sequenceDiagram
     Gateway->>Plugin: "Envoy ext_authz Check"
     Plugin->>Plugin: "Match service-yellow/yellow-policy"
     Plugin->>Issuer: "POST /token/yellow<br/>subject_token=incoming-yellow"
-    Issuer-->>Plugin: "200 access_token=exchanged-yellow-incoming-yellow"
+    Issuer-->>Plugin: "200 access_token=JWT scenario=yellow sub=incoming-yellow aud=httpbin-yellow"
     Plugin-->>Gateway: "OK, replace Authorization"
-    Gateway->>Httpbin: "GET /anything/yellow<br/>Authorization: Bearer exchanged-yellow-incoming-yellow"
+    Gateway->>Httpbin: "GET /anything/yellow<br/>Authorization: Bearer JWT scenario=yellow sub=incoming-yellow aud=httpbin-yellow"
     Httpbin-->>Client: "200 JSON echoed headers"
 ```
 

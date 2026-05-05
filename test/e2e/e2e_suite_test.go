@@ -323,9 +323,18 @@ entries:
     methods: ["GET", "POST", "OPTIONS"]
     scope: %s
     resource: %s%s
+    audience: %s
     tokenEndpoint: %s
-`, env.host, pathPrefix, scope, env.httpbinResourceBase, pathPrefix, tokenEndpoint)
+`, env.host, pathPrefix, scope, env.httpbinResourceBase, pathPrefix, audienceForNamespace(namespace), tokenEndpoint)
 	upsertConfigMap(ctx, namespace, name, config)
+}
+
+func audienceForNamespace(namespace string) string {
+	prefix := env.namespacePrefix + "-"
+	if color := strings.TrimPrefix(namespace, prefix); color != namespace && color != "" {
+		return "httpbin-" + color
+	}
+	return "httpbin-" + namespace
 }
 
 type ephemeralPolicy struct {
