@@ -17,7 +17,10 @@ version: v1
 entries:
   - host: {{ $.Values.host }}
     pathPrefix: {{ .pathPrefix }}
-    methods: ["GET", "POST", "OPTIONS"]
+{{- if .methods }}
+    methods:
+{{ .methods | toYaml | indent 6 }}
+{{- end }}
 {{- if eq .action "deny" }}
     action: deny
 {{- else }}

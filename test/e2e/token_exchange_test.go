@@ -155,12 +155,20 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 	})
 
 	It("denies explicitly denied routes without default deny", func(ctx SpecContext) {
-		resp, body := request(ctx, http.MethodGet, "/anything/denied", "denied-token", nil)
-		Expect(resp.StatusCode).To(Equal(http.StatusForbidden), string(body))
+		for _, tc := range []struct {
+			method string
+			bearer string
+		}{
+			{method: http.MethodGet, bearer: "denied-token"},
+			{method: http.MethodOptions},
+		} {
+			resp, body := request(ctx, tc.method, "/anything/denied", tc.bearer, nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusForbidden), string(body))
 
-		var parsed map[string]string
-		Expect(json.Unmarshal(body, &parsed)).To(Succeed())
-		Expect(parsed).To(HaveKeyWithValue("error", "policy_denied"))
+			var parsed map[string]string
+			Expect(json.Unmarshal(body, &parsed)).To(Succeed())
+			Expect(parsed).To(HaveKeyWithValue("error", "policy_denied"))
+		}
 	})
 
 	It("ignores policies from namespaces that do not match the namespace selector", func(ctx SpecContext) {

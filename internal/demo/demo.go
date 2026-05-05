@@ -225,12 +225,12 @@ func (sc Scenario) WithDefaults() Scenario {
 	if sc.Expect.Status == 0 {
 		sc.Expect.Status = http.StatusOK
 	}
-	sc.Behavior = ExchangeBehavior(sc.Exchange, sc.Request)
+	sc.Behavior = ExchangeBehavior(sc.Exchange, sc.Request, sc.Expect)
 	return sc
 }
 
 // ExchangeBehavior returns demo metadata for a fake token endpoint path.
-func ExchangeBehavior(exchange string, req Request) Behavior {
+func ExchangeBehavior(exchange string, req Request, expect Expectation) Behavior {
 	if exchange == "" || exchange == "-" {
 		if strings.EqualFold(req.Method, http.MethodOptions) && req.Headers["Origin"] != "" && req.Headers["Access-Control-Request-Method"] != "" {
 			return Behavior{
@@ -238,9 +238,15 @@ func ExchangeBehavior(exchange string, req Request) Behavior {
 				Detail:  "This is a true CORS preflight request, so the plugin allows it through without calling the token endpoint.",
 			}
 		}
+		if expect.Status >= http.StatusBadRequest {
+			return Behavior{
+				Summary: "Denied before token exchange.",
+				Detail:  "The plugin returns this denial directly, so the fake issuer is not called.",
+			}
+		}
 		return Behavior{
-			Summary: "No token endpoint call for this scenario.",
-			Detail:  "The request is denied before exchange or allowed through unchanged, so the fake issuer is not called.",
+			Summary: "Passes through without token exchange.",
+			Detail:  "The plugin allows this request through unchanged, so the fake issuer is not called.",
 		}
 	}
 	switch strings.TrimPrefix(exchange, "/token/") {
