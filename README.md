@@ -44,7 +44,10 @@ devspace run test-e2e
 ```
 
 The `local-test` profile deploys the plugin, fake token endpoint, color team
-namespaces, and app-owned policy ConfigMaps from the e2e Helm chart.
+namespaces, and app-owned policy ConfigMaps from the e2e Helm chart. The color
+namespaces are labeled with the default policy namespace selector
+`ext-authz-token-exchange.magneticflux.net/policy=enabled`; ConfigMaps in
+unlabeled namespaces are ignored by the plugin.
 
 Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra
 -p local-test` to install required infrastructure plus the local demo/e2e stack.

@@ -51,6 +51,10 @@ profiles:
           run_dependencies --all
           ensure_pull_secrets --all
           build_images prod fake-token-endpoint
+          for ns in service-yellow service-red service-blue; do
+            kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+            kubectl label namespace "$ns" ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
+          done
           create_deployments --all
 
 # Images to build and push

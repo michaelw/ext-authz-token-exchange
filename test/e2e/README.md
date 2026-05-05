@@ -192,6 +192,23 @@ By default the suite creates:
 
 - `ext-authz-token-exchange-e2e` for the central ext-authz plugin and fake token endpoint.
 - `service-yellow`, `service-red`, and `service-blue` for app-owned policy ConfigMaps.
+  These namespaces are labeled
+  `ext-authz-token-exchange.magneticflux.net/policy=enabled`, which is the
+  plugin's default namespace selector.
+
+The e2e suite also creates an unlabeled `service-black` namespace during one
+test and places a valid policy ConfigMap in it. Requests for that policy must
+pass through unchanged, proving that ConfigMap labels alone are not enough:
+the namespace must match `CONFIGMAP_NAMESPACE_SELECTOR`.
+
+When using `devspace deploy -p local-test`, DevSpace creates or updates the
+color namespaces before Helm deploys the demo chart and labels them with the
+policy namespace selector. A direct `helm upgrade --install` also labels
+namespaces that the chart creates or already owns.
+
+The namespace selector is plugin-side discovery policy. Kubernetes RBAC cannot
+grant ConfigMap access by namespace label, so production deployments should
+still treat RBAC as the hard access boundary.
 
 Useful overrides:
 

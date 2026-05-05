@@ -28,6 +28,8 @@ service:
           value: "urn:ietf:params:oauth:token-type:access_token"
         - name: CONFIGMAP_LABEL_SELECTOR
           value: "ext-authz-token-exchange.magneticflux.net/enabled=true"
+        - name: CONFIGMAP_NAMESPACE_SELECTOR
+          value: "ext-authz-token-exchange.magneticflux.net/policy=enabled"
         - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
           value: "false"
         - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT

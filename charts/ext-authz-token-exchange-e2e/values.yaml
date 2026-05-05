@@ -9,6 +9,9 @@ labels:
 policy:
   labelKey: ext-authz-token-exchange.magneticflux.net/enabled
   labelValue: "true"
+  namespaceLabelKey: ext-authz-token-exchange.magneticflux.net/policy
+  namespaceLabelValue: enabled
+  namespaceSelector: ext-authz-token-exchange.magneticflux.net/policy=enabled
   httpbinResourceBase: https://httpbin.int.kube
 
 oauth:
@@ -84,6 +87,8 @@ plugin:
             value: "urn:ietf:params:oauth:token-type:access_token"
           - name: CONFIGMAP_LABEL_SELECTOR
             value: "ext-authz-token-exchange.magneticflux.net/enabled=true"
+          - name: CONFIGMAP_NAMESPACE_SELECTOR
+            value: "ext-authz-token-exchange.magneticflux.net/policy=enabled"
           - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
             value: "false"
           - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT

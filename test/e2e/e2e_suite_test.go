@@ -36,6 +36,9 @@ const (
 	oauthSecretName            = "ext-authz-token-exchange-oauth"
 	policyLabelKey             = "ext-authz-token-exchange.magneticflux.net/enabled"
 	policyLabelValue           = "true"
+	policyNamespaceLabelKey    = "ext-authz-token-exchange.magneticflux.net/policy"
+	policyNamespaceLabelValue  = "enabled"
+	policyNamespaceSelector    = "ext-authz-token-exchange.magneticflux.net/policy=enabled"
 	tokenEndpointName          = "fake-token-endpoint"
 	tokenEndpointPort          = int32(8080)
 	defaultReleaseName         = "ext-authz-token-exchange-e2e"
@@ -128,7 +131,7 @@ func (e e2eEnv) teamNamespace(color string) string {
 }
 
 func (e e2eEnv) allNamespaces() []string {
-	return []string{e.systemNamespace, e.teamNamespace("yellow"), e.teamNamespace("red"), e.teamNamespace("blue")}
+	return []string{e.systemNamespace, e.teamNamespace("yellow"), e.teamNamespace("red"), e.teamNamespace("blue"), e.teamNamespace("black")}
 }
 
 func newKubeClient() (*kubernetes.Clientset, error) {
@@ -181,6 +184,9 @@ systemNamespace: %q
 policy:
   labelKey: %q
   labelValue: %q
+  namespaceLabelKey: %q
+  namespaceLabelValue: %q
+  namespaceSelector: %q
   httpbinResourceBase: %q
 oauth:
   secretName: %q
@@ -218,6 +224,8 @@ plugin:
             value: "urn:ietf:params:oauth:token-type:access_token"
           - name: CONFIGMAP_LABEL_SELECTOR
             value: "%s=%s"
+          - name: CONFIGMAP_NAMESPACE_SELECTOR
+            value: %q
           - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
             value: "false"
           - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
@@ -267,11 +275,37 @@ plugin:
       clientIDKey: client_id
       clientSecretKey: client_secret
 `, env.host, env.namespacePrefix, env.systemNamespace,
-		policyLabelKey, policyLabelValue, env.httpbinResourceBase,
+		policyLabelKey, policyLabelValue, policyNamespaceLabelKey, policyNamespaceLabelValue, policyNamespaceSelector, env.httpbinResourceBase,
 		oauthSecretName, env.oauthClientID, env.oauthClientSecret,
 		tokenEndpointName, env.fakeTokenImage, tokenEndpointPort,
 		env.pluginImage, oauthSecretName, oauthSecretName, policyLabelKey, policyLabelValue,
-		defaultEndpoint, defaultBearerRealm, oauthSecretName)
+		policyNamespaceSelector, defaultEndpoint, defaultBearerRealm, oauthSecretName)
+}
+
+func createUnlabeledTeamNamespace(ctx context.Context, color string) string {
+	namespace := env.teamNamespace(color)
+	existing, err := env.kube.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, err = env.kube.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: namespace,
+				Labels: map[string]string{
+					e2eLabelKey: e2eLabelValue,
+				},
+			},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		return namespace
+	}
+	Expect(err).NotTo(HaveOccurred())
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	existing.Labels[e2eLabelKey] = e2eLabelValue
+	delete(existing.Labels, policyNamespaceLabelKey)
+	_, err = env.kube.CoreV1().Namespaces().Update(ctx, existing, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	return namespace
 }
 
 func createPolicy(ctx context.Context, namespace, name, scope, pathPrefix, tokenPath string) {

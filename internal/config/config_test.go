@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ var _ = Describe("RuntimeConfig", func() {
 			GrantType:                          config.DefaultGrantType,
 			SubjectTokenType:                   config.DefaultSubjectTokenType,
 			LabelSelector:                      config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
 			RequireIssuedTokenType:             true,
 			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
 			TokenEndpointRequestTimeout:        time.Second,
@@ -44,6 +46,7 @@ var _ = Describe("RuntimeConfig", func() {
 			GrantType:                          config.DefaultGrantType,
 			SubjectTokenType:                   config.DefaultSubjectTokenType,
 			LabelSelector:                      config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
 			DefaultTokenEndpoint:               "http://issuer.example/token",
 			RequireIssuedTokenType:             true,
 			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
@@ -68,4 +71,58 @@ var _ = Describe("RuntimeConfig", func() {
 		Expect(cfg.ValidateTokenEndpoint("http://issuer.example/token")).To(Succeed())
 		Expect(cfg.ValidateTokenEndpoint("http://other.example/token")).To(MatchError(ContainSubstring("not in TOKEN_ENDPOINT_ALLOWLIST")))
 	})
+
+	It("loads the default namespace selector from the environment", func() {
+		setenv("OAUTH_CLIENT_ID", "client")
+		setenv("OAUTH_CLIENT_SECRET", "secret")
+
+		cfg, err := config.LoadFromEnv()
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.NamespaceSelector).To(Equal(config.DefaultConfigMapNamespaceSelector))
+	})
+
+	It("allows overriding the namespace selector", func() {
+		setenv("OAUTH_CLIENT_ID", "client")
+		setenv("OAUTH_CLIENT_SECRET", "secret")
+		setenv("CONFIGMAP_NAMESPACE_SELECTOR", "platform.example.com/token-exchange=true")
+
+		cfg, err := config.LoadFromEnv()
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.NamespaceSelector).To(Equal("platform.example.com/token-exchange=true"))
+	})
+
+	It("rejects invalid namespace selectors", func() {
+		cfg := config.RuntimeConfig{
+			ClientID:                           "client",
+			ClientSecret:                       "secret",
+			TokenEndpointAuthMethod:            config.AuthMethodClientSecretBasic,
+			GrantType:                          config.DefaultGrantType,
+			SubjectTokenType:                   config.DefaultSubjectTokenType,
+			LabelSelector:                      config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:                  "not in valid selector form",
+			RequireIssuedTokenType:             true,
+			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
+			TokenEndpointRequestTimeout:        time.Second,
+			TokenEndpointDialTimeout:           time.Second,
+			TokenEndpointTLSHandshakeTimeout:   time.Second,
+			TokenEndpointResponseHeaderTimeout: time.Second,
+			TokenEndpointIdleConnTimeout:       time.Second,
+		}
+
+		Expect(cfg.Validate()).To(MatchError(ContainSubstring("CONFIGMAP_NAMESPACE_SELECTOR is invalid")))
+	})
 })
+
+func setenv(name, value string) {
+	original, hadOriginal := os.LookupEnv(name)
+	Expect(os.Setenv(name, value)).To(Succeed())
+	DeferCleanup(func() {
+		if hadOriginal {
+			Expect(os.Setenv(name, original)).To(Succeed())
+			return
+		}
+		Expect(os.Unsetenv(name)).To(Succeed())
+	})
+}

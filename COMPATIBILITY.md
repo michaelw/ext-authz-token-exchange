@@ -81,6 +81,19 @@ Misconfigured app-owned policy now fails closed for the affected host, path, and
 method area instead of being silently ignored. Unrelated teams' valid policy
 continues to work.
 
+Policy ConfigMaps are discovered only from namespaces selected by
+`CONFIGMAP_NAMESPACE_SELECTOR`, which defaults to:
+
+```text
+ext-authz-token-exchange.magneticflux.net/policy=enabled
+```
+
+This namespace selector is a scalable Kubernetes-style discovery control, not a
+replacement for RBAC. Kubernetes RBAC does not grant ConfigMap access by
+namespace label, so platform owners should still use appropriate Roles,
+RoleBindings, ClusterRoles, or externally managed RBAC as the hard access
+boundary.
+
 Only CORS preflight `OPTIONS` requests bypass token exchange by default. A
 request is treated as preflight when it has both `Origin` and
 `Access-Control-Request-Method` headers. Non-preflight `OPTIONS` requests can

@@ -10,11 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 const (
 	// DefaultConfigMapLabelSelector selects app-owned policy ConfigMaps.
 	DefaultConfigMapLabelSelector = "ext-authz-token-exchange.magneticflux.net/enabled=true"
+	// DefaultConfigMapNamespaceSelector selects namespaces that may own policy ConfigMaps.
+	DefaultConfigMapNamespaceSelector = "ext-authz-token-exchange.magneticflux.net/policy=enabled"
 	// DefaultGrantType is the RFC8693 token exchange grant type.
 	DefaultGrantType = "urn:ietf:params:oauth:grant-type:token-exchange"
 	// DefaultSubjectTokenType is the RFC8693 OAuth access-token token type.
@@ -37,6 +41,7 @@ type RuntimeConfig struct {
 	GrantType                          string
 	SubjectTokenType                   string
 	LabelSelector                      string
+	NamespaceSelector                  string
 	TokenEndpointAllowlist             []string
 	AllowHTTPTokenEndpoint             bool
 	ErrorPassthrough                   bool
@@ -64,6 +69,7 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		GrantType:                          envDefault("TOKEN_EXCHANGE_GRANT_TYPE", DefaultGrantType),
 		SubjectTokenType:                   envDefault("TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE", DefaultSubjectTokenType),
 		LabelSelector:                      envDefault("CONFIGMAP_LABEL_SELECTOR", DefaultConfigMapLabelSelector),
+		NamespaceSelector:                  envDefault("CONFIGMAP_NAMESPACE_SELECTOR", DefaultConfigMapNamespaceSelector),
 		TokenEndpointAllowlist:             splitCSV(os.Getenv("TOKEN_ENDPOINT_ALLOWLIST")),
 		AllowHTTPTokenEndpoint:             envBool("TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT", false),
 		ErrorPassthrough:                   envBool("TOKEN_EXCHANGE_ERROR_PASSTHROUGH", false),
@@ -98,6 +104,11 @@ func (c RuntimeConfig) Validate() error {
 	}
 	if c.LabelSelector == "" {
 		problems = append(problems, "CONFIGMAP_LABEL_SELECTOR is required")
+	}
+	if c.NamespaceSelector == "" {
+		problems = append(problems, "CONFIGMAP_NAMESPACE_SELECTOR is required")
+	} else if _, err := labels.Parse(c.NamespaceSelector); err != nil {
+		problems = append(problems, fmt.Sprintf("CONFIGMAP_NAMESPACE_SELECTOR is invalid: %v", err))
 	}
 	if c.DefaultTokenEndpoint != "" {
 		if err := c.ValidateTokenEndpoint(c.DefaultTokenEndpoint); err != nil {

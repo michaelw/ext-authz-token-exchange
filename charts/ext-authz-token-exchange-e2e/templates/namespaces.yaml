@@ -12,6 +12,7 @@ metadata:
   name: {{ $name | quote }}
   labels:
 {{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    {{ $.Values.policy.namespaceLabelKey }}: {{ $.Values.policy.namespaceLabelValue | quote }}
 ---
 {{- end }}
 {{- end }}

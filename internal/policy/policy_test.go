@@ -32,6 +32,7 @@ var _ = Describe("Index", func() {
 			GrantType:               config.DefaultGrantType,
 			SubjectTokenType:        config.DefaultSubjectTokenType,
 			LabelSelector:           config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:       config.DefaultConfigMapNamespaceSelector,
 			DefaultTokenEndpoint:    "http://issuer.example/token",
 			AllowHTTPTokenEndpoint:  true,
 			RequireIssuedTokenType:  true,
@@ -116,16 +117,23 @@ entries:
 	})
 
 	It("loads matching ConfigMaps through the Kubernetes watcher", func() {
-		client := fake.NewSimpleClientset(&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "orders",
-				Name:      "token-exchange",
+		client := fake.NewSimpleClientset(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "orders",
 				Labels: map[string]string{
-					"ext-authz-token-exchange.magneticflux.net/enabled": "true",
+					"ext-authz-token-exchange.magneticflux.net/policy": "enabled",
 				},
-			},
-			Data: map[string]string{
-				"config.yaml": `
+			}},
+			&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "orders",
+					Name:      "token-exchange",
+					Labels: map[string]string{
+						"ext-authz-token-exchange.magneticflux.net/enabled": "true",
+					},
+				},
+				Data: map[string]string{
+					"config.yaml": `
 version: v1
 entries:
   - host: orders.example.com
@@ -133,8 +141,9 @@ entries:
     methods: ["GET"]
     scope: read:orders
 `,
+				},
 			},
-		})
+		)
 		store := policy.NewConfigMapStoreWithClient(client, cfg)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -147,4 +156,69 @@ entries:
 			return store.Index().Match("orders.example.com", "/api/orders/1", "GET").Matched
 		}, 2*time.Second, 25*time.Millisecond).Should(BeTrue())
 	})
+
+	It("ignores ConfigMaps in namespaces that do not match the namespace selector", func() {
+		client := fake.NewSimpleClientset(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "orders",
+				Labels: map[string]string{
+					"ext-authz-token-exchange.magneticflux.net/policy": "enabled",
+				},
+			}},
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ignored"}},
+			&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "orders",
+					Name:      "token-exchange",
+					Labels: map[string]string{
+						"ext-authz-token-exchange.magneticflux.net/enabled": "true",
+					},
+				},
+				Data: map[string]string{
+					"config.yaml": `
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    scope: read:orders
+`,
+				},
+			},
+			&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "ignored",
+					Name:      "token-exchange",
+					Labels: map[string]string{
+						"ext-authz-token-exchange.magneticflux.net/enabled": "true",
+					},
+				},
+				Data: map[string]string{
+					"config.yaml": `
+version: v1
+entries:
+  - host: ignored.example.com
+    pathPrefix: /api/ignored
+    methods: ["GET"]
+    scope: read:ignored
+`,
+				},
+			},
+		)
+		store := policy.NewConfigMapStoreWithClient(client, cfg)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		go func() {
+			_ = store.Run(ctx)
+		}()
+
+		Eventually(func() bool {
+			return store.Index().Match("orders.example.com", "/api/orders/1", "GET").Matched
+		}, 2*time.Second, 25*time.Millisecond).Should(BeTrue())
+		Consistently(func() bool {
+			return store.Index().Match("ignored.example.com", "/api/ignored/1", "GET").Matched
+		}, 200*time.Millisecond, 25*time.Millisecond).Should(BeFalse())
+	})
+
 })

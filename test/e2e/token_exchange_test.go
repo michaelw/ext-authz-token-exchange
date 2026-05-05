@@ -98,6 +98,17 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer original-token"))
 	})
 
+	It("ignores policies from namespaces that do not match the namespace selector", func(ctx SpecContext) {
+		namespace := createUnlabeledTeamNamespace(ctx, "black")
+		policy := createEphemeralPolicy(ctx, namespace, "black-unselected", "black", "/token/black")
+
+		Consistently(func(g Gomega) {
+			resp, body := request(ctx, http.MethodGet, policy.Path, "original-black", nil)
+			g.Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
+			g.Expect(headerFromHTTPBin(body, "Authorization")).To(Equal("Bearer original-black"))
+		}, 5*time.Second, time.Second).Should(Succeed())
+	})
+
 	It("fails closed for cross-namespace ties", func(ctx SpecContext) {
 		policy := newEphemeralPolicy("yellow-conflict")
 		createPolicy(ctx, env.teamNamespace("yellow"), policy.Name, "yellow-conflict", policy.Path, "/token/yellow")
