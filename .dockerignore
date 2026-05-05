@@ -47,6 +47,7 @@ README.md
 renovate.json*
 
 # Ignore go build files
+/bin/
 *.exe
 *.out
 *.test

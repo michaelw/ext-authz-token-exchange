@@ -1,0 +1,30 @@
+{{- range $team := .Values.teams }}
+{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color) }}
+{{- $baseScenario := dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "tokenPath" (printf "/token/%s" $team.color) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-policy" $team.color | quote }}
+  namespace: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    {{ $.Values.policy.labelKey }}: {{ $.Values.policy.labelValue | quote }}
+data:
+  config.yaml: |
+{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values) $baseScenario) | indent 4 }}
+---
+{{- range $scenario := $team.scenarios }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-policy" $scenario.name | quote }}
+  namespace: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    {{ $.Values.policy.labelKey }}: {{ $.Values.policy.labelValue | quote }}
+data:
+  config.yaml: |
+{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values) $scenario) | indent 4 }}
+---
+{{- end }}
+{{- end }}

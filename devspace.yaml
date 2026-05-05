@@ -18,6 +18,8 @@ vars:
     value: "ghcr.io/michaelw"
   IMAGE_NAME:
     value: "ext-authz-token-exchange"
+  FAKE_TOKEN_ENDPOINT_IMAGE_NAME:
+    value: "ext-authz-token-exchange-fake-token-endpoint"
   DEV_TAG:
     value: "dev-${DEVSPACE_USER}-${DEVSPACE_TIMESTAMP}"
   PROD_TAG:
@@ -29,7 +31,27 @@ profiles:
       dependencies:
         infra:
           git: https://github.com/michaelw/devspace-starter-pack
-
+  - name: local-test
+    merge:
+      deployments:
+        ext-authz-token-exchange:
+          namespace: ext-authz-token-exchange-e2e
+          helm:
+            releaseName: ext-authz-token-exchange-e2e
+            chart:
+              name: ./charts/ext-authz-token-exchange-e2e
+            values:
+              host: httpbin.int.kube
+              namespacePrefix: service
+              systemNamespace: ext-authz-token-exchange-e2e
+    patches:
+      - op: replace
+        path: pipelines.deploy.run
+        value: |-
+          run_dependencies --all
+          ensure_pull_secrets --all
+          build_images prod fake-token-endpoint
+          create_deployments --all
 
 # Images to build and push
 images:
@@ -55,6 +77,15 @@ images:
       - "${DEVSPACE_GIT_COMMIT}"
       - ${PROD_TAG}
     # This will be pushed to registry for others to use
+
+  fake-token-endpoint:
+    image: ${REGISTRY}/${FAKE_TOKEN_ENDPOINT_IMAGE_NAME}
+    dockerfile: ./Dockerfile
+    target: fake-token-endpoint
+    buildKit: *buildKit
+    tags:
+      - "${DEVSPACE_GIT_COMMIT}"
+      - ${PROD_TAG}
 
 # Deployments - Kubernetes manifests
 deployments:
@@ -137,7 +168,7 @@ pipelines:
 
       run_dependencies --all
       ensure_pull_secrets --all
-      build_images --all --except prod
+      build_images dev
       create_deployments --all
       start_dev --all --set "terminal.enabled=$TERMINAL_ENABLED" --set "logs.enabled=$LOGS_ENABLED"
       if [ $(get_flag "vscode") == "true" ]; then
@@ -149,7 +180,7 @@ pipelines:
     run: |-
       run_dependencies --all
       ensure_pull_secrets --all
-      build_images --all --except dev
+      build_images prod
       create_deployments --all
 
 commands:
@@ -190,6 +221,15 @@ commands:
       echo "I: target=test"
       devspace run build $@
       go test -v ./...
+
+  test-e2e:
+    description: "Run Kubernetes e2e tests against the local-test deployment"
+    section: build
+    command: |
+      echo "I: target=test-e2e"
+      E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.int.kube}" \
+      E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
+      go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
 
   start:
     description: "Start the application"

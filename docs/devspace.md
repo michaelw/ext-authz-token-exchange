@@ -46,6 +46,47 @@ Deploy to production:
 devspace deploy
 ```
 
+The default deploy path is production-like and deploys only the plugin chart.
+
+### Local Test Deployment
+
+Deploy the full local demo/e2e stack:
+
+```bash
+devspace deploy -p local-test
+```
+
+The `local-test` profile assumes infrastructure already provides Istio/Gateway
+and `https://httpbin.int.kube/` through the Gateway API gateway. It deploys the
+e2e Helm chart, which includes the plugin, fake token endpoint, color team
+namespaces, and app-owned policy ConfigMaps.
+
+Profiles are composable:
+
+```bash
+# plugin only, assumes infrastructure exists
+devspace deploy
+
+# plugin plus required infrastructure from scratch
+devspace deploy -p with-infra
+
+# plugin plus demo/e2e resources, assumes infrastructure exists
+devspace deploy -p local-test
+
+# plugin plus demo/e2e resources and required infrastructure from scratch
+devspace deploy -p with-infra -p local-test
+```
+
+After deployment, run the e2e assertions against the already deployed release:
+
+```bash
+devspace run test-e2e
+```
+
+DevSpace updates the built image tags in Helm values during deployment, so this
+flow can use locally built images without publishing them to the default GHCR
+repository when the cluster supports DevSpace's image handling.
+
 ## Available Commands
 
 ```bash

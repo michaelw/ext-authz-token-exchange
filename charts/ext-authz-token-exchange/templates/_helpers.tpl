@@ -47,3 +47,10 @@ Selector labels
 app.kubernetes.io/name: {{ include "ext-authz-token-exchange.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Name of the Kubernetes Service rendered by the component-chart dependency.
+*/}}
+{{- define "ext-authz-token-exchange.serviceName" -}}
+{{- default .Release.Name .Values.service.service.name | trunc 63 | trimSuffix "-" }}
+{{- end }}

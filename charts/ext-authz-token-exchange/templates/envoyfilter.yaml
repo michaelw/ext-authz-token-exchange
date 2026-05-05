@@ -2,11 +2,15 @@ apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
   name: {{ include "ext-authz-token-exchange.fullname" . }}-authz
-  namespace: istio-ingress
+  namespace: {{ .Values.envoyFilter.namespace | quote }}
 spec:
   workloadSelector:
     labels:
-      gateway.networking.k8s.io/gateway-name: gateway
+{{- if .Values.envoyFilter.workloadSelectorLabelsOverride }}
+{{ toYaml .Values.envoyFilter.workloadSelectorLabelsOverride | indent 6 }}
+{{- else }}
+{{ toYaml .Values.envoyFilter.workloadSelectorLabels | indent 6 }}
+{{- end }}
   configPatches:
     - applyTo: HTTP_FILTER
       match:
@@ -28,5 +32,5 @@ spec:
             failure_mode_allow: false
             grpc_service:
               envoy_grpc:
-                cluster_name: outbound|3001||ext-authz-token-exchange.{{ .Release.Namespace }}.svc.cluster.local
-              timeout: 1s
+                cluster_name: outbound|3001||{{ include "ext-authz-token-exchange.serviceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+              timeout: {{ .Values.envoyFilter.timeout | quote }}

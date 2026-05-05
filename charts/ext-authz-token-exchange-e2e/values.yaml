@@ -1,0 +1,126 @@
+host: httpbin.int.kube
+namespacePrefix: service
+systemNamespace: ext-authz-token-exchange-e2e
+
+labels:
+  partOfKey: app.kubernetes.io/part-of
+  partOfValue: ext-authz-token-exchange-e2e
+
+policy:
+  labelKey: ext-authz-token-exchange.magneticflux.net/enabled
+  labelValue: "true"
+  httpbinResourceBase: https://httpbin.int.kube
+
+oauth:
+  secretName: ext-authz-token-exchange-oauth
+  clientID: e2e-client
+  clientSecret: e2e-secret
+
+fakeTokenEndpoint:
+  name: fake-token-endpoint
+  image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:latest
+  imagePullPolicy: IfNotPresent
+  port: 8080
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+teams:
+  - color: blue
+  - color: yellow
+  - color: red
+    scenarios:
+      - name: error-invalid-target
+        scope: errors
+        pathPrefix: /anything/error-invalid-target
+        tokenPath: /token/invalid-target
+      - name: error-unauthorized
+        scope: unauthorized
+        pathPrefix: /anything/error-unauthorized
+        tokenPath: /token/unauthorized
+      - name: error-forbidden
+        scope: forbidden
+        pathPrefix: /anything/error-forbidden
+        tokenPath: /token/forbidden
+      - name: error-malformed
+        scope: malformed
+        pathPrefix: /anything/error-malformed
+        tokenPath: /token/malformed
+
+plugin:
+  service:
+    serviceAccountName: ext-authz-token-exchange
+    containers:
+      - name: ext-authz-token-exchange-service
+        image: ghcr.io/michaelw/ext-authz-token-exchange:latest
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: GRPC_PORT
+            value: "3001"
+          - name: OAUTH_CLIENT_ID
+            valueFrom:
+              secretKeyRef:
+                name: ext-authz-token-exchange-oauth
+                key: client_id
+          - name: OAUTH_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: ext-authz-token-exchange-oauth
+                key: client_secret
+          - name: TOKEN_ENDPOINT_AUTH_METHOD
+            value: "client_secret_basic"
+          - name: TOKEN_EXCHANGE_GRANT_TYPE
+            value: "urn:ietf:params:oauth:grant-type:token-exchange"
+          - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
+            value: "urn:ietf:params:oauth:token-type:access_token"
+          - name: CONFIGMAP_LABEL_SELECTOR
+            value: "ext-authz-token-exchange.magneticflux.net/enabled=true"
+          - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
+            value: "false"
+          - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
+            value: "true"
+          - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
+            value: "http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success"
+          - name: TOKEN_ENDPOINT_ALLOWLIST
+            value: ""
+          - name: TOKEN_EXCHANGE_BEARER_REALM
+            value: "ext-authz-token-exchange-e2e"
+          - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
+            value: "false"
+          - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
+            value: "2s"
+          - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
+            value: "1s"
+          - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
+            value: "1s"
+          - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
+            value: "2s"
+          - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
+            value: "30s"
+          - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
+            value: "10"
+          - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
+            value: "5"
+        ports:
+          - name: grpc-authz
+            containerPort: 3001
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+    service:
+      type: ClusterIP
+      ports:
+        - name: grpc-api
+          port: 3001
+          containerPort: grpc-authz
+          appProtocol: grpc
+  oauth:
+    existingSecret:
+      name: ext-authz-token-exchange-oauth
+      clientIDKey: client_id
+      clientSecretKey: client_secret

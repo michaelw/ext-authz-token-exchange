@@ -7,3 +7,30 @@
 {{- if not .Values.oauth.existingSecret.clientSecretKey }}
 {{- fail "oauth.existingSecret.clientSecretKey is required" }}
 {{- end }}
+{{- $container := index .Values.service.containers 0 }}
+{{- $clientIDSecretName := "" }}
+{{- $clientIDSecretKey := "" }}
+{{- $clientSecretSecretName := "" }}
+{{- $clientSecretSecretKey := "" }}
+{{- range $env := $container.env }}
+{{- if eq $env.name "OAUTH_CLIENT_ID" }}
+{{- $clientIDSecretName = $env.valueFrom.secretKeyRef.name }}
+{{- $clientIDSecretKey = $env.valueFrom.secretKeyRef.key }}
+{{- end }}
+{{- if eq $env.name "OAUTH_CLIENT_SECRET" }}
+{{- $clientSecretSecretName = $env.valueFrom.secretKeyRef.name }}
+{{- $clientSecretSecretKey = $env.valueFrom.secretKeyRef.key }}
+{{- end }}
+{{- end }}
+{{- if ne $clientIDSecretName .Values.oauth.existingSecret.name }}
+{{- fail "service.containers[0].env OAUTH_CLIENT_ID secretKeyRef.name must match oauth.existingSecret.name" }}
+{{- end }}
+{{- if ne $clientIDSecretKey .Values.oauth.existingSecret.clientIDKey }}
+{{- fail "service.containers[0].env OAUTH_CLIENT_ID secretKeyRef.key must match oauth.existingSecret.clientIDKey" }}
+{{- end }}
+{{- if ne $clientSecretSecretName .Values.oauth.existingSecret.name }}
+{{- fail "service.containers[0].env OAUTH_CLIENT_SECRET secretKeyRef.name must match oauth.existingSecret.name" }}
+{{- end }}
+{{- if ne $clientSecretSecretKey .Values.oauth.existingSecret.clientSecretKey }}
+{{- fail "service.containers[0].env OAUTH_CLIENT_SECRET secretKeyRef.key must match oauth.existingSecret.clientSecretKey" }}
+{{- end }}

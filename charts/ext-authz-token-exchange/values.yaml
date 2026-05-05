@@ -98,3 +98,10 @@ tokenExchange:
 rbac:
   create: true
   serviceAccountName: ext-authz-token-exchange
+
+envoyFilter:
+  namespace: istio-ingress
+  workloadSelectorLabels:
+    gateway.networking.k8s.io/gateway-name: gateway
+  workloadSelectorLabelsOverride: {}
+  timeout: 1s

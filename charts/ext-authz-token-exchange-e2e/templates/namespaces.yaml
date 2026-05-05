@@ -1,0 +1,17 @@
+{{- range $team := .Values.teams }}
+{{- $name := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color) }}
+{{- $existing := lookup "v1" "Namespace" "" $name }}
+{{- $annotations := dict }}
+{{- if $existing }}
+{{- $annotations = default dict $existing.metadata.annotations }}
+{{- end }}
+{{- if or (not $existing) (eq (get $annotations "meta.helm.sh/release-name") $.Release.Name) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $name | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+---
+{{- end }}
+{{- end }}

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.fakeTokenEndpoint.name | quote }}
+  namespace: {{ .Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 4 }}
+    app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
+  template:
+    metadata:
+      labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 8 }}
+        app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
+    spec:
+      containers:
+        - name: {{ .Values.fakeTokenEndpoint.name | quote }}
+          image: {{ .Values.fakeTokenEndpoint.image | quote }}
+          imagePullPolicy: {{ .Values.fakeTokenEndpoint.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.fakeTokenEndpoint.port }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+{{ toYaml .Values.fakeTokenEndpoint.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.fakeTokenEndpoint.name | quote }}
+  namespace: {{ .Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 4 }}
+    app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
+  ports:
+    - name: http
+      port: {{ .Values.fakeTokenEndpoint.port }}
+      targetPort: http

@@ -18,6 +18,7 @@
 go.work
 
 # Build artifacts
+/bin/
 /ext-authz-router-service
 /ext-authz-token-exchange-service
 *.gen.go

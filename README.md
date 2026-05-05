@@ -18,7 +18,8 @@ Users who want to run the service **without modifying the code** can use DevSpac
 
 ### Running with DevSpace
 
-If you have a local Kubernetes cluster available, [DevSpace](https://devspace.sh/) is all you need:
+If you have a local Kubernetes cluster available, [DevSpace](https://devspace.sh/) is all you need.
+The default deployment is production-like and deploys only the plugin chart:
 
 For a preview of what gets deployed:
 
@@ -34,12 +35,26 @@ devspace deploy -p with-infra
 
 The command will setup a fully functionioning self-contained demo environment.
 
+For the local demo/e2e stack that assumes infrastructure already provides
+`https://httpbin.int.kube/` through the Gateway API gateway, use:
+
+```bash
+devspace deploy -p local-test
+devspace run test-e2e
+```
+
+The `local-test` profile deploys the plugin, fake token endpoint, color team
+namespaces, and app-owned policy ConfigMaps from the e2e Helm chart.
+
+Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra
+-p local-test` to install required infrastructure plus the local demo/e2e stack.
+
 Refer to the [DevSpace](docs/devspace.md) and [devspace-starter-pack](https://github.com/michaelw/devspace-starter-pack) documentation
 for more information.
 
 ### Uninstall
 
-- `devspace purge` or `devspace purge -p with-infra`
+- `devspace purge`, `devspace purge -p with-infra`, `devspace purge -p local-test`, or `devspace purge -p with-infra -p local-test`
 
 ## Development Quickstart Guide
 
