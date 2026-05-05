@@ -54,8 +54,37 @@ unchanged. Set `TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=true` or
 `tokenExchange.defaultDenyUnmatched=true` in the Helm values to return
 `403 Forbidden` for unmatched traffic, including unmatched CORS preflights.
 Individual routes can also be rejected with `action: deny` policy entries,
-while omitted `action` and `action: exchange` keep the normal token exchange
-behavior.
+while `action: exchange` keeps the normal token exchange behavior. Policy
+entries are split into `match`, `action`, and action-specific configuration:
+
+```yaml
+version: v1
+entries:
+  - match:
+      host: api.example.com
+      pathPrefix: /orders
+      methods: ["GET", "POST"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      resources:
+        - https://api.example.com/orders
+      audiences:
+        - orders-api
+      tokenEndpoint: https://issuer.example.com/oauth/token
+
+  - match:
+      host: api.example.com
+      pathPrefix: /admin
+      methods: ["*"]
+    action: deny
+```
+
+Policy ConfigMaps are strictly validated by the running service and
+misconfigured matching regions fail closed. Helm schemas validate deployment
+values and policies rendered by the e2e chart, while arbitrary app-owned
+ConfigMaps can use `docs/policy.schema.json` for editor or CI validation before
+they are applied.
 
 Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra
 -p local-test` to install required infrastructure plus the local demo/e2e stack.

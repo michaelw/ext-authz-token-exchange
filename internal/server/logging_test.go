@@ -256,11 +256,15 @@ func loggingIndex() *policy.Index {
 	return policy.BuildIndex(map[policy.Source]string{{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    resource: https://orders.example.com/api/
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
 `}, config.RuntimeConfig{
 		ClientID:                "client",
 		ClientSecret:            "secret",
@@ -278,10 +282,11 @@ func loggingDenyIndex() *policy.Index {
 	return policy.BuildIndex(map[policy.Source]string{{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: deny
 `}, config.RuntimeConfig{
 		ClientID:                "client",
 		ClientSecret:            "secret",

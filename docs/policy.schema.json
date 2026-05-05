@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/michaelw/ext-authz-token-exchange/docs/policy.schema.json",
+  "title": "Ext AuthZ Token Exchange Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "entries"],
+  "properties": {
+    "version": {
+      "const": "v1"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "action"],
+      "properties": {
+        "match": {
+          "$ref": "#/$defs/match"
+        },
+        "action": {
+          "enum": ["exchange", "deny"]
+        },
+        "exchange": {
+          "$ref": "#/$defs/exchangeFields"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "exchange"
+              }
+            },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["exchange"],
+            "properties": {
+              "exchange": {
+                "$ref": "#/$defs/exchangeAction"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "pathPrefix"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pathPrefix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "exchangeFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "audiences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tokenEndpoint": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "exchangeAction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/exchangeFields"
+        }
+      ],
+      "anyOf": [
+        {
+          "required": ["scope"],
+          "properties": {
+            "scope": {
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": ["resources"],
+          "properties": {
+            "resources": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "required": ["audiences"],
+          "properties": {
+            "audiences": {
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

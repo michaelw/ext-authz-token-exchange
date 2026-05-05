@@ -6,12 +6,12 @@ while moving from the original token-exchange plan to the RFC-aligned design.
 ## Configuration Changes
 
 - `target_upstream` was the previous planning name for what is now the
-  RFC8707/RFC8693 `resource` field. Use `resource` for the target API or
-  upstream URI where the exchanged token will be used.
-- `audience` remains available for authorization-server-specific logical
-  audience names.
-- App-owned ConfigMaps may omit `tokenEndpoint` only when the plugin deployment
-  configures `TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT`.
+  RFC8707/RFC8693 `resources` field. Use `exchange.resources` for target API or
+  upstream URIs where the exchanged token will be used.
+- `exchange.audiences` remains available for authorization-server-specific
+  logical audience names.
+- App-owned ConfigMaps may omit `exchange.tokenEndpoint` only when the plugin
+  deployment configures `TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT`.
 
 ## OAuth Client Authentication
 
@@ -120,17 +120,20 @@ healthy CORS preflights still bypass token exchange and continue to the resource
 server. The plugin logs whether a `policy_denied` response came from unmatched
 default-deny behavior or from an explicit deny policy.
 
-Policy entries may now include an `action`. Omitted `action` and
-`action: exchange` both preserve the original token exchange behavior:
+Policy entries use explicit `match`, `action`, and action-specific sections.
+Use `action: exchange` for normal token exchange behavior:
 
 ```yaml
 version: v1
 entries:
-  - host: api.example.com
-    pathPrefix: /orders
-    methods: ["GET"]
+  - match:
+      host: api.example.com
+      pathPrefix: /orders
+      methods: ["GET"]
     action: exchange
-    resource: https://api.example.com/orders
+    exchange:
+      resources:
+        - https://api.example.com/orders
 ```
 
 Use `action: deny` to intentionally reject a matched route even when
@@ -139,10 +142,18 @@ Use `action: deny` to intentionally reject a matched route even when
 ```yaml
 version: v1
 entries:
-  - host: api.example.com
-    pathPrefix: /admin
-    methods: ["*"]
+  - match:
+      host: api.example.com
+      pathPrefix: /admin
+      methods: ["*"]
     action: deny
 ```
 
-Unknown action values make the affected host/path/method region fail closed.
+`action` is required. Unknown action values, unknown policy fields, and invalid
+exchange config make the affected host/path/method region fail closed.
+
+Policy YAML is decoded with known-field validation. The Helm charts include
+values schemas for deployment-time feedback, and `docs/policy.schema.json` can
+be used by editors or CI for app-owned ConfigMaps. Kubernetes cannot deeply
+validate the YAML string stored in `ConfigMap.data["config.yaml"]`; the running
+service remains the authoritative runtime validator for arbitrary ConfigMaps.

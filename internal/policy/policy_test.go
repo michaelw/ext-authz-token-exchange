@@ -45,14 +45,21 @@ var _ = Describe("Index", func() {
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api
-    methods: ["GET"]
-    scope: read:any
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    resource: https://orders.example.com/api/
+  - match:
+      host: orders.example.com
+      pathPrefix: /api
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:any
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
 `,
 		}, cfg)
 
@@ -63,23 +70,25 @@ entries:
 		Expect(decision.Entry.PathPrefix).To(Equal("/api/orders"))
 	})
 
-	It("defaults policy action to exchange", func() {
+	It("requires policy action", func() {
 		index := policy.BuildIndex(map[policy.Source]string{
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    exchange:
+      scope: read:orders
 `,
 		}, cfg)
 
 		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
 
 		Expect(decision.Matched).To(BeTrue())
-		Expect(decision.Unhealthy).To(BeFalse())
-		Expect(decision.Entry.Action).To(Equal(policy.ActionExchange))
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring("entries[0].action is required"))
 	})
 
 	It("accepts explicit exchange action", func() {
@@ -87,11 +96,13 @@ entries:
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - action: exchange
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 		}, cfg)
 
@@ -107,10 +118,11 @@ entries:
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: deny
 `,
 		}, cfg)
 
@@ -121,19 +133,23 @@ entries:
 		Expect(decision.Entry.Action).To(Equal(policy.ActionDeny))
 	})
 
-	It("ignores exchange-only fields on deny entries", func() {
+	It("ignores exchange config on deny entries", func() {
 		index := policy.BuildIndex(map[policy.Source]string{
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: ignored
-    resource: https://orders.example.com/api/
-    audience: ignored
-    tokenEndpoint: not-a-url
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: deny
+    exchange:
+      scope: ignored
+      resources:
+        - https://orders.example.com/api/
+      audiences:
+        - ignored
+      tokenEndpoint: not-a-url
 `,
 		}, cfg)
 
@@ -156,10 +172,13 @@ entries:
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 		}, cfg)
 
@@ -167,7 +186,7 @@ entries:
 
 		Expect(decision.Matched).To(BeTrue())
 		Expect(decision.Unhealthy).To(BeTrue())
-		Expect(decision.Reason).To(ContainSubstring("tokenEndpoint is required"))
+		Expect(decision.Reason).To(ContainSubstring("entries[0].exchange.tokenEndpoint is required"))
 	})
 
 	It("fails closed for unknown actions", func() {
@@ -175,10 +194,11 @@ entries:
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - action: reject
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: reject
 `,
 		}, cfg)
 
@@ -186,7 +206,7 @@ entries:
 
 		Expect(decision.Matched).To(BeTrue())
 		Expect(decision.Unhealthy).To(BeTrue())
-		Expect(decision.Reason).To(ContainSubstring("action must be exchange or deny"))
+		Expect(decision.Reason).To(ContainSubstring("entries[0].action must be exchange or deny"))
 	})
 
 	It("uses the most-specific action when deny and exchange overlap", func() {
@@ -194,15 +214,18 @@ entries:
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api
-    methods: ["GET"]
-  - action: exchange
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api
+      methods: ["GET"]
+    action: deny
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 		}, cfg)
 
@@ -224,18 +247,25 @@ entries:
 			{Namespace: "orders", Name: "one"}: `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 			{Namespace: "orders", Name: "two"}: `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    resource: https://orders.example.com/api/
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
 `,
 		}, cfg)
 
@@ -251,19 +281,23 @@ entries:
 			{Namespace: "orders", Name: "one"}: `
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: deny
 `,
 			{Namespace: "orders", Name: "two"}: `
 version: v1
 entries:
-  - action: exchange
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    resource: https://orders.example.com/api/
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
 `,
 		}, cfg)
 
@@ -273,6 +307,96 @@ entries:
 		Expect(decision.Unhealthy).To(BeTrue())
 		Expect(decision.Reason).To(ContainSubstring("tie"))
 	})
+
+	It("fails closed when exchange action omits exchange config", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring("entries[0].exchange is required when action is exchange"))
+	})
+
+	It("fails closed when match section is missing", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - action: exchange
+    exchange:
+      scope: read:orders
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring("entries[0].match is required"))
+	})
+
+	DescribeTable("fails closed when policy has unknown fields", func(data, field string) {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: data,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring("not valid policy YAML"))
+		Expect(decision.Reason).To(ContainSubstring(field))
+	},
+		Entry("file", `
+version: v1
+unknown: true
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+    action: deny
+`, "unknown"),
+		Entry("entry", `
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+    action: deny
+    unknown: true
+`, "unknown"),
+		Entry("match", `
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      port: 443
+    action: deny
+`, "port"),
+		Entry("exchange", `
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+    action: exchange
+    exchange:
+      resource: https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`, "resource"),
+	)
 
 	It("loads matching ConfigMaps through the Kubernetes watcher", func() {
 		client := fake.NewSimpleClientset(
@@ -294,10 +418,13 @@ entries:
 					"config.yaml": `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 				},
 			},
@@ -336,10 +463,13 @@ entries:
 					"config.yaml": `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 				},
 			},
@@ -355,10 +485,13 @@ entries:
 					"config.yaml": `
 version: v1
 entries:
-  - host: ignored.example.com
-    pathPrefix: /api/ignored
-    methods: ["GET"]
-    scope: read:ignored
+  - match:
+      host: ignored.example.com
+      pathPrefix: /api/ignored
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:ignored
 `,
 				},
 			},

@@ -228,6 +228,12 @@ The namespace selector is plugin-side discovery policy. Kubernetes RBAC cannot
 grant ConfigMap access by namespace label, so production deployments should
 still treat RBAC as the hard access boundary.
 
+Policy ConfigMaps use the nested `v1` policy shape with `match`, `action`, and
+`exchange` sections. The e2e chart values are checked by Helm's
+`values.schema.json` before rendering, and the rendered ConfigMaps are still
+strictly validated by the plugin at runtime. Arbitrary app-owned ConfigMaps can
+also be checked in CI or editors with `docs/policy.schema.json`.
+
 Useful overrides:
 
 - `E2E_HOST`: Host header and ConfigMap host. Defaults to the host from `E2E_BASE_URL`.

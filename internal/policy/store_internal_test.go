@@ -36,10 +36,13 @@ func TestConfigMapStoreRemoveNamespaceClearsPolicies(t *testing.T) {
 	store.configs[Source{Namespace: "orders", Name: "token-exchange"}] = `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `
 	store.rebuildLocked()
 	store.mu.Unlock()
@@ -69,10 +72,13 @@ func TestConfigMapStoreNamespaceLabelTransitionsEnableAndDisablePolicies(t *test
 			"config.yaml": `
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `,
 		},
 	})

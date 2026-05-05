@@ -318,13 +318,18 @@ func createPolicy(ctx context.Context, namespace, name, scope, pathPrefix, token
 	tokenEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s", tokenEndpointName, env.systemNamespace, tokenEndpointPort, tokenPath)
 	config := fmt.Sprintf(`version: v1
 entries:
-  - host: %s
-    pathPrefix: %s
-    methods: ["GET", "POST", "OPTIONS"]
-    scope: %s
-    resource: %s%s
-    audience: %s
-    tokenEndpoint: %s
+  - match:
+      host: %s
+      pathPrefix: %s
+      methods: ["GET", "POST", "OPTIONS"]
+    action: exchange
+    exchange:
+      scope: %s
+      resources:
+        - %s%s
+      audiences:
+        - %s
+      tokenEndpoint: %s
 `, env.host, pathPrefix, scope, env.httpbinResourceBase, pathPrefix, audienceForNamespace(namespace), tokenEndpoint)
 	upsertConfigMap(ctx, namespace, name, config)
 }

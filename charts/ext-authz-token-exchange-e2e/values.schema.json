@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "ext-authz-token-exchange-e2e values",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["host", "namespacePrefix", "systemNamespace", "policy", "oauth", "fakeTokenEndpoint", "teams"],
+  "properties": {
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "namespacePrefix": {
+      "type": "string",
+      "minLength": 1
+    },
+    "systemNamespace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["labelKey", "labelValue", "namespaceLabelKey", "namespaceLabelValue", "namespaceSelector", "httpbinResourceBase"],
+      "properties": {
+        "labelKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labelValue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespaceLabelKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespaceLabelValue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespaceSelector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "httpbinResourceBase": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "oauth": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["secretName", "clientID", "clientSecret"],
+      "properties": {
+        "secretName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientID": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientSecret": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fakeTokenEndpoint": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "image", "port"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "imagePullPolicy": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "teams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["color"],
+        "properties": {
+          "color": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "pathPrefix"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "action": {
+                  "enum": ["exchange", "deny"]
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "pathPrefix": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tokenPath": {
+                  "type": "string"
+                },
+                "methods": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "plugin": {
+      "type": "object"
+    }
+  }
+}

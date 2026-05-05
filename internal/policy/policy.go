@@ -3,12 +3,13 @@
 package policy
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
-	"sigs.k8s.io/yaml"
+	"gopkg.in/yaml.v3"
 )
 
 // Source identifies the Kubernetes object that provided policy.
@@ -70,21 +71,27 @@ func EmptyIndex() *Index {
 }
 
 type file struct {
-	Version string     `json:"version"`
-	Entries []rawEntry `json:"entries"`
+	Version string     `yaml:"version"`
+	Entries []rawEntry `yaml:"entries"`
 }
 
 type rawEntry struct {
-	Action        string   `json:"action"`
-	Host          string   `json:"host"`
-	PathPrefix    string   `json:"pathPrefix"`
-	Methods       []string `json:"methods"`
-	Scope         string   `json:"scope"`
-	Resource      string   `json:"resource"`
-	Resources     []string `json:"resources"`
-	Audience      string   `json:"audience"`
-	Audiences     []string `json:"audiences"`
-	TokenEndpoint string   `json:"tokenEndpoint"`
+	Match    *rawMatch    `yaml:"match"`
+	Action   string       `yaml:"action"`
+	Exchange *rawExchange `yaml:"exchange"`
+}
+
+type rawMatch struct {
+	Host       string   `yaml:"host"`
+	PathPrefix string   `yaml:"pathPrefix"`
+	Methods    []string `yaml:"methods"`
+}
+
+type rawExchange struct {
+	Scope         string   `yaml:"scope"`
+	Resources     []string `yaml:"resources"`
+	Audiences     []string `yaml:"audiences"`
+	TokenEndpoint string   `yaml:"tokenEndpoint"`
 }
 
 // BuildIndex parses all supplied ConfigMap payloads into a new immutable index.
@@ -149,8 +156,10 @@ func (i *Index) Match(host, path, method string) Decision {
 
 func parseConfig(source Source, data string, cfg config.RuntimeConfig) ([]Entry, []Region) {
 	var parsed file
-	if err := yaml.Unmarshal([]byte(data), &parsed); err != nil {
-		return nil, []Region{{Source: source, Reason: "config.yaml is not valid YAML"}}
+	decoder := yaml.NewDecoder(bytes.NewReader([]byte(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil, []Region{{Source: source, Reason: fmt.Sprintf("config.yaml is not valid policy YAML: %v", err)}}
 	}
 	if parsed.Version != "v1" {
 		return nil, []Region{{Source: source, Reason: "version must be v1"}}
@@ -158,8 +167,8 @@ func parseConfig(source Source, data string, cfg config.RuntimeConfig) ([]Entry,
 
 	var entries []Entry
 	var regions []Region
-	for _, raw := range parsed.Entries {
-		entry, region, ok := normalizeEntry(source, raw, cfg)
+	for idx, raw := range parsed.Entries {
+		entry, region, ok := normalizeEntry(source, idx, raw, cfg)
 		if ok {
 			entries = append(entries, entry)
 		} else {
@@ -169,23 +178,32 @@ func parseConfig(source Source, data string, cfg config.RuntimeConfig) ([]Entry,
 	return entries, regions
 }
 
-func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entry, Region, bool) {
+func normalizeEntry(source Source, idx int, raw rawEntry, cfg config.RuntimeConfig) (Entry, Region, bool) {
 	action := normalizeAction(raw.Action)
+	var match rawMatch
+	if raw.Match != nil {
+		match = *raw.Match
+	}
 	region := Region{
 		Source:     source,
-		Host:       normalizeHost(raw.Host),
-		PathPrefix: normalizePathPrefix(raw.PathPrefix),
-		Methods:    normalizeMethods(raw.Methods),
+		Host:       normalizeHost(match.Host),
+		PathPrefix: normalizePathPrefix(match.PathPrefix),
+		Methods:    normalizeMethods(match.Methods),
 	}
 	var problems []string
+	if raw.Match == nil {
+		problems = append(problems, entryPath(idx, "match")+" is required")
+	}
 	if region.Host == "" {
-		problems = append(problems, "host is required")
+		problems = append(problems, entryPath(idx, "match.host")+" is required")
 	}
 	if region.PathPrefix == "" {
-		problems = append(problems, "pathPrefix is required")
+		problems = append(problems, entryPath(idx, "match.pathPrefix")+" is required")
 	}
-	if action == "" {
-		problems = append(problems, "action must be exchange or deny")
+	if strings.TrimSpace(raw.Action) == "" {
+		problems = append(problems, entryPath(idx, "action")+" is required")
+	} else if action == "" {
+		problems = append(problems, entryPath(idx, "action")+" must be exchange or deny")
 	}
 	if len(problems) > 0 {
 		region.Reason = strings.Join(problems, "; ")
@@ -201,22 +219,28 @@ func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entr
 		}, Region{}, true
 	}
 
-	resources := compact(append(raw.Resources, raw.Resource))
-	// RFC8707 Section 2 defines resource as the target service URI.
-	// https://www.rfc-editor.org/rfc/rfc8707#section-2
-	audiences := compact(append(raw.Audiences, raw.Audience))
-	if raw.Scope == "" && len(resources) == 0 && len(audiences) == 0 {
-		problems = append(problems, "at least one of scope, resource, or audience is required")
+	if raw.Exchange == nil {
+		region.Reason = entryPath(idx, "exchange") + " is required when action is exchange"
+		return Entry{}, region, false
 	}
 
-	tokenEndpoint := strings.TrimSpace(raw.TokenEndpoint)
+	exchange := *raw.Exchange
+	resources := compact(exchange.Resources)
+	// RFC8707 Section 2 defines resource as the target service URI.
+	// https://www.rfc-editor.org/rfc/rfc8707#section-2
+	audiences := compact(exchange.Audiences)
+	if strings.TrimSpace(exchange.Scope) == "" && len(resources) == 0 && len(audiences) == 0 {
+		problems = append(problems, entryPath(idx, "exchange")+" requires at least one of scope, resources, or audiences")
+	}
+
+	tokenEndpoint := strings.TrimSpace(exchange.TokenEndpoint)
 	if tokenEndpoint == "" {
 		tokenEndpoint = cfg.DefaultTokenEndpoint
 	}
 	if tokenEndpoint == "" {
-		problems = append(problems, "tokenEndpoint is required when no default is configured")
+		problems = append(problems, entryPath(idx, "exchange.tokenEndpoint")+" is required when no default is configured")
 	} else if err := cfg.ValidateTokenEndpoint(tokenEndpoint); err != nil {
-		problems = append(problems, fmt.Sprintf("tokenEndpoint: %v", err))
+		problems = append(problems, fmt.Sprintf("%s: %v", entryPath(idx, "exchange.tokenEndpoint"), err))
 	}
 
 	if len(problems) > 0 {
@@ -229,7 +253,7 @@ func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entr
 		Host:          region.Host,
 		PathPrefix:    region.PathPrefix,
 		Methods:       region.Methods,
-		Scope:         strings.TrimSpace(raw.Scope),
+		Scope:         strings.TrimSpace(exchange.Scope),
 		Resources:     resources,
 		Audiences:     audiences,
 		TokenEndpoint: tokenEndpoint,
@@ -238,15 +262,16 @@ func normalizeEntry(source Source, raw rawEntry, cfg config.RuntimeConfig) (Entr
 
 func normalizeAction(action string) Action {
 	action = strings.ToLower(strings.TrimSpace(action))
-	if action == "" {
-		return ActionExchange
-	}
 	switch Action(action) {
 	case ActionExchange, ActionDeny:
 		return Action(action)
 	default:
 		return ""
 	}
+}
+
+func entryPath(idx int, field string) string {
+	return fmt.Sprintf("entries[%d].%s", idx, field)
 }
 
 func (e Entry) matches(host, path, method string) bool {
@@ -301,6 +326,9 @@ func normalizeMethods(methods []string) []string {
 }
 
 func methodAllowed(methods []string, method string) bool {
+	if len(methods) == 0 {
+		return true
+	}
 	for _, allowed := range methods {
 		if allowed == "*" || allowed == method {
 			return true

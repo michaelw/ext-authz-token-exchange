@@ -15,21 +15,27 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- define "ext-authz-token-exchange-e2e.policyConfig" -}}
 version: v1
 entries:
-  - host: {{ $.Values.host }}
-    pathPrefix: {{ .pathPrefix }}
+  - match:
+      host: {{ $.Values.host }}
+      pathPrefix: {{ .pathPrefix }}
 {{- if .methods }}
-    methods:
-{{ .methods | toYaml | indent 6 }}
+      methods:
+{{ .methods | toYaml | indent 8 }}
 {{- end }}
 {{- if eq .action "deny" }}
     action: deny
 {{- else }}
 {{- if .action }}
     action: {{ .action }}
+{{- else }}
+    action: exchange
 {{- end }}
-    scope: {{ .scope }}
-    resource: {{ $.Values.policy.httpbinResourceBase }}{{ .pathPrefix }}
-    audience: {{ .audience | quote }}
-    tokenEndpoint: {{ include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
+    exchange:
+      scope: {{ .scope }}
+      resources:
+        - {{ $.Values.policy.httpbinResourceBase }}{{ .pathPrefix }}
+      audiences:
+        - {{ .audience | quote }}
+      tokenEndpoint: {{ include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
 {{- end }}
 {{- end }}

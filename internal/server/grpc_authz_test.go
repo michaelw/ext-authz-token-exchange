@@ -32,11 +32,14 @@ var _ = Describe("AuthzGRPCServer", func() {
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -53,11 +56,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", map[string]string{
@@ -73,11 +79,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", map[string]string{
@@ -96,11 +105,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/customers/1", map[string]string{
@@ -120,10 +132,11 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: deny
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
@@ -143,10 +156,11 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - action: deny
-    host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: deny
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -168,11 +182,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -189,11 +206,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", nil))
@@ -209,11 +229,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", nil))
@@ -228,11 +251,15 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["OPTIONS"]
-    resource: https://orders.example.com/api/
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["OPTIONS"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -249,11 +276,14 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", nil))
@@ -270,11 +300,15 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    resource: https://orders.example.com/api/
-    tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
@@ -290,10 +324,13 @@ entries:
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
 entries:
-  - host: orders.example.com
-    pathPrefix: /api/orders
-    methods: ["GET"]
-    scope: read:orders
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      scope: read:orders
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{

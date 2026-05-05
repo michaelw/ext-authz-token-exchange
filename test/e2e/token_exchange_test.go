@@ -201,9 +201,11 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		policy := newEphemeralPolicy("invalid-region")
 		config := fmt.Sprintf(`version: v1
 entries:
-  - host: %s
-    pathPrefix: %s
-    methods: ["GET"]
+  - match:
+      host: %s
+      pathPrefix: %s
+      methods: ["GET"]
+    action: exchange
 `, env.host, policy.Path)
 		upsertConfigMap(ctx, env.teamNamespace("red"), policy.Name, config)
 		DeferCleanup(func() {
