@@ -369,6 +369,13 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.node small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .node.active {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 18%, transparent);
@@ -460,6 +467,21 @@ dd {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.issuer-behavior {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px;
+  background: var(--surface-2);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.issuer-behavior p {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .policy-header {
