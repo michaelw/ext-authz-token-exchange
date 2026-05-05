@@ -2,6 +2,8 @@ const state = {
   scenarios: [],
   selected: null,
   results: new Map(),
+  diagramRenderID: 0,
+  mermaidInitialized: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -14,6 +16,8 @@ function applyTheme(theme) {
   } else {
     document.documentElement.setAttribute("data-theme", selected);
   }
+  state.mermaidInitialized = false;
+  renderDiagram();
   const picker = $("theme-select");
   if (picker) {
     picker.value = selected;
@@ -88,6 +92,7 @@ function renderSelected() {
   $("request-path").textContent = scenario.request.path;
   $("request-token").textContent = scenario.request.bearer ? `Bearer ${scenario.request.bearer}` : "<none>";
   $("tab-curl").textContent = result?.curl || buildCurlPreview(scenario);
+  renderDiagram(scenario, result);
   loadPolicy(scenario);
 
   if (!result) {
@@ -221,6 +226,221 @@ function renderFlow(scenario, result) {
   if (status >= 400) {
     document.querySelector('[data-step="plugin"]').classList.add("stop");
   }
+}
+
+async function renderDiagram(scenario = state.selected, result = state.results.get(state.selected?.name)) {
+  const diagram = $("mermaid-diagram");
+  const source = $("mermaid-source");
+  const error = $("mermaid-error");
+  if (!diagram || !source || !error) {
+    return;
+  }
+  if (!scenario) {
+    diagram.textContent = "Select a scenario.";
+    source.textContent = "";
+    error.hidden = true;
+    return;
+  }
+
+  const mermaidSource = buildMermaidDiagram(scenario, result);
+  const renderID = ++state.diagramRenderID;
+  source.textContent = mermaidSource;
+  error.hidden = true;
+
+  const mermaid = window.mermaid;
+  if (!mermaid) {
+    diagram.textContent = "Loading Mermaid renderer...";
+    return;
+  }
+  if (!state.mermaidInitialized) {
+    const styles = getComputedStyle(document.documentElement);
+    const dark = isDarkTheme();
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      themeVariables: {
+        darkMode: dark,
+        background: "transparent",
+        mainBkg: styles.getPropertyValue("--surface-2").trim(),
+        primaryColor: dark ? "#dbe7ff" : "#eef4ff",
+        primaryBorderColor: styles.getPropertyValue("--blue").trim(),
+        primaryTextColor: dark ? "#0f141b" : styles.getPropertyValue("--text").trim(),
+        lineColor: dark ? "#a9b8d0" : "#314052",
+        textColor: styles.getPropertyValue("--text").trim(),
+        actorBkg: dark ? "#dbe7ff" : "#eef4ff",
+        actorBorder: styles.getPropertyValue("--blue").trim(),
+        actorTextColor: dark ? "#0f141b" : styles.getPropertyValue("--text").trim(),
+        signalColor: styles.getPropertyValue("--text").trim(),
+        signalTextColor: styles.getPropertyValue("--text").trim(),
+        labelBoxBkgColor: styles.getPropertyValue("--surface").trim(),
+        labelTextColor: styles.getPropertyValue("--text").trim(),
+        noteBkgColor: styles.getPropertyValue("--accent-soft").trim(),
+        noteTextColor: styles.getPropertyValue("--text").trim(),
+        activationBkgColor: styles.getPropertyValue("--accent-soft").trim(),
+        activationBorderColor: styles.getPropertyValue("--accent-border").trim(),
+      },
+      sequence: {
+        mirrorActors: false,
+        useMaxWidth: true,
+      },
+    });
+    state.mermaidInitialized = true;
+  }
+
+  try {
+    const rendered = await mermaid.render(`scenario-diagram-${renderID}`, mermaidSource);
+    if (renderID !== state.diagramRenderID) {
+      return;
+    }
+    diagram.innerHTML = rendered.svg;
+    if (rendered.bindFunctions) {
+      rendered.bindFunctions(diagram);
+    }
+  } catch (renderError) {
+    diagram.textContent = "Mermaid could not render this scenario.";
+    error.textContent = renderError.message || String(renderError);
+    error.hidden = false;
+  }
+}
+
+function isDarkTheme() {
+  const theme = document.documentElement.getAttribute("data-theme");
+  return theme === "dark" ||
+    (theme !== "light" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+}
+
+function buildMermaidDiagram(scenario, result) {
+  const request = scenario.request || {};
+  const expect = scenario.expect || {};
+  const observed = result?.observed || {};
+  const status = observed.status || expect.status || 200;
+  const hasCORSHeaders = request.method === "OPTIONS" &&
+    request.headers?.Origin &&
+    request.headers?.["Access-Control-Request-Method"];
+  const unmatched = !scenario.policy || scenario.policy === "-";
+  const exchange = scenario.exchange && scenario.exchange !== "-";
+  const lines = [
+    "sequenceDiagram",
+    "    participant Client",
+    "    participant Gateway as \"Gateway API pod\"",
+    "    participant Plugin as \"ext-authz plugin\"",
+  ];
+  if (!unmatched) {
+    lines.push("    participant Policy as \"ConfigMap policy\"");
+  }
+  if (exchange && !hasCORSHeaders) {
+    lines.push("    participant Issuer as \"fake token endpoint\"");
+  }
+  if (status < 400 || unmatched || hasCORSHeaders) {
+    lines.push("    participant Httpbin as \"go-httpbin\"");
+  }
+  lines.push("");
+  lines.push(`    Client->>Gateway: ${diagramText(requestLine(request))}`);
+  lines.push("    Gateway->>Plugin: Envoy ext_authz Check");
+
+  if (unmatched) {
+    lines.push("    Plugin-->>Gateway: OK, no matching policy");
+    lines.push(`    Gateway->>Httpbin: ${diagramText(upstreamLine(request, observed, expect))}`);
+    lines.push(`    Httpbin-->>Client: ${diagramText(responseLine(status, "JSON echoed headers"))}`);
+    return lines.join("\n");
+  }
+
+  lines.push(`    Plugin->>Policy: ${diagramText(`Match ${scenario.policy}`)}`);
+
+  if (hasCORSHeaders) {
+    lines.push("    Plugin-->>Gateway: OK without token exchange");
+    lines.push(`    Gateway->>Httpbin: ${diagramText(`${request.method} ${request.path}`)}`);
+    lines.push(`    Httpbin-->>Client: ${diagramText(responseLine(status, "CORS response headers"))}`);
+    return lines.join("\n");
+  }
+
+  if (exchange) {
+    lines.push(`    Plugin->>Issuer: ${diagramText(tokenExchangeLine(scenario))}`);
+    if (status >= 400) {
+      lines.push(`    Issuer-->>Plugin: ${diagramText(issuerErrorLine(status, observed, expect))}`);
+      lines.push(`    Plugin-->>Client: ${diagramText(responseLine(status, sanitizedError(observed, expect)))}`);
+      return lines.join("\n");
+    }
+    lines.push(`    Issuer-->>Plugin: ${diagramText(issuerSuccessLine(scenario, observed, expect))}`);
+    lines.push("    Plugin-->>Gateway: OK, replace Authorization");
+    lines.push(`    Gateway->>Httpbin: ${diagramText(upstreamLine(request, observed, expect))}`);
+    lines.push(`    Httpbin-->>Client: ${diagramText(responseLine(status, "JSON echoed headers"))}`);
+    return lines.join("\n");
+  }
+
+  if (status >= 400) {
+    lines.push(`    Plugin-->>Client: ${diagramText(responseLine(status, sanitizedError(observed, expect)))}`);
+    return lines.join("\n");
+  }
+
+  lines.push("    Plugin-->>Gateway: OK without token exchange");
+  lines.push(`    Gateway->>Httpbin: ${diagramText(upstreamLine(request, observed, expect))}`);
+  lines.push(`    Httpbin-->>Client: ${diagramText(responseLine(status, "JSON echoed headers"))}`);
+  return lines.join("\n");
+}
+
+function requestLine(request) {
+  const parts = [`${request.method} ${request.path}`];
+  if (request.bearer) {
+    parts.push(`Authorization: Bearer ${request.bearer}`);
+  }
+  const headers = Object.entries(request.headers || {});
+  if (headers.length) {
+    parts.push(headers.map(([key, value]) => `${key}: ${value}`).join(", "));
+  }
+  return parts.join("<br/>");
+}
+
+function tokenExchangeLine(scenario) {
+  const request = scenario.request || {};
+  const parts = [`POST ${scenario.exchange}`];
+  if (request.bearer) {
+    parts.push(`subject_token=${request.bearer}`);
+  }
+  return parts.join("<br/>");
+}
+
+function issuerSuccessLine(scenario, observed, expect) {
+  const auth = observed.upstreamAuthorization || expect.upstreamAuthorization || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  if (token) {
+    return `200 access_token=${token}`;
+  }
+  if (scenario.exchange && scenario.request?.bearer) {
+    return `200 access_token=exchanged-${scenario.exchange.split("/").pop()}-${scenario.request.bearer}`;
+  }
+  return "200 access_token";
+}
+
+function issuerErrorLine(status, observed, expect) {
+  const code = sanitizedError(observed, expect);
+  if (status === 401 && (observed.wwwAuthenticate || expect.wwwAuthenticateContains)) {
+    return "401 WWW-Authenticate";
+  }
+  return `${status} OAuth error ${code}`;
+}
+
+function upstreamLine(request, observed, expect) {
+  const parts = [`${request.method} ${request.path}`];
+  const auth = observed.upstreamAuthorization || expect.upstreamAuthorization;
+  if (auth) {
+    parts.push(`Authorization: ${auth}`);
+  }
+  return parts.join("<br/>");
+}
+
+function responseLine(status, detail) {
+  return detail ? `${status} ${detail}` : String(status);
+}
+
+function sanitizedError(observed, expect) {
+  return observed.error || expect.error || "sanitized OAuth error";
+}
+
+function diagramText(value) {
+  return String(value || "-")
+    .replaceAll("\n", " ");
 }
 
 function setPill(label, klass) {
@@ -380,6 +600,9 @@ for (const tab of document.querySelectorAll(".tab")) {
     }
     tab.classList.add("active");
     $(`tab-${tab.dataset.tab}`).classList.add("active");
+    if (tab.dataset.tab === "diagram") {
+      renderDiagram();
+    }
   });
 }
 
@@ -396,6 +619,7 @@ for (const button of document.querySelectorAll(".format-button")) {
   button.addEventListener("click", () => renderStructuredPreview(button.dataset.format));
 }
 
+window.addEventListener("mermaid-ready", () => renderDiagram());
 applyTheme(localStorage.getItem(themeStorageKey) || "system");
 load().catch((error) => {
   $("scenario-list").textContent = error.message;
