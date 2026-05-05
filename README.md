@@ -43,6 +43,24 @@ devspace deploy -p local-test
 devspace run test-e2e
 ```
 
+### Demo UI
+
+The local demo includes a browser UI for exercising token exchange scenarios
+and inspecting policy, response, log, and request-flow details.
+
+![Token exchange demo policy view](docs/images/token-exchange-demo-policy.png)
+
+<details>
+<summary>More demo screenshots</summary>
+
+![Token exchange demo logs view](docs/images/token-exchange-demo-logs.png)
+
+![Token exchange demo response view](docs/images/token-exchange-demo-response.png)
+
+![Token exchange demo diagram view](docs/images/token-exchange-demo-diagram.png)
+
+</details>
+
 The `local-test` profile deploys the plugin, fake token endpoint, color team
 namespaces, and app-owned policy ConfigMaps from the e2e Helm chart. The color
 namespaces are labeled with the default policy namespace selector
