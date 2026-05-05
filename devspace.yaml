@@ -51,6 +51,8 @@ profiles:
           run_dependencies --all
           ensure_pull_secrets --all
           build_images prod fake-token-endpoint
+          helm dependency build charts/ext-authz-token-exchange
+          helm dependency build charts/ext-authz-token-exchange-e2e
           for ns in service-yellow service-red service-blue; do
             kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
             kubectl label namespace "$ns" ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
@@ -185,6 +187,7 @@ pipelines:
       run_dependencies --all
       ensure_pull_secrets --all
       build_images prod
+      helm dependency build charts/ext-authz-token-exchange
       create_deployments --all
 
 commands:
