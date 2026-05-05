@@ -84,7 +84,22 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 	if oauthErr != nil {
 		return s.oauthDeny(oauthErr), nil
 	}
+	s.logTokensIfInsecureEnabled(method, host, httpReq.GetPath(), decision.Entry, subjectToken, result.AccessToken)
 	return allowResponse([]headerPair{{Name: "authorization", Value: "Bearer " + result.AccessToken}}), nil
+}
+
+func (s *AuthzGRPCServer) logTokensIfInsecureEnabled(method, host, path string, entry policy.Entry, subjectToken, exchangedToken string) {
+	if !s.cfg.InsecureLogTokens {
+		return
+	}
+	customLogger.Printf("INSECURE_LOG_TOKENS method=%s host=%s path=%s policy=%s/%s subject_token=%s exchanged_token=%s",
+		logField(method),
+		logField(host),
+		logPath(path),
+		logField(entry.Source.Namespace),
+		logField(entry.Source.Name),
+		logField(subjectToken),
+		logField(exchangedToken))
 }
 
 func (s *AuthzGRPCServer) oauthDeny(oauthErr *exchange.OAuthError) *envoy_service_auth_v3.CheckResponse {

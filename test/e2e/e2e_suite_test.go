@@ -238,6 +238,9 @@ plugin:
             value: %q
           - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
             value: "false"
+          # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
+          - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS
+            value: "true"
           - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
             value: "2s"
           - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
@@ -490,8 +493,20 @@ func tokenEndpointLogs(ctx context.Context) string {
 		LabelSelector: "app.kubernetes.io/name=" + tokenEndpointName,
 	})
 	Expect(err).NotTo(HaveOccurred())
+	return podLogs(ctx, pods.Items)
+}
+
+func pluginLogs(ctx context.Context) string {
+	pods, err := env.kube.CoreV1().Pods(env.systemNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/component=" + env.releaseName,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return podLogs(ctx, pods.Items)
+}
+
+func podLogs(ctx context.Context, pods []corev1.Pod) string {
 	var logs bytes.Buffer
-	for _, pod := range pods.Items {
+	for _, pod := range pods {
 		req := env.kube.CoreV1().Pods(env.systemNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{})
 		stream, err := req.Stream(ctx)
 		if err != nil {

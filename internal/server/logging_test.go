@@ -9,6 +9,9 @@ import (
 	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	envoy_type_v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
+	"github.com/michaelw/ext-authz-token-exchange/internal/config"
+	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
+	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
@@ -94,16 +97,129 @@ func TestLogPathDropsQueryFragmentAndNormalizesControls(t *testing.T) {
 	}
 }
 
+func TestAuthzServerDoesNotLogTokensByDefault(t *testing.T) {
+	var logs bytes.Buffer
+	restoreLogger := captureLogger(&logs)
+	defer restoreLogger()
+
+	srv := NewAuthzGRPCServer(config.RuntimeConfig{BearerRealm: "example"}, policy.NewStaticStore(loggingIndex()), &loggingExchanger{
+		result: exchange.Result{AccessToken: "exchanged-access-token"},
+	})
+
+	resp, err := srv.Check(context.Background(), loggingCheckRequestWithHeaders("GET", "orders.example.com", "/api/orders?email=alice@example.com", map[string]string{
+		"authorization": "Bearer subject-token",
+	}))
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if resp.GetOkResponse() == nil {
+		t.Fatalf("expected OK response: %v", resp)
+	}
+
+	got := logs.String()
+	for _, sensitive := range []string{"INSECURE_LOG_TOKENS", "subject-token", "exchanged-access-token"} {
+		if bytes.Contains([]byte(got), []byte(sensitive)) {
+			t.Fatalf("log contained sensitive value %q: %s", sensitive, got)
+		}
+	}
+}
+
+func TestAuthzServerLogsTokensWhenInsecureLoggingEnabled(t *testing.T) {
+	var logs bytes.Buffer
+	restoreLogger := captureLogger(&logs)
+	defer restoreLogger()
+
+	srv := NewAuthzGRPCServer(config.RuntimeConfig{BearerRealm: "example", InsecureLogTokens: true}, policy.NewStaticStore(loggingIndex()), &loggingExchanger{
+		result: exchange.Result{AccessToken: "exchanged-access-token"},
+	})
+
+	resp, err := srv.Check(context.Background(), loggingCheckRequestWithHeaders("GET", "orders.example.com", "/api/orders?email=alice@example.com", map[string]string{
+		"authorization": "Bearer subject-token",
+	}))
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if resp.GetOkResponse() == nil {
+		t.Fatalf("expected OK response: %v", resp)
+	}
+
+	got := logs.String()
+	for _, want := range []string{
+		"INSECURE_LOG_TOKENS",
+		"method=GET",
+		"host=orders.example.com",
+		"path=/api/orders",
+		"policy=orders/token-exchange",
+		"subject_token=subject-token",
+		"exchanged_token=exchanged-access-token",
+	} {
+		if !bytes.Contains([]byte(got), []byte(want)) {
+			t.Fatalf("log did not contain %q: %s", want, got)
+		}
+	}
+	if bytes.Contains([]byte(got), []byte("alice@example.com")) {
+		t.Fatalf("log contained query PII: %s", got)
+	}
+}
+
+func captureLogger(logs *bytes.Buffer) func() {
+	originalWriter := customLogger.Writer()
+	customLogger.SetOutput(logs)
+	return func() {
+		customLogger.SetOutput(originalWriter)
+	}
+}
+
 func loggingCheckRequest(method, host, path string) *envoy_service_auth_v3.CheckRequest {
+	return loggingCheckRequestWithHeaders(method, host, path, nil)
+}
+
+func loggingCheckRequestWithHeaders(method, host, path string, headers map[string]string) *envoy_service_auth_v3.CheckRequest {
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	headers[":authority"] = host
 	return &envoy_service_auth_v3.CheckRequest{
 		Attributes: &envoy_service_auth_v3.AttributeContext{
 			Request: &envoy_service_auth_v3.AttributeContext_Request{
 				Http: &envoy_service_auth_v3.AttributeContext_HttpRequest{
-					Method: method,
-					Host:   host,
-					Path:   path,
+					Method:  method,
+					Host:    host,
+					Path:    path,
+					Headers: headers,
 				},
 			},
 		},
 	}
+}
+
+type loggingExchanger struct {
+	result exchange.Result
+	err    *exchange.OAuthError
+}
+
+func (f *loggingExchanger) Exchange(context.Context, policy.Entry, string) (exchange.Result, *exchange.OAuthError) {
+	return f.result, f.err
+}
+
+func loggingIndex() *policy.Index {
+	return policy.BuildIndex(map[policy.Source]string{{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - host: orders.example.com
+    pathPrefix: /api/orders
+    methods: ["GET"]
+    resource: https://orders.example.com/api/
+    tokenEndpoint: http://issuer.example/token
+`}, config.RuntimeConfig{
+		ClientID:                "client",
+		ClientSecret:            "secret",
+		TokenEndpointAuthMethod: config.AuthMethodClientSecretBasic,
+		GrantType:               config.DefaultGrantType,
+		SubjectTokenType:        config.DefaultSubjectTokenType,
+		LabelSelector:           config.DefaultConfigMapLabelSelector,
+		AllowHTTPTokenEndpoint:  true,
+		RequireIssuedTokenType:  true,
+		ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+	})
 }

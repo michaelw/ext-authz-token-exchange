@@ -82,6 +82,7 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 
 	It("exchanges bearer tokens on OPTIONS requests that are not CORS preflight", func(ctx SpecContext) {
 		before := tokenEndpointLogs(ctx)
+		pluginBefore := pluginLogs(ctx)
 		resp, body := request(ctx, http.MethodOptions, "/anything/yellow", "options-token", nil)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
 
@@ -90,6 +91,13 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 			g.Expect(after).To(ContainSubstring(`scenario=yellow`))
 			g.Expect(after).NotTo(ContainSubstring(`subject_token=`))
 			g.Expect(after).NotTo(ContainSubstring(`options-token`))
+		}, 30*time.Second, time.Second).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			after := strings.TrimPrefix(pluginLogs(ctx), pluginBefore)
+			g.Expect(after).To(ContainSubstring(`INSECURE_LOG_TOKENS`))
+			g.Expect(after).To(ContainSubstring(`subject_token=options-token`))
+			g.Expect(after).To(ContainSubstring(`exchanged_token=exchanged-yellow-options-token`))
 		}, 30*time.Second, time.Second).Should(Succeed())
 	})
 

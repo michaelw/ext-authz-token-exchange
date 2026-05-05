@@ -75,11 +75,24 @@ var _ = Describe("RuntimeConfig", func() {
 	It("loads the default namespace selector from the environment", func() {
 		setenv("OAUTH_CLIENT_ID", "client")
 		setenv("OAUTH_CLIENT_SECRET", "secret")
+		unsetenv("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS")
 
 		cfg, err := config.LoadFromEnv()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.NamespaceSelector).To(Equal(config.DefaultConfigMapNamespaceSelector))
+		Expect(cfg.InsecureLogTokens).To(BeFalse())
+	})
+
+	It("loads insecure token logging only when explicitly enabled", func() {
+		setenv("OAUTH_CLIENT_ID", "client")
+		setenv("OAUTH_CLIENT_SECRET", "secret")
+		setenv("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS", "true")
+
+		cfg, err := config.LoadFromEnv()
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.InsecureLogTokens).To(BeTrue())
 	})
 
 	It("allows overriding the namespace selector", func() {
@@ -124,5 +137,15 @@ func setenv(name, value string) {
 			return
 		}
 		Expect(os.Unsetenv(name)).To(Succeed())
+	})
+}
+
+func unsetenv(name string) {
+	original, hadOriginal := os.LookupEnv(name)
+	Expect(os.Unsetenv(name)).To(Succeed())
+	DeferCleanup(func() {
+		if hadOriginal {
+			Expect(os.Setenv(name, original)).To(Succeed())
+		}
 	})
 }
