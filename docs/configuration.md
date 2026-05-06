@@ -204,7 +204,7 @@ and e2e chart lives in `charts/ext-authz-token-exchange-e2e`.
 
 ### OAuth Secret
 
-The production chart expects an existing Secret by default:
+The plugin chart expects an existing Secret by default:
 
 ```yaml
 oauth:
@@ -217,6 +217,24 @@ oauth:
 The chart validation requires the `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`
 env entries in `service.containers[0].env` to point at the same Secret name and
 keys.
+
+For local or demo installs, the plugin chart can create the OAuth client
+credential Secret itself:
+
+```yaml
+oauth:
+  createSecret: true
+  secretName: ext-authz-token-exchange-oauth
+  clientID: e2e-client
+  clientSecret: e2e-secret
+  existingSecret:
+    name: ext-authz-token-exchange-oauth
+    clientIDKey: client_id
+    clientSecretKey: client_secret
+```
+
+The demo/e2e chart does not create OAuth credentials; they are owned by the
+plugin chart that consumes them.
 
 ### RBAC
 

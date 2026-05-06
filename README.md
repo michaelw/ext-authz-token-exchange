@@ -67,8 +67,11 @@ and inspecting policy, response, log, and request-flow details.
 
 </details>
 
-The `local-test` profile deploys the plugin, fake token endpoint, color team
-namespaces, and app-owned policy ConfigMaps from the e2e Helm chart. The color
+The `local-test` profile deploys the plugin chart as release
+`ext-authz-token-exchange` in namespace `ext-authz-token-exchange`, and the
+demo/e2e chart as release `ext-authz-token-exchange-e2e` in namespace
+`ext-authz-token-exchange-e2e`. The demo/e2e chart owns the fake token
+endpoint, color team namespaces, and app-owned policy ConfigMaps. The color
 namespaces are labeled with the default policy namespace selector
 `ext-authz-token-exchange.magneticflux.net/policy=enabled`; ConfigMaps in
 unlabeled namespaces are ignored by the plugin.
