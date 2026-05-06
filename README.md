@@ -74,12 +74,16 @@ namespaces are labeled with the default policy namespace selector
 unlabeled namespaces are ignored by the plugin.
 
 By default, requests that do not match any app-owned policy pass through
-unchanged. Set `TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=true` or
-`tokenExchange.defaultDenyUnmatched=true` in the Helm values to return
+unchanged. Set `TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED=true` to return
 `403 Forbidden` for unmatched traffic, including unmatched CORS preflights.
 Individual routes can also be rejected with `action: deny` policy entries,
-while `action: exchange` keeps the normal token exchange behavior. Policy
-entries are split into `match`, `action`, and action-specific configuration:
+while `action: exchange` keeps the normal token exchange behavior.
+
+For the full configuration reference and behavior details, including all policy
+fields, token endpoint allowlists, namespace and ConfigMap discovery labels,
+and RBAC requirements, see the [Configuration Reference](docs/configuration.md).
+Policy entries are split into `match`, `action`, and action-specific
+configuration:
 
 ```yaml
 version: v1

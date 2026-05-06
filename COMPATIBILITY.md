@@ -5,6 +5,9 @@ while moving from the original token-exchange plan to the RFC-aligned design.
 
 ## Configuration Changes
 
+For the current operator-facing configuration and behavior reference, see
+`docs/configuration.md`.
+
 - `target_upstream` was the previous planning name for what is now the
   RFC8707/RFC8693 `resources` field. Use `exchange.resources` for target API or
   upstream URIs where the exchanged token will be used.
