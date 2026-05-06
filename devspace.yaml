@@ -20,6 +20,7 @@ vars:
     value: "ext-authz-token-exchange"
   FAKE_TOKEN_ENDPOINT_IMAGE_NAME:
     value: "ext-authz-token-exchange-fake-token-endpoint"
+  GIT_COMMIT: $(git rev-parse HEAD)
   DEV_TAG:
     value: "dev-${DEVSPACE_USER}-${DEVSPACE_TIMESTAMP}"
   PROD_TAG:
@@ -35,6 +36,99 @@ profiles:
     merge:
       deployments:
         ext-authz-token-exchange:
+          namespace: ext-authz-token-exchange
+          helm:
+            releaseName: ext-authz-token-exchange
+            chart:
+              name: ./charts/ext-authz-token-exchange
+            values:
+              service:
+                serviceAccountName: ext-authz-token-exchange
+                containers:
+                  - name: ext-authz-token-exchange-service
+                    image: ghcr.io/michaelw/ext-authz-token-exchange
+                    imagePullPolicy: IfNotPresent
+                    env:
+                      - name: GRPC_PORT
+                        value: "3001"
+                      - name: OAUTH_CLIENT_ID
+                        valueFrom:
+                          secretKeyRef:
+                            name: ext-authz-token-exchange-oauth
+                            key: client_id
+                      - name: OAUTH_CLIENT_SECRET
+                        valueFrom:
+                          secretKeyRef:
+                            name: ext-authz-token-exchange-oauth
+                            key: client_secret
+                      - name: TOKEN_ENDPOINT_AUTH_METHOD
+                        value: "client_secret_basic"
+                      - name: TOKEN_EXCHANGE_GRANT_TYPE
+                        value: "urn:ietf:params:oauth:grant-type:token-exchange"
+                      - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
+                        value: "urn:ietf:params:oauth:token-type:access_token"
+                      - name: CONFIGMAP_LABEL_SELECTOR
+                        value: "ext-authz-token-exchange.magneticflux.net/enabled=true"
+                      - name: CONFIGMAP_NAMESPACE_SELECTOR
+                        value: "ext-authz-token-exchange.magneticflux.net/policy=enabled"
+                      - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
+                        value: "false"
+                      - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
+                        value: "true"
+                      - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
+                        value: "http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success"
+                      - name: TOKEN_ENDPOINT_ALLOWLIST
+                        value: ""
+                      - name: TOKEN_EXCHANGE_BEARER_REALM
+                        value: "ext-authz-token-exchange-e2e"
+                      - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
+                        value: "false"
+                      - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
+                        value: "false"
+                      # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
+                      - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS
+                        value: "true"
+                      - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
+                        value: "2s"
+                      - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
+                        value: "1s"
+                      - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
+                        value: "1s"
+                      - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
+                        value: "2s"
+                      - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
+                        value: "30s"
+                      - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
+                        value: "10"
+                      - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
+                        value: "5"
+                    ports:
+                      - name: grpc-authz
+                        containerPort: 3001
+                    resources:
+                      requests:
+                        cpu: 50m
+                        memory: 64Mi
+                      limits:
+                        cpu: 500m
+                        memory: 256Mi
+                service:
+                  type: ClusterIP
+                  ports:
+                    - name: grpc-api
+                      port: 3001
+                      containerPort: grpc-authz
+                      appProtocol: grpc
+              oauth:
+                createSecret: true
+                secretName: ext-authz-token-exchange-oauth
+                clientID: e2e-client
+                clientSecret: e2e-secret
+                existingSecret:
+                  name: ext-authz-token-exchange-oauth
+                  clientIDKey: client_id
+                  clientSecretKey: client_secret
+        ext-authz-token-exchange-e2e:
           namespace: ext-authz-token-exchange-e2e
           helm:
             releaseName: ext-authz-token-exchange-e2e
@@ -44,6 +138,8 @@ profiles:
               host: httpbin.int.kube
               namespacePrefix: service
               systemNamespace: ext-authz-token-exchange-e2e
+              fakeTokenEndpoint:
+                image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint
     patches:
       - op: replace
         path: pipelines.deploy.run
@@ -52,7 +148,6 @@ profiles:
           ensure_pull_secrets --all
           build_images prod fake-token-endpoint
           helm dependency build charts/ext-authz-token-exchange
-          helm dependency build charts/ext-authz-token-exchange-e2e
           for ns in service-yellow service-red service-blue; do
             kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
             kubectl label namespace "$ns" ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
@@ -80,7 +175,7 @@ images:
     target: prod
     buildKit: *buildKit
     tags:
-      - "${DEVSPACE_GIT_COMMIT}"
+      - "${GIT_COMMIT}"
       - ${PROD_TAG}
     # This will be pushed to registry for others to use
 
@@ -90,16 +185,28 @@ images:
     target: fake-token-endpoint
     buildKit: *buildKit
     tags:
-      - "${DEVSPACE_GIT_COMMIT}"
+      - "${GIT_COMMIT}"
       - ${PROD_TAG}
 
 # Deployments - Kubernetes manifests
 deployments:
   ext-authz-token-exchange:
+    namespace: ext-authz-token-exchange
     helm:
+      releaseName: ext-authz-token-exchange
       # https://www.devspace.sh/component-chart/docs/
       chart:
         name: ./charts/ext-authz-token-exchange
+      values:
+        oauth:
+          createSecret: true
+          secretName: ext-authz-token-exchange-oauth
+          clientID: devspace-client
+          clientSecret: devspace-secret
+          existingSecret:
+            name: ext-authz-token-exchange-oauth
+            clientIDKey: client_id
+            clientSecretKey: client_secret
 
 # Development configuration
 dev:

@@ -40,6 +40,7 @@ func main() {
 	s := &server{opts: opts}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.health)
+	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/scenarios", s.scenarios)
 	mux.HandleFunc("POST /api/scenarios/run-all", s.runAll)
 	mux.HandleFunc("POST /api/scenarios/{name}/run", s.runOne)
@@ -76,6 +77,43 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *server) status(w http.ResponseWriter, r *http.Request) {
+	opts := s.opts.WithDefaults()
+	plugin := deploymentStatus(r.Context(), opts.PluginNamespace, opts.PluginDeployment)
+	issuer := deploymentStatus(r.Context(), opts.SystemNamespace, "fake-token-endpoint")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plugin": plugin,
+		"issuer": issuer,
+	})
+}
+
+type componentStatus struct {
+	Ready     bool   `json:"ready"`
+	Namespace string `json:"namespace"`
+	Deploy    string `json:"deployment"`
+	Available string `json:"available,omitempty"`
+	Warning   string `json:"warning,omitempty"`
+}
+
+func deploymentStatus(parent context.Context, namespace, deployment string) componentStatus {
+	status := componentStatus{Namespace: namespace, Deploy: deployment}
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "deployment", "-n", namespace, deployment, "-o", "jsonpath={.status.availableReplicas}/{.spec.replicas}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		status.Warning = strings.TrimSpace(string(out))
+		if status.Warning == "" {
+			status.Warning = err.Error()
+		}
+		return status
+	}
+	status.Available = strings.TrimSpace(string(out))
+	parts := strings.Split(status.Available, "/")
+	status.Ready = len(parts) == 2 && parts[0] != "" && parts[0] != "0" && parts[0] == parts[1]
+	return status
+}
+
 func (s *server) scenarios(w http.ResponseWriter, _ *http.Request) {
 	cfg, err := demo.LoadConfig(s.opts)
 	if err != nil {
@@ -86,10 +124,12 @@ func (s *server) scenarios(w http.ResponseWriter, _ *http.Request) {
 		cfg.Scenarios[i] = cfg.Scenarios[i].WithDefaults()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"baseURL":         s.opts.WithDefaults().BaseURL,
-		"namespacePrefix": s.opts.WithDefaults().NamespacePrefix,
-		"systemNamespace": s.opts.WithDefaults().SystemNamespace,
-		"scenarios":       cfg.Scenarios,
+		"baseURL":          s.opts.WithDefaults().BaseURL,
+		"namespacePrefix":  s.opts.WithDefaults().NamespacePrefix,
+		"systemNamespace":  s.opts.WithDefaults().SystemNamespace,
+		"pluginNamespace":  s.opts.WithDefaults().PluginNamespace,
+		"pluginDeployment": s.opts.WithDefaults().PluginDeployment,
+		"scenarios":        cfg.Scenarios,
 	})
 }
 
@@ -166,11 +206,15 @@ func (s *server) policy(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) logs(w http.ResponseWriter, r *http.Request) {
 	component := r.PathValue("component")
+	opts := s.opts.WithDefaults()
+	namespace := ""
 	deployment := ""
 	switch component {
 	case "plugin":
-		deployment = "ext-authz-token-exchange-e2e"
+		namespace = opts.PluginNamespace
+		deployment = opts.PluginDeployment
 	case "issuer":
+		namespace = opts.SystemNamespace
 		deployment = "fake-token-endpoint"
 	default:
 		writeError(w, http.StatusNotFound, fmt.Errorf("unknown log component %q", component))
@@ -178,7 +222,7 @@ func (s *server) logs(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "kubectl", "logs", "-n", s.opts.WithDefaults().SystemNamespace, "deploy/"+deployment, "--tail=80")
+	cmd := exec.CommandContext(ctx, "kubectl", "logs", "-n", namespace, "deploy/"+deployment, "--tail=80")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{

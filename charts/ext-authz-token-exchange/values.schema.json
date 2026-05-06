@@ -8,6 +8,19 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "createSecret": {
+          "type": "boolean"
+        },
+        "secretName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientID": {
+          "type": "string"
+        },
+        "clientSecret": {
+          "type": "string"
+        },
         "existingSecret": {
           "type": "object",
           "additionalProperties": true,

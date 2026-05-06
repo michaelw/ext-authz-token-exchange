@@ -148,7 +148,8 @@ Deploy the production chart through DevSpace:
 devspace deploy
 ```
 
-Deploy the self-contained local demo stack:
+Deploy the local demo stack. This installs the plugin chart and demo/e2e chart
+as separate Helm releases:
 
 ```sh
 devspace deploy -p local-test

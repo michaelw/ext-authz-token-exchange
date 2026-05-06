@@ -193,12 +193,14 @@ h3 {
   border-color: var(--good-border);
 }
 
+.chip.fail,
 .result-pill.fail {
   color: var(--red);
   background: var(--fail-soft);
   border-color: var(--fail-border);
 }
 
+.chip.running,
 .result-pill.running {
   color: var(--blue);
   background: var(--running-soft);

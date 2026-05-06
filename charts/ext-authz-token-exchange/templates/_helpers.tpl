@@ -54,3 +54,14 @@ Name of the Kubernetes Service rendered by the component-chart dependency.
 {{- define "ext-authz-token-exchange.serviceName" -}}
 {{- default .Release.Name .Values.service.service.name | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{/*
+Name of the OAuth client credential Secret consumed by the plugin.
+*/}}
+{{- define "ext-authz-token-exchange.oauthSecretName" -}}
+{{- if .Values.oauth.createSecret -}}
+{{- .Values.oauth.secretName -}}
+{{- else -}}
+{{- .Values.oauth.existingSecret.name -}}
+{{- end -}}
+{{- end }}

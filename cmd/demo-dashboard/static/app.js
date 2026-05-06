@@ -4,6 +4,8 @@ const state = {
   results: new Map(),
   diagramRenderID: 0,
   mermaidInitialized: false,
+  statusRefreshTimer: null,
+  statusRefreshing: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -38,8 +40,62 @@ async function load() {
   const data = await api("/api/scenarios");
   state.scenarios = data.scenarios;
   $("gateway-chip").textContent = `Gateway: ${data.baseURL}`;
+  await refreshStatus({ showChecking: true });
+  startStatusRefresh();
   renderScenarioList();
   selectScenario(state.scenarios[0]?.name);
+}
+
+function startStatusRefresh() {
+  if (state.statusRefreshTimer) {
+    return;
+  }
+  state.statusRefreshTimer = window.setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    refreshStatus();
+  }, 5000);
+}
+
+async function refreshStatus({ showChecking = false } = {}) {
+  if (state.statusRefreshing) {
+    return;
+  }
+  state.statusRefreshing = true;
+  if (showChecking) {
+    setStatusChip("plugin-status", "Plugin", { checking: true });
+    setStatusChip("issuer-status", "Fake issuer", { checking: true });
+  }
+  try {
+    const status = await api("/api/status");
+    setStatusChip("plugin-status", "Plugin", status.plugin);
+    setStatusChip("issuer-status", "Fake issuer", status.issuer);
+  } catch (error) {
+    setStatusChip("plugin-status", "Plugin", { warning: error.message });
+    setStatusChip("issuer-status", "Fake issuer", { warning: error.message });
+  } finally {
+    state.statusRefreshing = false;
+  }
+}
+
+function setStatusChip(id, label, status = {}) {
+  const chip = $(id);
+  chip.classList.remove("good", "fail", "running");
+  if (status.checking) {
+    chip.classList.add("running");
+    chip.textContent = `${label}: checking`;
+    chip.title = "";
+    return;
+  }
+  if (status.ready) {
+    chip.classList.add("good");
+    chip.textContent = `${label}: ready`;
+  } else {
+    chip.classList.add("fail");
+    chip.textContent = `${label}: down`;
+  }
+  chip.title = status.warning || `${status.namespace || ""}/${status.deployment || ""} ${status.available || ""}`.trim();
 }
 
 function renderScenarioList() {
@@ -143,6 +199,7 @@ function clearObserved() {
 }
 
 async function runScenario(name) {
+  await refreshStatus();
   const scenario = state.scenarios.find((item) => item.name === name);
   if (!scenario) {
     return;
@@ -166,6 +223,7 @@ async function runScenario(name) {
 }
 
 async function runAll() {
+  await refreshStatus();
   $("run-all").disabled = true;
   try {
     for (const scenario of state.scenarios) {
@@ -714,6 +772,7 @@ function buildCurlPreview(scenario) {
 }
 
 async function refreshLogs() {
+  await refreshStatus();
   $("plugin-logs").textContent = "Loading...";
   $("issuer-logs").textContent = "Loading...";
   const [plugin, issuer] = await Promise.all([

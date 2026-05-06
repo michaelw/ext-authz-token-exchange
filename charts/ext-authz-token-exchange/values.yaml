@@ -80,6 +80,10 @@ service:
         appProtocol: grpc
 
 oauth:
+  createSecret: false
+  secretName: ext-authz-token-exchange-oauth
+  clientID: ""
+  clientSecret: ""
   existingSecret:
     name: ext-authz-token-exchange-oauth
     clientIDKey: client_id

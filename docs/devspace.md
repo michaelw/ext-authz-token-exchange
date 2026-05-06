@@ -58,8 +58,11 @@ devspace deploy -p local-test
 
 The `local-test` profile assumes infrastructure already provides Istio/Gateway
 and `https://httpbin.int.kube/` through the Gateway API gateway. It deploys the
-e2e Helm chart, which includes the plugin, fake token endpoint, color team
-namespaces, and app-owned policy ConfigMaps.
+plugin chart as release `ext-authz-token-exchange` in namespace
+`ext-authz-token-exchange`, and the demo/e2e chart as release
+`ext-authz-token-exchange-e2e` in namespace `ext-authz-token-exchange-e2e`.
+The demo/e2e chart owns the fake token endpoint, color team namespaces, and
+app-owned policy ConfigMaps.
 
 Profiles are composable:
 
@@ -77,7 +80,7 @@ devspace deploy -p local-test
 devspace deploy -p with-infra -p local-test
 ```
 
-After deployment, run the e2e assertions against the already deployed release:
+After deployment, run the e2e assertions against the already deployed releases:
 
 ```bash
 devspace run test-e2e

@@ -4,8 +4,3 @@ name: ext-authz-token-exchange-e2e
 description: Demo and Kubernetes e2e resources for ext-authz-token-exchange.
 version: 0.1.0
 appVersion: "0.1.0"
-dependencies:
-  - alias: plugin
-    name: ext-authz-token-exchange
-    version: 0.1.0
-    repository: "file://../ext-authz-token-exchange"

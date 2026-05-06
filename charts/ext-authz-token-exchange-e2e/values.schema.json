@@ -3,7 +3,7 @@
   "title": "ext-authz-token-exchange-e2e values",
   "type": "object",
   "additionalProperties": true,
-  "required": ["host", "namespacePrefix", "systemNamespace", "policy", "oauth", "fakeTokenEndpoint", "teams"],
+  "required": ["host", "namespacePrefix", "systemNamespace", "policy", "fakeTokenEndpoint", "teams"],
   "properties": {
     "host": {
       "type": "string",
@@ -47,25 +47,6 @@
           "minLength": 1
         },
         "httpbinResourceBase": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "oauth": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": ["secretName", "clientID", "clientSecret"],
-      "properties": {
-        "secretName": {
-          "type": "string",
-          "minLength": 1
-        },
-        "clientID": {
-          "type": "string",
-          "minLength": 1
-        },
-        "clientSecret": {
           "type": "string",
           "minLength": 1
         }
@@ -141,9 +122,6 @@
           }
         }
       }
-    },
-    "plugin": {
-      "type": "object"
     }
   }
 }

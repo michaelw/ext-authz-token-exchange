@@ -13,10 +13,12 @@ E2E_FAKE_TOKEN_ENDPOINT_IMAGE=ghcr.io/michaelw/ext-authz-token-exchange-fake-tok
 go run github.com/onsi/ginkgo/v2/ginkgo -r -v ./test/e2e
 ```
 
-The Ginkgo suite installs `charts/ext-authz-token-exchange-e2e`, an umbrella
-Helm chart that deploys the central plugin chart plus demo-only resources. The
-test code intentionally does not construct baseline Kubernetes manifests; use
-the chart values to change namespaces, credentials, images, policy entries, or
+When `E2E_SKIP_INSTALL=false`, the Ginkgo suite installs the plugin chart and
+the demo/e2e chart as separate Helm releases. The plugin chart owns the OAuth
+client credentials it consumes. The demo/e2e chart owns demo-only resources:
+the fake token endpoint, color team namespaces, and app-owned policy ConfigMaps.
+The test code intentionally does not construct baseline Kubernetes manifests;
+use chart values to change namespaces, credentials, images, policy entries, or
 the fake token endpoint.
 
 You can also let DevSpace deploy the full local demo stack:
@@ -31,9 +33,10 @@ from the Go test cache. Pass Ginkgo flags directly, for example
 `devspace run test-e2e -v`.
 
 The `local-test` profile builds the plugin and fake token endpoint images, then
-deploys the e2e chart. DevSpace updates the image tags in Helm values in memory,
-so the local-test flow does not require pushing images to `ghcr.io/michaelw`
-when your cluster can use DevSpace-built images.
+deploys the plugin chart as release `ext-authz-token-exchange` and the demo/e2e
+chart as release `ext-authz-token-exchange-e2e`. DevSpace updates the image
+tags in Helm values in memory, so the local-test flow does not require pushing
+images to `ghcr.io/michaelw` when your cluster can use DevSpace-built images.
 
 The production plugin image intentionally contains only
 `ext-authz-token-exchange-service`. The fake token endpoint is packaged through
@@ -70,6 +73,11 @@ Omit `-open` to keep the current manual-open behavior and then open
 embedded static assets. It is not copied into the production `prod` image; that
 image intentionally copies only `ext-authz-token-exchange-service`.
 
+The dashboard reads plugin logs from `DEMO_PLUGIN_NAMESPACE` and
+`DEMO_PLUGIN_DEPLOYMENT`, which default to `ext-authz-token-exchange`. It reads
+fake issuer logs from `DEMO_SYSTEM_NAMESPACE`, which defaults to
+`ext-authz-token-exchange-e2e`.
+
 For a recorded demo, a useful four-terminal layout is:
 
 ```sh
@@ -77,7 +85,7 @@ For a recorded demo, a useful four-terminal layout is:
 go run ./cmd/demo-scenario all
 
 # 2. Central plugin logs.
-kubectl logs -f -n ext-authz-token-exchange-e2e deploy/ext-authz-token-exchange-e2e
+kubectl logs -f -n ext-authz-token-exchange deploy/ext-authz-token-exchange
 
 # 3. Fake token endpoint logs.
 kubectl logs -f -n ext-authz-token-exchange-e2e deploy/fake-token-endpoint
@@ -208,7 +216,8 @@ sequenceDiagram
 
 By default the suite creates:
 
-- `ext-authz-token-exchange-e2e` for the central ext-authz plugin and fake token endpoint.
+- `ext-authz-token-exchange` for the central ext-authz plugin.
+- `ext-authz-token-exchange-e2e` for the fake token endpoint and demo support resources.
 - `service-yellow`, `service-red`, and `service-blue` for app-owned policy ConfigMaps.
   These namespaces are labeled
   `ext-authz-token-exchange.magneticflux.net/policy=enabled`, which is the
@@ -221,8 +230,8 @@ the namespace must match `CONFIGMAP_NAMESPACE_SELECTOR`.
 
 When using `devspace deploy -p local-test`, DevSpace creates or updates the
 color namespaces before Helm deploys the demo chart and labels them with the
-policy namespace selector. A direct `helm upgrade --install` also labels
-namespaces that the chart creates or already owns.
+policy namespace selector. A direct `helm upgrade --install` of the demo chart
+also labels namespaces that the chart creates or already owns.
 
 The namespace selector is plugin-side discovery policy. Kubernetes RBAC cannot
 grant ConfigMap access by namespace label, so production deployments should
@@ -238,8 +247,10 @@ Useful overrides:
 
 - `E2E_HOST`: Host header and ConfigMap host. Defaults to the host from `E2E_BASE_URL`.
 - `E2E_NAMESPACE_PREFIX`: Prefix for team namespaces. Defaults to `service`.
-- `E2E_SYSTEM_NAMESPACE`: Namespace for the plugin and fake token endpoint.
-- `E2E_RELEASE`: Helm release name for the plugin.
+- `E2E_RELEASE`: Helm release name for the plugin. Defaults to `ext-authz-token-exchange`.
+- `E2E_NAMESPACE`: Namespace for the plugin. Defaults to `ext-authz-token-exchange`.
+- `E2E_DEMO_RELEASE`: Helm release name for demo/e2e resources. Defaults to `ext-authz-token-exchange-e2e`.
+- `E2E_DEMO_NAMESPACE`: Namespace for demo/e2e resources. Defaults to `ext-authz-token-exchange-e2e`.
 - `E2E_FAKE_TOKEN_ENDPOINT_IMAGE`: Image for the demo token endpoint.
 - `E2E_HTTPBIN_RESOURCE_BASE`: Resource URI base used in demo ConfigMaps.
 - `E2E_SKIP_CLEANUP=true`: Keep test namespaces for inspection.
