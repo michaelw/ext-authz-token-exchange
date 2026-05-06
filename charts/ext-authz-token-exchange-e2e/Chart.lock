@@ -1,6 +1,0 @@
-dependencies:
-- name: ext-authz-token-exchange
-  repository: file://../ext-authz-token-exchange
-  version: 0.1.0
-digest: sha256:58b17f42a057fd2279e9e2ce649ede706e7f8a29ac408a4b8b3aafdcc7f448a3
-generated: "2026-05-04T22:15:07.066767-05:00"
