@@ -1,14 +1,20 @@
 # Ext AuthZ Token Exchange Plugin
 
-Envoy Ext-AuthZ plugin template for token exchange.
+Envoy external authorization plugin for OAuth 2.0 token exchange.
 
-The current service intentionally keeps only the gRPC external authorization
-service stub. Business logic will be added in `internal/server/grpc_authz.go`.
+The service implements Envoy's ext-authz gRPC API, reads app-owned Kubernetes
+ConfigMap policies, performs RFC 8693 token exchange for matched protected
+routes, and rewrites the upstream `Authorization` header with the exchanged
+access token. Requests that match invalid or ambiguous policy regions fail
+closed.
 
 ## Project Overview
 
 - `cmd/ext-authz-token-exchange-service/main.go` — gRPC service entrypoint
-- `internal/server/` — Envoy ext-authz gRPC server stub
+- `internal/server/` — Envoy ext-authz decisions and responses
+- `internal/policy/` — policy parsing, validation, indexing, and matching
+- `internal/exchange/` — OAuth token endpoint client behavior
+- `internal/config/` — runtime configuration parsing and validation
 
 For a detailed overview, refer to the [Implementation Guide](docs/implementation.md).
 
@@ -33,7 +39,7 @@ If you do not yet have Gateway API CRDs, a cluster-wide gateway named `gateway`,
 devspace deploy -p with-infra
 ```
 
-The command will setup a fully functionioning self-contained demo environment.
+The command will setup a fully functioning self-contained demo environment.
 
 For the local demo/e2e stack that assumes infrastructure already provides
 `https://httpbin.int.kube/` through the Gateway API gateway, use:
@@ -128,10 +134,3 @@ For further information, refer to the [Development Guide](docs/development.md).
 Deploy a development container and connect it to VSCode
 
 - `devspace dev --vscode`
-
-# TODO
-
-* Tests
-* CI builds
-* Persist shell history in devcontainer, dotfiles, etc.
-* Inject Github credentials
