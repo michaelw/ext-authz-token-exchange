@@ -24,8 +24,12 @@ const (
 	DefaultBaseURL = "https://httpbin.int.kube"
 	// DefaultNamespacePrefix is the namespace prefix used by the e2e Helm chart.
 	DefaultNamespacePrefix = "service"
-	// DefaultSystemNamespace is the central namespace for the plugin and fake issuer.
+	// DefaultSystemNamespace is the namespace used by demo/e2e support resources.
 	DefaultSystemNamespace = "ext-authz-token-exchange-e2e"
+	// DefaultPluginNamespace is the namespace used by the plugin Helm release.
+	DefaultPluginNamespace = "ext-authz-token-exchange"
+	// DefaultPluginDeployment is the Deployment name used by the plugin Helm release.
+	DefaultPluginDeployment = "ext-authz-token-exchange"
 	// DefaultConfigPath is the shared scenario file used by e2e demo tooling.
 	DefaultConfigPath = "test/e2e/demo-scenarios.yaml"
 	// DefaultRequestTimeout bounds each demo HTTP request.
@@ -34,21 +38,25 @@ const (
 
 // Options configures scenario rendering and HTTP execution.
 type Options struct {
-	BaseURL         string
-	ConfigPath      string
-	NamespacePrefix string
-	SystemNamespace string
-	InsecureTLS     bool
+	BaseURL          string
+	ConfigPath       string
+	NamespacePrefix  string
+	SystemNamespace  string
+	PluginNamespace  string
+	PluginDeployment string
+	InsecureTLS      bool
 }
 
 // LoadOptionsFromEnv returns demo options from environment variables.
 func LoadOptionsFromEnv() Options {
 	return Options{
-		BaseURL:         strings.TrimRight(envDefault("DEMO_BASE_URL", DefaultBaseURL), "/"),
-		ConfigPath:      envDefault("DEMO_SCENARIO_CONFIG", DefaultConfigPath),
-		NamespacePrefix: envDefault("DEMO_NAMESPACE_PREFIX", DefaultNamespacePrefix),
-		SystemNamespace: envDefault("DEMO_SYSTEM_NAMESPACE", DefaultSystemNamespace),
-		InsecureTLS:     envBool("DEMO_INSECURE_SKIP_VERIFY", true),
+		BaseURL:          strings.TrimRight(envDefault("DEMO_BASE_URL", DefaultBaseURL), "/"),
+		ConfigPath:       envDefault("DEMO_SCENARIO_CONFIG", DefaultConfigPath),
+		NamespacePrefix:  envDefault("DEMO_NAMESPACE_PREFIX", DefaultNamespacePrefix),
+		SystemNamespace:  envDefault("DEMO_SYSTEM_NAMESPACE", DefaultSystemNamespace),
+		PluginNamespace:  envDefault("DEMO_PLUGIN_NAMESPACE", DefaultPluginNamespace),
+		PluginDeployment: envDefault("DEMO_PLUGIN_DEPLOYMENT", DefaultPluginDeployment),
+		InsecureTLS:      envBool("DEMO_INSECURE_SKIP_VERIFY", true),
 	}
 }
 
@@ -347,6 +355,12 @@ func (opts Options) WithDefaults() Options {
 	}
 	if opts.SystemNamespace == "" {
 		opts.SystemNamespace = DefaultSystemNamespace
+	}
+	if opts.PluginNamespace == "" {
+		opts.PluginNamespace = DefaultPluginNamespace
+	}
+	if opts.PluginDeployment == "" {
+		opts.PluginDeployment = DefaultPluginDeployment
 	}
 	return opts
 }
