@@ -42,7 +42,10 @@ const (
 	policyNamespaceSelector    = "ext-authz-token-exchange.magneticflux.net/policy=enabled"
 	tokenEndpointName          = "fake-token-endpoint"
 	tokenEndpointPort          = int32(8080)
-	defaultReleaseName         = "ext-authz-token-exchange-e2e"
+	defaultReleaseName         = "ext-authz-token-exchange"
+	defaultNamespace           = "ext-authz-token-exchange"
+	defaultDemoReleaseName     = "ext-authz-token-exchange-e2e"
+	defaultDemoNamespace       = "ext-authz-token-exchange-e2e"
 	defaultPluginImage         = "ghcr.io/michaelw/ext-authz-token-exchange:latest"
 	defaultFakeTokenImage      = "ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:latest"
 	defaultOAuthClientID       = "e2e-client"
@@ -71,8 +74,8 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	if !env.skipInstall {
 		installDemo(ctx)
 	}
-	waitForDeployment(ctx, env.systemNamespace, env.releaseName)
-	waitForDeployment(ctx, env.systemNamespace, tokenEndpointName)
+	waitForDeployment(ctx, env.namespace, env.releaseName)
+	waitForDeployment(ctx, env.demoNamespace, tokenEndpointName)
 })
 
 var _ = AfterSuite(func(ctx SpecContext) {
@@ -89,8 +92,10 @@ type e2eEnv struct {
 	baseURL             string
 	host                string
 	namespacePrefix     string
-	systemNamespace     string
+	namespace           string
 	releaseName         string
+	demoNamespace       string
+	demoReleaseName     string
 	pluginImage         string
 	fakeTokenImage      string
 	oauthClientID       string
@@ -114,8 +119,10 @@ func loadE2EEnv() e2eEnv {
 		baseURL:             base,
 		host:                host,
 		namespacePrefix:     envDefault("E2E_NAMESPACE_PREFIX", "service"),
-		systemNamespace:     envDefault("E2E_SYSTEM_NAMESPACE", defaultReleaseName),
 		releaseName:         envDefault("E2E_RELEASE", defaultReleaseName),
+		namespace:           envDefault("E2E_NAMESPACE", defaultNamespace),
+		demoReleaseName:     envDefault("E2E_DEMO_RELEASE", defaultDemoReleaseName),
+		demoNamespace:       envDefault("E2E_DEMO_NAMESPACE", defaultDemoNamespace),
 		pluginImage:         envDefault("E2E_PLUGIN_IMAGE", defaultPluginImage),
 		fakeTokenImage:      envDefault("E2E_FAKE_TOKEN_ENDPOINT_IMAGE", defaultFakeTokenImage),
 		oauthClientID:       envDefault("E2E_OAUTH_CLIENT_ID", defaultOAuthClientID),
@@ -132,7 +139,7 @@ func (e e2eEnv) teamNamespace(color string) string {
 }
 
 func (e e2eEnv) allNamespaces() []string {
-	return []string{e.systemNamespace, e.teamNamespace("yellow"), e.teamNamespace("red"), e.teamNamespace("blue"), e.teamNamespace("black")}
+	return []string{e.namespace, e.demoNamespace, e.teamNamespace("yellow"), e.teamNamespace("red"), e.teamNamespace("blue"), e.teamNamespace("black")}
 }
 
 func newKubeClient() (*kubernetes.Clientset, error) {
@@ -151,18 +158,26 @@ func newKubeClient() (*kubernetes.Clientset, error) {
 }
 
 func installDemo(ctx context.Context) {
-	valuesPath := filepath.Join(os.TempDir(), env.releaseName+"-e2e-values.yaml")
-	Expect(os.WriteFile(valuesPath, []byte(demoValues()), 0o600)).To(Succeed())
+	pluginValuesPath := filepath.Join(os.TempDir(), env.releaseName+"-plugin-values.yaml")
+	Expect(os.WriteFile(pluginValuesPath, []byte(pluginValues()), 0o600)).To(Succeed())
+	installHelmRelease(ctx, env.releaseName, env.namespace, repoPath("charts", "ext-authz-token-exchange"), pluginValuesPath, true)
 
-	chartPath := repoPath("charts", "ext-authz-token-exchange-e2e")
+	demoValuesPath := filepath.Join(os.TempDir(), env.demoReleaseName+"-values.yaml")
+	Expect(os.WriteFile(demoValuesPath, []byte(demoValues()), 0o600)).To(Succeed())
+	installHelmRelease(ctx, env.demoReleaseName, env.demoNamespace, repoPath("charts", "ext-authz-token-exchange-e2e"), demoValuesPath, false)
+}
+
+func installHelmRelease(ctx context.Context, releaseName, namespace, chartPath, valuesPath string, dependencyUpdate bool) {
 	args := []string{
-		"upgrade", "--install", env.releaseName, chartPath,
-		"--namespace", env.systemNamespace,
+		"upgrade", "--install", releaseName, chartPath,
+		"--namespace", namespace,
 		"--create-namespace",
-		"--dependency-update",
 		"--values", valuesPath,
 		"--wait",
 		"--timeout", "2m",
+	}
+	if dependencyUpdate {
+		args = append(args, "--dependency-update")
 	}
 	cmd := exec.CommandContext(ctx, "helm", args...)
 	out, err := cmd.CombinedOutput()
@@ -170,15 +185,112 @@ func installDemo(ctx context.Context) {
 }
 
 func uninstallDemo(ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "helm", "uninstall", env.releaseName, "--namespace", env.systemNamespace, "--wait", "--timeout", "2m")
+	uninstallHelmRelease(ctx, env.demoReleaseName, env.demoNamespace)
+	uninstallHelmRelease(ctx, env.releaseName, env.namespace)
+}
+
+func uninstallHelmRelease(ctx context.Context, releaseName, namespace string) {
+	cmd := exec.CommandContext(ctx, "helm", "uninstall", releaseName, "--namespace", namespace, "--wait", "--timeout", "2m")
 	out, err := cmd.CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "release: not found") {
 		Expect(err).NotTo(HaveOccurred(), string(out))
 	}
 }
 
+func pluginValues() string {
+	defaultEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/token/success", tokenEndpointName, env.demoNamespace, tokenEndpointPort)
+	return fmt.Sprintf(`service:
+  serviceAccountName: ext-authz-token-exchange
+  containers:
+    - name: ext-authz-token-exchange-service
+      image: %q
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: GRPC_PORT
+          value: "3001"
+        - name: OAUTH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: %q
+              key: client_id
+        - name: OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: %q
+              key: client_secret
+        - name: TOKEN_ENDPOINT_AUTH_METHOD
+          value: "client_secret_basic"
+        - name: TOKEN_EXCHANGE_GRANT_TYPE
+          value: "urn:ietf:params:oauth:grant-type:token-exchange"
+        - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
+          value: "urn:ietf:params:oauth:token-type:access_token"
+        - name: CONFIGMAP_LABEL_SELECTOR
+          value: "%s=%s"
+        - name: CONFIGMAP_NAMESPACE_SELECTOR
+          value: %q
+        - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
+          value: "false"
+        - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
+          value: "true"
+        - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
+          value: %q
+        - name: TOKEN_ENDPOINT_ALLOWLIST
+          value: ""
+        - name: TOKEN_EXCHANGE_BEARER_REALM
+          value: %q
+        - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
+          value: "false"
+        - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
+          value: "false"
+        # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
+        - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS
+          value: "true"
+        - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
+          value: "2s"
+        - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
+          value: "1s"
+        - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
+          value: "1s"
+        - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
+          value: "2s"
+        - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
+          value: "30s"
+        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
+          value: "10"
+        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
+          value: "5"
+      ports:
+        - name: grpc-authz
+          containerPort: 3001
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+  service:
+    type: ClusterIP
+    ports:
+      - name: grpc-api
+        port: 3001
+        containerPort: grpc-authz
+        appProtocol: grpc
+oauth:
+  createSecret: true
+  secretName: %q
+  clientID: %q
+  clientSecret: %q
+  existingSecret:
+    name: %q
+    clientIDKey: client_id
+    clientSecretKey: client_secret
+`, env.pluginImage, oauthSecretName, oauthSecretName, policyLabelKey, policyLabelValue,
+		policyNamespaceSelector, defaultEndpoint, defaultBearerRealm,
+		oauthSecretName, env.oauthClientID, env.oauthClientSecret, oauthSecretName)
+}
+
 func demoValues() string {
-	defaultEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/token/success", tokenEndpointName, env.systemNamespace, tokenEndpointPort)
 	return fmt.Sprintf(`host: %q
 namespacePrefix: %q
 systemNamespace: %q
@@ -189,103 +301,13 @@ policy:
   namespaceLabelValue: %q
   namespaceSelector: %q
   httpbinResourceBase: %q
-oauth:
-  secretName: %q
-  clientID: %q
-  clientSecret: %q
 fakeTokenEndpoint:
   name: %q
   image: %q
   port: %d
-plugin:
-  service:
-    serviceAccountName: ext-authz-token-exchange
-    containers:
-      - name: ext-authz-token-exchange-service
-        image: %q
-        imagePullPolicy: IfNotPresent
-        env:
-          - name: GRPC_PORT
-            value: "3001"
-          - name: OAUTH_CLIENT_ID
-            valueFrom:
-              secretKeyRef:
-                name: %q
-                key: client_id
-          - name: OAUTH_CLIENT_SECRET
-            valueFrom:
-              secretKeyRef:
-                name: %q
-                key: client_secret
-          - name: TOKEN_ENDPOINT_AUTH_METHOD
-            value: "client_secret_basic"
-          - name: TOKEN_EXCHANGE_GRANT_TYPE
-            value: "urn:ietf:params:oauth:grant-type:token-exchange"
-          - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
-            value: "urn:ietf:params:oauth:token-type:access_token"
-          - name: CONFIGMAP_LABEL_SELECTOR
-            value: "%s=%s"
-          - name: CONFIGMAP_NAMESPACE_SELECTOR
-            value: %q
-          - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
-            value: "false"
-          - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
-            value: "true"
-          - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
-            value: %q
-          - name: TOKEN_ENDPOINT_ALLOWLIST
-            value: ""
-          - name: TOKEN_EXCHANGE_BEARER_REALM
-            value: %q
-          - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
-            value: "false"
-          - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
-            value: "false"
-          # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
-          - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS
-            value: "true"
-          - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
-            value: "2s"
-          - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
-            value: "1s"
-          - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
-            value: "1s"
-          - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
-            value: "2s"
-          - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
-            value: "30s"
-          - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
-            value: "10"
-          - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
-            value: "5"
-        ports:
-          - name: grpc-authz
-            containerPort: 3001
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
-    service:
-      type: ClusterIP
-      ports:
-        - name: grpc-api
-          port: 3001
-          containerPort: grpc-authz
-          appProtocol: grpc
-  oauth:
-    existingSecret:
-      name: %q
-      clientIDKey: client_id
-      clientSecretKey: client_secret
-`, env.host, env.namespacePrefix, env.systemNamespace,
+`, env.host, env.namespacePrefix, env.demoNamespace,
 		policyLabelKey, policyLabelValue, policyNamespaceLabelKey, policyNamespaceLabelValue, policyNamespaceSelector, env.httpbinResourceBase,
-		oauthSecretName, env.oauthClientID, env.oauthClientSecret,
-		tokenEndpointName, env.fakeTokenImage, tokenEndpointPort,
-		env.pluginImage, oauthSecretName, oauthSecretName, policyLabelKey, policyLabelValue,
-		policyNamespaceSelector, defaultEndpoint, defaultBearerRealm, oauthSecretName)
+		tokenEndpointName, env.fakeTokenImage, tokenEndpointPort)
 }
 
 func createUnlabeledTeamNamespace(ctx context.Context, color string) string {
@@ -315,7 +337,7 @@ func createUnlabeledTeamNamespace(ctx context.Context, color string) string {
 }
 
 func createPolicy(ctx context.Context, namespace, name, scope, pathPrefix, tokenPath string) {
-	tokenEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s", tokenEndpointName, env.systemNamespace, tokenEndpointPort, tokenPath)
+	tokenEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s", tokenEndpointName, env.demoNamespace, tokenEndpointPort, tokenPath)
 	config := fmt.Sprintf(`version: v1
 entries:
   - match:
@@ -429,7 +451,7 @@ func deleteConfigMapIgnoreNotFound(ctx context.Context, namespace, name string) 
 
 func setPluginEnv(ctx context.Context, name, value string) {
 	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		deployment, err := env.kube.AppsV1().Deployments(env.systemNamespace).Get(ctx, env.releaseName, metav1.GetOptions{})
+		deployment, err := env.kube.AppsV1().Deployments(env.namespace).Get(ctx, env.releaseName, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -441,23 +463,24 @@ func setPluginEnv(ctx context.Context, name, value string) {
 			for j := range container.Env {
 				if container.Env[j].Name == name {
 					container.Env[j].Value = value
-					_, err = env.kube.AppsV1().Deployments(env.systemNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
+					_, err = env.kube.AppsV1().Deployments(env.namespace).Update(ctx, deployment, metav1.UpdateOptions{})
 					return err
 				}
 			}
 			container.Env = append(container.Env, corev1.EnvVar{Name: name, Value: value})
-			_, err = env.kube.AppsV1().Deployments(env.systemNamespace).Update(ctx, deployment, metav1.UpdateOptions{})
+			_, err = env.kube.AppsV1().Deployments(env.namespace).Update(ctx, deployment, metav1.UpdateOptions{})
 			return err
 		}
-		return fmt.Errorf("deployment %s/%s does not contain ext-authz-token-exchange-service", env.systemNamespace, env.releaseName)
+		return fmt.Errorf("deployment %s/%s does not contain ext-authz-token-exchange-service", env.namespace, env.releaseName)
 	})).To(Succeed())
-	waitForDeployment(ctx, env.systemNamespace, env.releaseName)
+	waitForDeployment(ctx, env.namespace, env.releaseName)
 }
 
 func waitForDeployment(ctx context.Context, namespace, name string) {
 	Eventually(func(g Gomega) {
 		deployment, err := env.kube.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(deployment.Status.ObservedGeneration).To(BeNumerically(">=", deployment.Generation))
 		g.Expect(deployment.Status.AvailableReplicas).To(BeNumerically(">=", 1))
 		g.Expect(deployment.Status.UpdatedReplicas).To(Equal(*deployment.Spec.Replicas))
 	}, 2*time.Minute, 2*time.Second).Should(Succeed())
@@ -533,7 +556,7 @@ func headerFromHTTPBin(body []byte, name string) string {
 }
 
 func tokenEndpointLogs(ctx context.Context) string {
-	pods, err := env.kube.CoreV1().Pods(env.systemNamespace).List(ctx, metav1.ListOptions{
+	pods, err := env.kube.CoreV1().Pods(env.demoNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=" + tokenEndpointName,
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -541,7 +564,7 @@ func tokenEndpointLogs(ctx context.Context) string {
 }
 
 func pluginLogs(ctx context.Context) string {
-	pods, err := env.kube.CoreV1().Pods(env.systemNamespace).List(ctx, metav1.ListOptions{
+	pods, err := env.kube.CoreV1().Pods(env.namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/component=" + env.releaseName,
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -551,7 +574,7 @@ func pluginLogs(ctx context.Context) string {
 func podLogs(ctx context.Context, pods []corev1.Pod) string {
 	var logs bytes.Buffer
 	for _, pod := range pods {
-		req := env.kube.CoreV1().Pods(env.systemNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{})
+		req := env.kube.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{})
 		stream, err := req.Stream(ctx)
 		if err != nil {
 			continue
