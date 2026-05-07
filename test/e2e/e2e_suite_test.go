@@ -215,8 +215,8 @@ func pluginValues() string {
 %s
 env:
   TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
-  TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: %q
   TOKEN_EXCHANGE_BEARER_REALM: %q
+  TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: %q
   # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
   TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
 resources:
@@ -235,7 +235,7 @@ oauth:
     name: %q
     clientIDKey: client_id
     clientSecretKey: client_secret
-`, imageValues(env.pluginImage), defaultEndpoint, defaultBearerRealm,
+`, imageValues(env.pluginImage), defaultBearerRealm, defaultEndpoint,
 		oauthSecretName, env.oauthClientID, env.oauthClientSecret, oauthSecretName)
 }
 
