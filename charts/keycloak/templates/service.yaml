@@ -1,0 +1,3 @@
+{{- $values := deepCopy .Values }}
+{{- $_ := set $values "service" (dict "ports" (dict "http" (dict "port" .Values.keycloak.port "targetPort" "http"))) }}
+{{- include "common.itsumi.services.tpl" (merge (dict "Values" $values) (omit . "Values")) }}

@@ -14,6 +14,12 @@ import (
 )
 
 var _ = Describe("multi-namespace token exchange", Ordered, func() {
+	BeforeEach(func() {
+		if env.issuer != defaultIssuer {
+			Skip("fake token endpoint scenarios run only when E2E_ISSUER=fake")
+		}
+	})
+
 	It("merges per-team ConfigMaps and exchanges tokens for each color namespace", func(ctx SpecContext) {
 		for _, color := range []string{"yellow", "red", "blue"} {
 			color := color

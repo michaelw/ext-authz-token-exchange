@@ -1,0 +1,52 @@
+namespace: ext-authz-token-exchange-e2e
+pluginNamespace: ext-authz-token-exchange
+
+labels:
+  partOfKey: app.kubernetes.io/part-of
+  partOfValue: ext-authz-token-exchange-e2e
+
+keycloak:
+  name: keycloak
+  image:
+    repository: quay.io/keycloak/keycloak
+    pullPolicy: IfNotPresent
+  port: 8080
+  externalHost: keycloak.int.kube
+  externalURL: https://keycloak.int.kube
+  adminUsername: admin
+  adminPassword: admin
+  realm: token-exchange-e2e
+  resources:
+    requests:
+      cpu: 250m
+      memory: 768Mi
+    limits:
+      cpu: "1"
+      memory: 1536Mi
+
+clients:
+  subject:
+    id: tx-subject-client
+    secret: tx-subject-secret
+  exchanger:
+    id: tx-exchanger-client
+    secret: tx-exchanger-secret
+  audience:
+    id: tx-audience-client
+
+secret:
+  name: ext-authz-token-exchange-keycloak-oauth
+  clientIDKey: client_id
+  clientSecretKey: client_secret
+
+gateway:
+  enabled: true
+  name: gateway
+  namespace: istio-ingress
+
+testUser:
+  username: token-user
+  password: token-user-password
+  email: token-user@example.test
+  firstName: Token
+  lastName: User

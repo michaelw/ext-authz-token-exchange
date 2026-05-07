@@ -1,0 +1,15 @@
+{{- if .Values.gateway.enabled }}
+{{- $labels := include "keycloak.labels" . | fromYaml }}
+{{- $_ := set $labels "app.kubernetes.io/name" .Values.keycloak.name }}
+{{- $values := deepCopy .Values }}
+{{- $_ := set $values "httpRoutes" (dict "default" (dict
+  "namespace" .Values.namespace
+  "labels" $labels
+  "spec" (dict
+    "parentRefs" (dict "default" (dict "name" .Values.gateway.name "namespace" .Values.gateway.namespace))
+    "hostnames" (list .Values.keycloak.externalHost)
+    "rules" (dict "default" (dict "backendRefs" (dict "default" (dict "name" .Values.keycloak.name "port" .Values.keycloak.port))))
+  )
+)) }}
+{{- include "common.itsumi.httproutes.tpl" (merge (dict "Values" $values) (omit . "Values")) }}
+{{- end }}

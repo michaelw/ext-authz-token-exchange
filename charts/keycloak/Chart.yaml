@@ -1,0 +1,11 @@
+apiVersion: v2
+name: keycloak
+description: Local Keycloak issuer for ext-authz-token-exchange e2e testing
+type: application
+version: 0.1.0
+appVersion: "26.6.1"
+
+dependencies:
+  - name: common.itsumi
+    version: 0.5.1
+    repository: oci://ghcr.io/michaelw

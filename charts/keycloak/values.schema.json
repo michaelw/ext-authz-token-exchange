@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "keycloak values",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["namespace", "pluginNamespace", "keycloak", "clients", "secret", "testUser"],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pluginNamespace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "keycloak": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "image", "port", "realm"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["repository"],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pullPolicy": {
+              "type": "string"
+            }
+          }
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "externalHost": {
+          "type": "string",
+          "minLength": 1
+        },
+        "externalURL": {
+          "type": "string",
+          "minLength": 1
+        },
+        "realm": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "clients": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["subject", "exchanger", "audience"]
+    },
+    "secret": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "clientIDKey", "clientSecretKey"]
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "testUser": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["username", "password"]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {{- range $team := .Values.teams }}
 {{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color) }}
 {{- $audience := printf "httpbin-%s" $team.color }}
-{{- $baseScenario := dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "tokenPath" (printf "/token/%s" $team.color) "audience" $audience }}
+{{- $baseScenario := mergeOverwrite (dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "tokenPath" (printf "/token/%s" $team.color) "audience" $audience) (omit $team "color" "scenarios") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,6 +15,7 @@ data:
 {{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values) $baseScenario) | indent 4 }}
 ---
 {{- range $scenario := $team.scenarios }}
+{{- $scenarioConfig := merge (dict "audience" $audience) $scenario }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -25,7 +26,7 @@ metadata:
     {{ $.Values.policy.labelKey }}: {{ $.Values.policy.labelValue | quote }}
 data:
   config.yaml: |
-{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values "audience" $audience) $scenario) | indent 4 }}
+{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values) $scenarioConfig) | indent 4 }}
 ---
 {{- end }}
 {{- end }}

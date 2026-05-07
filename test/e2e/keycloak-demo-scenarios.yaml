@@ -1,0 +1,23 @@
+version: v1
+scenarios:
+  - name: keycloak-audience
+    summary: real Keycloak issuer exchanges the inbound subject token for the target audience
+    request:
+      method: GET
+      path: /anything/keycloak-audience
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    exchange: Keycloak token exchange endpoint
+    expect:
+      status: 200
+
+  - name: keycloak-resource
+    summary: real Keycloak issuer exchanges when resource is configured separately from the audience case
+    request:
+      method: GET
+      path: /anything/keycloak-resource
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-resource-policy"
+    exchange: Keycloak token exchange endpoint
+    expect:
+      status: 200
