@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode"
 
-	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -20,8 +19,25 @@ var customLogger = log.New(os.Stdout, "[gRPC] ", log.LstdFlags)
 
 const maxLogFieldLength = 512
 
+// LoggingOptions controls gRPC request/response logging behavior.
+type LoggingOptions struct {
+	Methods map[string]LoggingMethod
+}
+
+// LoggingMethod controls logging for a single gRPC full method.
+type LoggingMethod struct {
+	LogEnabled        bool
+	SummarizeRequest  func(any) string
+	SummarizeResponse func(any) string
+}
+
 // LoggingInterceptor creates a gRPC unary interceptor for request/response logging
 func LoggingInterceptor() grpc.UnaryServerInterceptor {
+	return LoggingInterceptorWithOptions(LoggingOptions{})
+}
+
+// LoggingInterceptorWithOptions creates a gRPC unary interceptor with explicit logging options.
+func LoggingInterceptorWithOptions(opts LoggingOptions) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 
 		// Extract client address
@@ -35,21 +51,19 @@ func LoggingInterceptor() grpc.UnaryServerInterceptor {
 		resp, err := handler(ctx, req)
 		duration := time.Since(start)
 
+		methodLogging, hasMethodLogging := opts.Methods[info.FullMethod]
+		if hasMethodLogging && !methodLogging.LogEnabled {
+			return resp, err
+		}
+
 		// Format similar to Gin: [gRPC] timestamp | status | duration | client | method | args
 		var args string
-		if checkReq, ok := req.(*envoy_service_auth_v3.CheckRequest); ok {
-			httpReq := checkReq.GetAttributes().GetRequest().GetHttp()
-			if httpReq != nil {
-				args = fmt.Sprintf(" | %s | %s://%s%s",
-					logField(httpReq.GetMethod()),
-					logField(httpReq.GetScheme()),
-					logField(httpReq.GetHost()),
-					logPath(httpReq.GetPath()))
-			}
+		if hasMethodLogging && methodLogging.SummarizeRequest != nil {
+			args += methodLogging.SummarizeRequest(req)
 		}
 
 		if resp != nil {
-			args += fmt.Sprintf(" | response=%s", responseSummary(resp))
+			args += fmt.Sprintf(" | response=%s", responseSummary(resp, methodLogging, hasMethodLogging))
 		}
 
 		if st, ok := status.FromError(err); ok {
@@ -72,17 +86,11 @@ func LoggingInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func responseSummary(resp any) string {
-	checkResp, ok := resp.(*envoy_service_auth_v3.CheckResponse)
-	if !ok {
-		return "unknown"
+func responseSummary(resp any, method LoggingMethod, registered bool) string {
+	if registered && method.SummarizeResponse != nil {
+		return method.SummarizeResponse(resp)
 	}
-	if checkResp.GetOkResponse() != nil {
-		return "ok"
-	}
-	if denied := checkResp.GetDeniedResponse(); denied != nil {
-		return "denied_status=" + logField(denied.GetStatus().GetCode().String())
-	}
+
 	return "unknown"
 }
 

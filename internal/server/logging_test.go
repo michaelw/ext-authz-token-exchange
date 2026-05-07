@@ -14,6 +14,7 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -40,10 +41,10 @@ func TestLoggingInterceptorDoesNotLogSensitiveResponseFields(t *testing.T) {
 		},
 	}
 
-	_, err := LoggingInterceptor()(peer.NewContext(context.Background(), &peer.Peer{
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Methods: AuthzLoggingMethods()})(peer.NewContext(context.Background(), &peer.Peer{
 		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
 	}), loggingCheckRequest("GET", "orders.example.com", "/api/orders?email=alice@example.com&token=subject-token"), &grpc.UnaryServerInfo{
-		FullMethod: "/envoy.service.auth.v3.Authorization/Check",
+		FullMethod: AuthzCheckMethod,
 	}, func(context.Context, any) (any, error) {
 		return resp, nil
 	})
@@ -81,12 +82,131 @@ func TestResponseSummaryDoesNotLogDeniedBody(t *testing.T) {
 		},
 	}
 
-	got := responseSummary(resp)
+	got := summarizeAuthzResponse(resp)
 	if bytes.Contains([]byte(got), []byte("alice@example.com")) || bytes.Contains([]byte(got), []byte("subject_token_expired")) {
 		t.Fatalf("summary contained denied body details: %s", got)
 	}
 	if got != "denied_status=Unauthorized" {
 		t.Fatalf("unexpected summary: %s", got)
+	}
+}
+
+func TestLoggingInterceptorUsesRegisteredMethodSummary(t *testing.T) {
+	var logs bytes.Buffer
+	originalWriter := customLogger.Writer()
+	customLogger.SetOutput(&logs)
+	t.Cleanup(func() {
+		customLogger.SetOutput(originalWriter)
+	})
+
+	_, err := LoggingInterceptor()(peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
+	}), struct{}{}, &grpc.UnaryServerInfo{
+		FullMethod: "/example.Service/Method",
+	}, func(context.Context, any) (any, error) {
+		return "response", nil
+	})
+	if err != nil {
+		t.Fatalf("interceptor returned error: %v", err)
+	}
+
+	got := logs.String()
+	if !bytes.Contains([]byte(got), []byte("response=unknown")) {
+		t.Fatalf("unregistered method did not fall back to unknown: %s", got)
+	}
+
+	logs.Reset()
+	_, err = LoggingInterceptorWithOptions(LoggingOptions{Methods: map[string]LoggingMethod{
+		"/example.Service/Method": {
+			LogEnabled:        true,
+			SummarizeResponse: func(any) string { return "registered" },
+		},
+	}})(peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
+	}), struct{}{}, &grpc.UnaryServerInfo{
+		FullMethod: "/example.Service/Method",
+	}, func(context.Context, any) (any, error) {
+		return "response", nil
+	})
+	if err != nil {
+		t.Fatalf("interceptor returned error: %v", err)
+	}
+
+	got = logs.String()
+	if !bytes.Contains([]byte(got), []byte("response=registered")) {
+		t.Fatalf("registered method summary was not used: %s", got)
+	}
+}
+
+func TestLoggingInterceptorCanSkipRegisteredMethod(t *testing.T) {
+	var logs bytes.Buffer
+	originalWriter := customLogger.Writer()
+	customLogger.SetOutput(&logs)
+	t.Cleanup(func() {
+		customLogger.SetOutput(originalWriter)
+	})
+
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Methods: map[string]LoggingMethod{
+		"/grpc.health.v1.Health/Check": {
+			LogEnabled:        false,
+			SummarizeResponse: func(any) string { return "health_status=serving" },
+		},
+	}})(peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
+	}), &healthpb.HealthCheckRequest{}, &grpc.UnaryServerInfo{
+		FullMethod: "/grpc.health.v1.Health/Check",
+	}, func(context.Context, any) (any, error) {
+		return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
+	})
+	if err != nil {
+		t.Fatalf("interceptor returned error: %v", err)
+	}
+
+	if got := logs.String(); got != "" {
+		t.Fatalf("expected registered method log to be skipped, got: %s", got)
+	}
+}
+
+func TestLoggingInterceptorDoesNotSkipAuthzWhenHealthCheckLoggingDisabled(t *testing.T) {
+	var logs bytes.Buffer
+	originalWriter := customLogger.Writer()
+	customLogger.SetOutput(&logs)
+	t.Cleanup(func() {
+		customLogger.SetOutput(originalWriter)
+	})
+
+	resp := &envoy_service_auth_v3.CheckResponse{
+		HttpResponse: &envoy_service_auth_v3.CheckResponse_OkResponse{
+			OkResponse: &envoy_service_auth_v3.OkHttpResponse{},
+		},
+	}
+
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Methods: map[string]LoggingMethod{
+		AuthzCheckMethod: {
+			LogEnabled:        true,
+			SummarizeResponse: summarizeAuthzResponse,
+		},
+		"/grpc.health.v1.Health/Check": {
+			LogEnabled:        false,
+			SummarizeResponse: func(any) string { return "health_status=serving" },
+		},
+	}})(peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
+	}), loggingCheckRequest("GET", "orders.example.com", "/api/orders"), &grpc.UnaryServerInfo{
+		FullMethod: AuthzCheckMethod,
+	}, func(context.Context, any) (any, error) {
+		return resp, nil
+	})
+	if err != nil {
+		t.Fatalf("interceptor returned error: %v", err)
+	}
+
+	got := logs.String()
+	if !bytes.Contains([]byte(got), []byte(AuthzCheckMethod)) {
+		t.Fatalf("expected authz request to be logged: %s", got)
+	}
+	if !bytes.Contains([]byte(got), []byte("response=ok")) {
+		t.Fatalf("expected authz response summary to be logged: %s", got)
 	}
 }
 

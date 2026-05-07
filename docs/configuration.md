@@ -141,6 +141,7 @@ oauth:
 
 | Environment variable | Default | Required | Description |
 | --- | --- | --- | --- |
+| `GRPC_LOG_HEALTH_CHECKS` | `true` | No | Logs successful gRPC health probe requests. Disable in noisy local/demo environments when probe chatter is not useful. |
 | `GRPC_PORT` | `3001` | No | Port for the ext-authz gRPC service. |
 | `OAUTH_CLIENT_ID` | none | Yes | OAuth client ID used when calling token endpoints. |
 | `OAUTH_CLIENT_SECRET` | none | Yes | OAuth client secret. Do not log or commit this value. |
@@ -290,7 +291,8 @@ closed if the external authorization service is unavailable or times out.
 
 The e2e chart configures a local fake token endpoint, demo namespaces, namespace
 labels, policy ConfigMaps, and demo-only runtime overrides. In particular, it
-sets `TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT=true` and
+sets `GRPC_LOG_HEALTH_CHECKS=false`,
+`TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT=true`, and
 `TOKEN_EXCHANGE_INSECURE_LOG_TOKENS=true` for local testing. Do not copy those
 settings into production.
 

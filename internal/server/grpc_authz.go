@@ -18,6 +18,8 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
+const AuthzCheckMethod = "/envoy.service.auth.v3.Authorization/Check"
+
 // AuthzGRPCServer implements the Envoy external authorization gRPC service.
 type AuthzGRPCServer struct {
 	envoy_service_auth_v3.UnimplementedAuthorizationServer
@@ -34,6 +36,47 @@ type tokenExchanger interface {
 // NewAuthzGRPCServer creates a gRPC authorization server.
 func NewAuthzGRPCServer(cfg config.RuntimeConfig, store policy.Store, exchanger tokenExchanger) *AuthzGRPCServer {
 	return &AuthzGRPCServer{cfg: cfg, store: store, exchanger: exchanger}
+}
+
+// AuthzLoggingMethods returns gRPC logging rules for this service's endpoints.
+func AuthzLoggingMethods() map[string]LoggingMethod {
+	return map[string]LoggingMethod{
+		AuthzCheckMethod: {
+			LogEnabled:        true,
+			SummarizeRequest:  summarizeAuthzRequest,
+			SummarizeResponse: summarizeAuthzResponse,
+		},
+	}
+}
+
+func summarizeAuthzRequest(req any) string {
+	checkReq, ok := req.(*envoy_service_auth_v3.CheckRequest)
+	if !ok {
+		return ""
+	}
+	httpReq := checkReq.GetAttributes().GetRequest().GetHttp()
+	if httpReq == nil {
+		return ""
+	}
+	return fmt.Sprintf(" | %s | %s://%s%s",
+		logField(httpReq.GetMethod()),
+		logField(httpReq.GetScheme()),
+		logField(httpReq.GetHost()),
+		logPath(httpReq.GetPath()))
+}
+
+func summarizeAuthzResponse(resp any) string {
+	checkResp, ok := resp.(*envoy_service_auth_v3.CheckResponse)
+	if !ok {
+		return "unknown"
+	}
+	if checkResp.GetOkResponse() != nil {
+		return "ok"
+	}
+	if denied := checkResp.GetDeniedResponse(); denied != nil {
+		return "denied_status=" + logField(denied.GetStatus().GetCode().String())
+	}
+	return "unknown"
 }
 
 // Check implements the Envoy external authorization check.
