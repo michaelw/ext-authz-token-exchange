@@ -40,3 +40,9 @@ func TestLoggingOptionsIncludesHealthMethod(t *testing.T) {
 		t.Fatalf("unexpected health summary: %s", got)
 	}
 }
+
+func TestSummarizeHealthResponseHandlesUnexpectedValues(t *testing.T) {
+	if got := summarizeHealthResponse("not a health response"); got != "unknown" {
+		t.Fatalf("unexpected health summary for wrong type: %s", got)
+	}
+}

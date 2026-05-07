@@ -91,6 +91,21 @@ func TestResponseSummaryDoesNotLogDeniedBody(t *testing.T) {
 	}
 }
 
+func TestAuthzLoggingSummariesHandleUnexpectedValues(t *testing.T) {
+	if got := summarizeAuthzRequest("not an authz request"); got != "" {
+		t.Fatalf("unexpected request summary for wrong type: %q", got)
+	}
+	if got := summarizeAuthzRequest(&envoy_service_auth_v3.CheckRequest{}); got != "" {
+		t.Fatalf("unexpected request summary for missing HTTP attributes: %q", got)
+	}
+	if got := summarizeAuthzResponse("not an authz response"); got != "unknown" {
+		t.Fatalf("unexpected response summary for wrong type: %q", got)
+	}
+	if got := summarizeAuthzResponse(&envoy_service_auth_v3.CheckResponse{}); got != "unknown" {
+		t.Fatalf("unexpected response summary for empty authz response: %q", got)
+	}
+}
+
 func TestLoggingInterceptorUsesRegisteredMethodSummary(t *testing.T) {
 	var logs bytes.Buffer
 	originalWriter := customLogger.Writer()
