@@ -1,1 +1,3 @@
-{{- include "common.itsumi.deployments.tpl" . }}
+{{- $values := deepCopy .Values }}
+{{- $_ := set $values "env" (include "ext-authz-token-exchange.env" . | fromYaml) }}
+{{- include "common.itsumi.deployments.tpl" (merge (dict "Values" $values) (omit . "Values")) }}

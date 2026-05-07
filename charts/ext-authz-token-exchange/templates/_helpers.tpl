@@ -65,3 +65,18 @@ Name of the OAuth client credential Secret consumed by the plugin.
 {{- .Values.oauth.existingSecret.name -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Runtime environment rendered from operator env plus chart-owned OAuth refs.
+*/}}
+{{- define "ext-authz-token-exchange.env" -}}
+{{- $secretName := include "ext-authz-token-exchange.oauthSecretName" . -}}
+{{- $env := dict
+  "OAUTH_CLIENT_ID" (dict "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" .Values.oauth.existingSecret.clientIDKey)))
+  "OAUTH_CLIENT_SECRET" (dict "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" .Values.oauth.existingSecret.clientSecretKey)))
+}}
+{{- with .Values.env }}
+{{- $env = mergeOverwrite $env . }}
+{{- end }}
+{{- toYaml $env }}
+{{- end }}

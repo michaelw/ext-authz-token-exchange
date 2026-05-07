@@ -109,11 +109,11 @@ deployments:
           repository: ${runtime.images.prod.image}
           tag: ${runtime.images.prod.tag}
         env:
-          TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
+          TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
           TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
+          TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
           # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
           TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
-          TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
         resources:
           requests:
             cpu: 50m

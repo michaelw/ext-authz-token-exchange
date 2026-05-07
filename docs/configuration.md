@@ -115,12 +115,27 @@ authorization server with `invalid_target`.
 ## Plugin Configuration
 
 The service reads runtime configuration from environment variables. In the
-production Helm chart, the current source of truth is the container env map at
-`env`. The `tokenExchange.*` values block exists in `values.yaml` and
-`values.schema.json`, but those friendly values do not drive the service
-environment on their own unless the chart rendering is changed to consume them.
-For example, `tokenExchange.tokenEndpointAllowlist` exists in values, while the
-service currently reads `TOKEN_ENDPOINT_ALLOWLIST`.
+production Helm chart, set runtime environment variables with the chart's `env`
+map. Runtime defaults live in the binary; omit values from `env` when the binary
+default is appropriate.
+
+The chart owns OAuth client credential Secret wiring through `oauth.*`, because
+those settings are Kubernetes Secret references rather than plain runtime
+defaults.
+
+For example:
+
+```yaml
+env:
+  TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: https://issuer.example.com/oauth/token
+  TOKEN_ENDPOINT_ALLOWLIST: issuer.example.com
+  TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange
+oauth:
+  existingSecret:
+    name: ext-authz-token-exchange-oauth
+    clientIDKey: client_id
+    clientSecretKey: client_secret
+```
 
 ### Core Service
 
@@ -213,8 +228,9 @@ oauth:
     clientSecretKey: client_secret
 ```
 
-The chart validation requires the `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`
-env entries in `env` to point at the same Secret name and keys.
+The chart renders `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` from the
+configured Secret name and keys. These OAuth variables are chart-owned and
+cannot be replaced through `env`.
 
 For local or demo installs, the plugin chart can create the OAuth client
 credential Secret itself:

@@ -117,62 +117,6 @@
         }
       }
     },
-    "tokenExchange": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "defaultTokenEndpoint": {
-          "type": "string"
-        },
-        "tokenEndpointAllowlist": {
-          "type": "string"
-        },
-        "bearerRealm": {
-          "type": "string",
-          "minLength": 1
-        },
-        "allowUnauthenticatedOptions": {
-          "type": "boolean"
-        },
-        "defaultDenyUnmatched": {
-          "type": "boolean"
-        },
-        "httpClient": {
-          "type": "object",
-          "additionalProperties": true,
-          "properties": {
-            "requestTimeout": {
-              "type": "string",
-              "minLength": 1
-            },
-            "dialTimeout": {
-              "type": "string",
-              "minLength": 1
-            },
-            "tlsHandshakeTimeout": {
-              "type": "string",
-              "minLength": 1
-            },
-            "responseHeaderTimeout": {
-              "type": "string",
-              "minLength": 1
-            },
-            "idleConnTimeout": {
-              "type": "string",
-              "minLength": 1
-            },
-            "maxIdleConns": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "maxIdleConnsPerHost": {
-              "type": "integer",
-              "minimum": 0
-            }
-          }
-        }
-      }
-    },
     "rbac": {
       "type": "object",
       "additionalProperties": true,
