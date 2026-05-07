@@ -212,6 +212,14 @@ production chart `version` and `appVersion`. The service images and chart share
 one version for now; split plugin and chart versions only after chart-only
 releases need their own compatibility policy.
 
+Release Please uses a dedicated GitHub App token so release PRs trigger the
+same required CI checks as human-authored PRs. The GitHub App should be
+installed on this repository with repository permissions for contents, issues,
+and pull requests set to read/write. Configure these repository secrets:
+
+- `RELEASE_PLEASE_APP_CLIENT_ID`
+- `RELEASE_PLEASE_APP_PRIVATE_KEY`
+
 When a Release Please release is created, GitHub Actions publishes:
 
 - `ghcr.io/michaelw/ext-authz-token-exchange:<version>`
