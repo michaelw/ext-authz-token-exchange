@@ -2,8 +2,26 @@ package demo
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
+
+func TestBearerTokenEnvRendersIntoScenarioTemplate(t *testing.T) {
+	t.Setenv(DefaultBearerTokenEnv, "subject-token")
+
+	opts := LoadOptionsFromEnv()
+	if opts.BearerToken != "subject-token" {
+		t.Fatalf("unexpected bearer token option: %q", opts.BearerToken)
+	}
+
+	rendered, err := RenderConfig([]byte(`bearer: "{{ .BearerToken }}"`), opts)
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if got := strings.TrimSpace(string(rendered)); got != `bearer: "subject-token"` {
+		t.Fatalf("unexpected rendered config: %q", got)
+	}
+}
 
 func TestExchangeBehaviorClassifiesNoExchangeDenial(t *testing.T) {
 	got := ExchangeBehavior("-", Request{Method: http.MethodGet}, Expectation{Status: http.StatusForbidden})

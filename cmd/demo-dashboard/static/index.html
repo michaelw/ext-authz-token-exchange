@@ -23,8 +23,9 @@
           </select>
         </label>
         <span class="chip" id="gateway-chip">Gateway</span>
+        <span class="chip" id="scenario-config-chip">Scenarios</span>
         <span class="chip" id="plugin-status">Plugin: checking</span>
-        <span class="chip" id="issuer-status">Fake issuer: checking</span>
+        <span class="chip" id="issuer-status">Issuer: checking</span>
       </div>
     </header>
 
@@ -71,7 +72,7 @@
           </div>
           <div class="arrow exchange-arrow"></div>
           <div class="node issuer" data-step="issuer">
-            <span>Fake token endpoint</span>
+            <span id="issuer-node-label">Issuer</span>
             <strong id="issuer-detail">-</strong>
             <small id="issuer-summary">-</small>
           </div>
@@ -164,7 +165,7 @@
           <button id="refresh-logs" type="button">Refresh logs</button>
           <h3>Plugin</h3>
           <pre id="plugin-logs"></pre>
-          <h3>Fake issuer</h3>
+          <h3 id="issuer-logs-title">Issuer</h3>
           <pre id="issuer-logs"></pre>
         </div>
         <div id="tab-diagram" class="tab-panel diagram-panel">

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/michaelw/ext-authz-token-exchange/internal/demo"
 )
 
 func TestDashboardURL(t *testing.T) {
@@ -96,6 +98,63 @@ func TestDeploymentStatus(t *testing.T) {
 				t.Fatalf("Warning = %q, want to contain %q", got.Warning, tt.wantWarn)
 			}
 		})
+	}
+}
+
+func TestSelectIssuerDetectsKeycloakDeployment(t *testing.T) {
+	withKubectl(t, `printf 'http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token'`)
+	t.Setenv("DEMO_SCENARIO_CONFIG", "")
+
+	opts := selectIssuer(context.Background(), demoOptions())
+
+	if opts.Name != "keycloak" {
+		t.Fatalf("Name = %q, want keycloak", opts.Name)
+	}
+	if opts.ScenarioConfig != keycloakConfigPath {
+		t.Fatalf("ScenarioConfig = %q, want %q", opts.ScenarioConfig, keycloakConfigPath)
+	}
+	if got := opts.apply(demoOptions()).ConfigPath; got != keycloakConfigPath {
+		t.Fatalf("applied ConfigPath = %q, want %q", got, keycloakConfigPath)
+	}
+}
+
+func TestSelectIssuerDetectsFakeDeployment(t *testing.T) {
+	withKubectl(t, `printf 'http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success'`)
+	t.Setenv("DEMO_SCENARIO_CONFIG", "")
+
+	opts := selectIssuer(context.Background(), demoOptions())
+
+	if opts.Name != "fake" {
+		t.Fatalf("Name = %q, want fake", opts.Name)
+	}
+	if got := opts.apply(demoOptions()).ConfigPath; got != "test/e2e/demo-scenarios.yaml" {
+		t.Fatalf("applied ConfigPath = %q, want default fake scenario config", got)
+	}
+}
+
+func TestSelectIssuerKeepsExplicitScenarioConfig(t *testing.T) {
+	withKubectl(t, `printf 'http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token'`)
+	t.Setenv("DEMO_SCENARIO_CONFIG", "custom.yaml")
+	opts := demoOptions()
+	opts.ConfigPath = "custom.yaml"
+
+	selection := selectIssuer(context.Background(), opts)
+	applied := selection.apply(opts)
+
+	if selection.Name != "fake" {
+		t.Fatalf("Name = %q, want fake fallback for custom config", selection.Name)
+	}
+	if applied.ConfigPath != "custom.yaml" {
+		t.Fatalf("ConfigPath = %q, want explicit custom.yaml", applied.ConfigPath)
+	}
+}
+
+func demoOptions() demo.Options {
+	return demo.Options{
+		ConfigPath:       "test/e2e/demo-scenarios.yaml",
+		PluginNamespace:  "ext-authz-token-exchange",
+		PluginDeployment: "ext-authz-token-exchange",
+		SystemNamespace:  "ext-authz-token-exchange-e2e",
 	}
 }
 

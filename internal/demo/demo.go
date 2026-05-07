@@ -34,6 +34,9 @@ const (
 	DefaultConfigPath = "test/e2e/demo-scenarios.yaml"
 	// DefaultRequestTimeout bounds each demo HTTP request.
 	DefaultRequestTimeout = 10 * time.Second
+	// DefaultBearerTokenEnv is the env var used by manual scenarios that need a
+	// freshly issued subject token.
+	DefaultBearerTokenEnv = "DEMO_BEARER_TOKEN"
 )
 
 // Options configures scenario rendering and HTTP execution.
@@ -44,6 +47,7 @@ type Options struct {
 	SystemNamespace  string
 	PluginNamespace  string
 	PluginDeployment string
+	BearerToken      string
 	InsecureTLS      bool
 }
 
@@ -56,6 +60,7 @@ func LoadOptionsFromEnv() Options {
 		SystemNamespace:  envDefault("DEMO_SYSTEM_NAMESPACE", DefaultSystemNamespace),
 		PluginNamespace:  envDefault("DEMO_PLUGIN_NAMESPACE", DefaultPluginNamespace),
 		PluginDeployment: envDefault("DEMO_PLUGIN_DEPLOYMENT", DefaultPluginDeployment),
+		BearerToken:      envDefault(DefaultBearerTokenEnv, ""),
 		InsecureTLS:      envBool("DEMO_INSECURE_SKIP_VERIFY", true),
 	}
 }
@@ -137,6 +142,7 @@ type templateData struct {
 	BaseURLHost     string
 	NamespacePrefix string
 	SystemNamespace string
+	BearerToken     string
 }
 
 // LoadConfig reads, renders, parses, and validates the demo scenario config.
@@ -177,6 +183,7 @@ func RenderConfig(data []byte, opts Options) ([]byte, error) {
 		BaseURLHost:     baseURLHost,
 		NamespacePrefix: opts.NamespacePrefix,
 		SystemNamespace: opts.SystemNamespace,
+		BearerToken:     opts.BearerToken,
 	})
 	if err != nil {
 		return nil, err

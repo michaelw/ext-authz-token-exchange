@@ -1,5 +1,6 @@
 const state = {
   scenarios: [],
+  issuer: { label: "Issuer" },
   selected: null,
   results: new Map(),
   diagramRenderID: 0,
@@ -39,7 +40,12 @@ async function api(path, options = {}) {
 async function load() {
   const data = await api("/api/scenarios");
   state.scenarios = data.scenarios;
+  state.issuer = data.issuer || { label: "Issuer" };
   $("gateway-chip").textContent = `Gateway: ${data.baseURL}`;
+  $("scenario-config-chip").textContent = `Scenarios: ${state.issuer.name || "unknown"}`;
+  $("scenario-config-chip").title = data.issuer?.scenarioConfig || "";
+  $("issuer-node-label").textContent = state.issuer.label || "Issuer";
+  $("issuer-logs-title").textContent = state.issuer.label || "Issuer";
   await refreshStatus({ showChecking: true });
   startStatusRefresh();
   renderScenarioList();
@@ -65,15 +71,16 @@ async function refreshStatus({ showChecking = false } = {}) {
   state.statusRefreshing = true;
   if (showChecking) {
     setStatusChip("plugin-status", "Plugin", { checking: true });
-    setStatusChip("issuer-status", "Fake issuer", { checking: true });
+    setStatusChip("issuer-status", state.issuer.label || "Issuer", { checking: true });
   }
   try {
     const status = await api("/api/status");
+    state.issuer.label = status.issuerLabel || state.issuer.label || "Issuer";
     setStatusChip("plugin-status", "Plugin", status.plugin);
-    setStatusChip("issuer-status", "Fake issuer", status.issuer);
+    setStatusChip("issuer-status", state.issuer.label, status.issuer);
   } catch (error) {
     setStatusChip("plugin-status", "Plugin", { warning: error.message });
-    setStatusChip("issuer-status", "Fake issuer", { warning: error.message });
+    setStatusChip("issuer-status", state.issuer.label || "Issuer", { warning: error.message });
   } finally {
     state.statusRefreshing = false;
   }
@@ -398,7 +405,7 @@ function buildMermaidDiagram(scenario, result) {
     lines.push("    participant Policy as \"ConfigMap policy\"");
   }
   if (exchange && !hasCORSHeaders) {
-    lines.push("    participant Issuer as \"fake token endpoint\"");
+    lines.push(`    participant Issuer as ${JSON.stringify(state.issuer.label || "Issuer")}`);
   }
   if (status < 400 || unmatched || hasCORSHeaders) {
     lines.push("    participant Httpbin as \"go-httpbin\"");
