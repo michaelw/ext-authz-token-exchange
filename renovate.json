@@ -5,6 +5,21 @@
   ],
   "packageRules": [
     {
+      "description": "Automerge Renovate version bumps after required CI passes",
+      "matchManagers": [
+        "gomod",
+        "github-actions",
+        "pre-commit"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
       "matchManagers": [
         "gomod"
       ],
