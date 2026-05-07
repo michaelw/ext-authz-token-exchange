@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -323,6 +324,102 @@ entries:
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resp.GetOkResponse()).NotTo(BeNil())
 		Expect(headerValue(resp.GetOkResponse().GetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
+	})
+
+	It("preserves raw OAuth error bodies and authenticate challenges from token exchange", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{
+			StatusCode:      http.StatusUnauthorized,
+			Body:            `{"error":"invalid_client","issuer_detail":"kept only when passthrough is enabled"}`,
+			WWWAuthenticate: []string{`Bearer realm="issuer", error="invalid_token"`},
+		}})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("Unauthorized"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"invalid_client","issuer_detail":"kept only when passthrough is enabled"}`))
+		Expect(headerValue(denied.GetHeaders(), "WWW-Authenticate")).To(Equal(`Bearer realm="issuer", error="invalid_token"`))
+	})
+
+	It("synthesizes OAuth deny JSON from sanitized error fields", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{
+			StatusCode:       http.StatusBadRequest,
+			Error:            "invalid_target",
+			ErrorDescription: "request failed (TXE-2001)",
+			Message:          "token exchange failed",
+			WWWAuthenticate:  []string{`Bearer realm="issuer"`},
+		}})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("BadRequest"))
+		Expect(denied.GetBody()).To(MatchJSON(`{
+			"error":"invalid_target",
+			"error_description":"request failed (TXE-2001)",
+			"message":"token exchange failed"
+		}`))
+		Expect(headerValue(denied.GetHeaders(), "WWW-Authenticate")).To(Equal(`Bearer realm="issuer"`))
+	})
+
+	It("falls back to server_error for empty OAuth deny bodies", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{
+			StatusCode: http.StatusInternalServerError,
+		}})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("InternalServerError"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"server_error"}`))
 	})
 
 	It("extracts upstream trace context from Envoy HTTP request headers before token exchange", func() {

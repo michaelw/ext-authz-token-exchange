@@ -72,6 +72,259 @@ func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
 	}
 }
 
+func TestTokenHandlerSupportsClientSecretPost(t *testing.T) {
+	handler := tokenHandler("e2e-client", "e2e-secret")
+	form := baseTokenForm()
+	form.Set("client_id", "e2e-client")
+	form.Set("client_secret", "e2e-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/token/blue", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", contentTypeFormEncoded)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	_, payload := decodeUnsignedJWT(t, body["access_token"])
+	if got, _ := payload["client_id"].(string); got != "e2e-client" {
+		t.Fatalf("client_id claim = %#v, want e2e-client", payload["client_id"])
+	}
+}
+
+func TestTokenHandlerScenarios(t *testing.T) {
+	cases := []struct {
+		name                string
+		method              string
+		path                string
+		contentType         string
+		basicAuth           bool
+		wantStatus          int
+		wantError           string
+		wantDescription     string
+		wantWWWAuthenticate string
+		wantJSONFields      map[string]string
+		wantBody            string
+	}{
+		{
+			name:            "non-post",
+			method:          http.MethodGet,
+			path:            "/token/yellow",
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_request",
+			wantDescription: "POST required",
+		},
+		{
+			name:            "wrong content type",
+			method:          http.MethodPost,
+			path:            "/token/yellow",
+			contentType:     "application/json",
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_request",
+			wantDescription: "form encoding required",
+		},
+		{
+			name:                "invalid client",
+			method:              http.MethodPost,
+			path:                "/token/yellow",
+			contentType:         contentTypeFormEncoded,
+			wantStatus:          http.StatusUnauthorized,
+			wantError:           "invalid_client",
+			wantDescription:     "client authentication failed",
+			wantWWWAuthenticate: `Basic realm="fake-token-endpoint"`,
+		},
+		{
+			name:            "invalid request scenario",
+			method:          http.MethodPost,
+			path:            "/token/invalid-request",
+			contentType:     contentTypeFormEncoded,
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_request",
+			wantDescription: "invalid token exchange request",
+		},
+		{
+			name:            "invalid target scenario",
+			method:          http.MethodPost,
+			path:            "/token/invalid-target",
+			contentType:     contentTypeFormEncoded,
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_target",
+			wantDescription: "resource or audience is invalid",
+		},
+		{
+			name:            "invalid grant scenario",
+			method:          http.MethodPost,
+			path:            "/token/invalid-grant",
+			contentType:     contentTypeFormEncoded,
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_grant",
+			wantDescription: "subject token is invalid",
+		},
+		{
+			name:            "expired subject token scenario",
+			method:          http.MethodPost,
+			path:            "/token/expired-subject-token",
+			contentType:     contentTypeFormEncoded,
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_grant",
+			wantDescription: "subject_token_expired",
+		},
+		{
+			name:                "unauthorized scenario",
+			method:              http.MethodPost,
+			path:                "/token/unauthorized",
+			contentType:         contentTypeFormEncoded,
+			basicAuth:           true,
+			wantStatus:          http.StatusUnauthorized,
+			wantError:           "invalid_client",
+			wantDescription:     "client rejected",
+			wantWWWAuthenticate: `Bearer realm="issuer", error="invalid_token"`,
+		},
+		{
+			name:            "forbidden scenario",
+			method:          http.MethodPost,
+			path:            "/token/forbidden",
+			contentType:     contentTypeFormEncoded,
+			basicAuth:       true,
+			wantStatus:      http.StatusForbidden,
+			wantError:       "invalid_target",
+			wantDescription: "target rejected",
+		},
+		{
+			name:           "server error scenario",
+			method:         http.MethodPost,
+			path:           "/token/server-error",
+			contentType:    contentTypeFormEncoded,
+			basicAuth:      true,
+			wantStatus:     http.StatusInternalServerError,
+			wantJSONFields: map[string]string{"error": "temporarily_unavailable"},
+		},
+		{
+			name:        "malformed success response",
+			method:      http.MethodPost,
+			path:        "/token/malformed",
+			contentType: contentTypeFormEncoded,
+			basicAuth:   true,
+			wantStatus:  http.StatusOK,
+			wantBody:    `{"access_token":`,
+		},
+		{
+			name:           "missing access token response",
+			method:         http.MethodPost,
+			path:           "/token/missing-access-token",
+			contentType:    contentTypeFormEncoded,
+			basicAuth:      true,
+			wantStatus:     http.StatusOK,
+			wantJSONFields: map[string]string{"issued_token_type": accessTokenType, "token_type": "Bearer"},
+		},
+		{
+			name:           "wrong token type response",
+			method:         http.MethodPost,
+			path:           "/token/wrong-token-type",
+			contentType:    contentTypeFormEncoded,
+			basicAuth:      true,
+			wantStatus:     http.StatusOK,
+			wantJSONFields: map[string]string{"issued_token_type": accessTokenType, "token_type": "N_A"},
+		},
+		{
+			name:           "wrong issued token type response",
+			method:         http.MethodPost,
+			path:           "/token/wrong-issued-token-type",
+			contentType:    contentTypeFormEncoded,
+			basicAuth:      true,
+			wantStatus:     http.StatusOK,
+			wantJSONFields: map[string]string{"issued_token_type": "urn:ietf:params:oauth:token-type:refresh_token", "token_type": "Bearer"},
+		},
+		{
+			name:            "unknown scenario",
+			method:          http.MethodPost,
+			path:            "/token/not-real",
+			contentType:     contentTypeFormEncoded,
+			basicAuth:       true,
+			wantStatus:      http.StatusBadRequest,
+			wantError:       "invalid_request",
+			wantDescription: "unknown fake token scenario",
+		},
+	}
+
+	handler := tokenHandler("e2e-client", "e2e-secret")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			form := baseTokenForm()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(form.Encode()))
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			if tc.basicAuth {
+				req.SetBasicAuth("e2e-client", "e2e-secret")
+			}
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if tc.wantWWWAuthenticate != "" && rec.Header().Get("WWW-Authenticate") != tc.wantWWWAuthenticate {
+				t.Fatalf("WWW-Authenticate = %q, want %q", rec.Header().Get("WWW-Authenticate"), tc.wantWWWAuthenticate)
+			}
+			if tc.wantBody != "" {
+				if got := strings.TrimSpace(rec.Body.String()); got != tc.wantBody {
+					t.Fatalf("body = %q, want %q", got, tc.wantBody)
+				}
+				return
+			}
+
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+			}
+			if tc.wantError != "" && body["error"] != tc.wantError {
+				t.Fatalf("error = %q, want %q", body["error"], tc.wantError)
+			}
+			if tc.wantDescription != "" && body["error_description"] != tc.wantDescription {
+				t.Fatalf("error_description = %q, want %q", body["error_description"], tc.wantDescription)
+			}
+			for key, want := range tc.wantJSONFields {
+				if got := body[key]; got != want {
+					t.Fatalf("%s = %q, want %q", key, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFakeTokenEndpointHealthAndEnvDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	fakeTokenEndpointHandler("e2e-client", "e2e-secret").ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("health status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	t.Setenv("FAKE_TOKEN_ENDPOINT_TEST", " configured ")
+	if got := envDefault("FAKE_TOKEN_ENDPOINT_TEST", "fallback"); got != "configured" {
+		t.Fatalf("envDefault configured = %q, want configured", got)
+	}
+	t.Setenv("FAKE_TOKEN_ENDPOINT_TEST", " ")
+	if got := envDefault("FAKE_TOKEN_ENDPOINT_TEST", "fallback"); got != "fallback" {
+		t.Fatalf("envDefault fallback = %q, want fallback", got)
+	}
+}
+
 func TestFakeTokenEndpointRecordsServerSpanUnderIncomingTrace(t *testing.T) {
 	previousProvider := otel.GetTracerProvider()
 	previousPropagator := otel.GetTextMapPropagator()
@@ -125,6 +378,14 @@ func TestFakeTokenEndpointRecordsServerSpanUnderIncomingTrace(t *testing.T) {
 	if got := span.Parent().SpanID().String(); got != "00f067aa0ba902b7" {
 		t.Fatalf("parent span ID = %s, want incoming parent", got)
 	}
+}
+
+func baseTokenForm() url.Values {
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
+	form.Set("subject_token", "incoming-yellow")
+	form.Set("subject_token_type", accessTokenType)
+	return form
 }
 
 func decodeUnsignedJWT(t *testing.T, token string) (map[string]any, map[string]any) {
