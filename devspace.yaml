@@ -248,16 +248,100 @@ commands:
     section: build
     command: |
       echo "I: target=compile"
-      devspace run generate $@
+      go mod download
       go build -v ./cmd/...
+
+  build:
+    description: "Build all commands"
+    section: build
+    command: |
+      echo "I: target=build"
+      go mod download
+      go build ./cmd/...
 
   test:
     description: "Run all tests"
     section: build
     command: |
       echo "I: target=test"
-      devspace run build $@
+      go mod download
+      go build ./cmd/...
       go test -v ./...
+
+  coverage:
+    description: "Run Go tests with coverage"
+    section: build
+    command: |
+      echo "I: target=coverage"
+      go test -coverprofile=coverage.out ./...
+
+  actionlint:
+    description: "Lint GitHub Actions workflows"
+    section: build
+    command: |
+      echo "I: target=actionlint"
+      go run github.com/rhysd/actionlint/cmd/actionlint@latest
+
+  lint:
+    description: "Run repository lint checks"
+    section: build
+    command: |
+      echo "I: target=lint"
+      pre-commit run --all-files
+      go run github.com/rhysd/actionlint/cmd/actionlint@latest
+
+  helm-verify:
+    description: "Verify Helm chart dependencies, lint, and rendering"
+    section: build
+    command: |
+      echo "I: target=helm-verify"
+      helm dependency build charts/ext-authz-token-exchange
+      helm lint charts/ext-authz-token-exchange
+      helm lint charts/ext-authz-token-exchange-e2e
+      helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
+        --namespace ext-authz-token-exchange \
+        > /tmp/ext-authz-token-exchange-rendered.yaml
+      helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e \
+        --namespace ext-authz-token-exchange-e2e \
+        > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
+
+  verify:
+    description: "Run CI-equivalent local validation without a Kubernetes cluster"
+    section: build
+    command: |
+      echo "I: target=verify"
+      echo "I: target=lint"
+      pre-commit run --all-files
+      go run github.com/rhysd/actionlint/cmd/actionlint@latest
+      echo "I: target=test"
+      go mod download
+      go build ./cmd/...
+      go test -v ./...
+      echo "I: target=coverage"
+      go test -coverprofile=coverage.out ./...
+      echo "I: target=build"
+      go mod download
+      go build ./cmd/...
+      echo "I: target=helm-verify"
+      helm dependency build charts/ext-authz-token-exchange
+      helm lint charts/ext-authz-token-exchange
+      helm lint charts/ext-authz-token-exchange-e2e
+      helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
+        --namespace ext-authz-token-exchange \
+        > /tmp/ext-authz-token-exchange-rendered.yaml
+      helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e \
+        --namespace ext-authz-token-exchange-e2e \
+        > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
+
+  smoke:
+    description: "Deploy local-test and run Kubernetes e2e smoke tests"
+    section: build
+    command: |
+      echo "I: target=smoke"
+      devspace deploy -p local-test
+      E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.int.kube}" \
+      E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
+      go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
 
   test-e2e:
     description: "Run Kubernetes e2e tests against the local-test deployment"
