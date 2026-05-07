@@ -4,6 +4,81 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "image": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["repository"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string"
+        }
+      }
+    },
+    "deployments": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "deploymentAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "serviceAccountName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "securityContext": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "livenessProbe": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "readinessProbe": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "ports": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
     "oauth": {
       "type": "object",
       "additionalProperties": true,
@@ -130,9 +205,6 @@
           "type": "object"
         }
       }
-    },
-    "service": {
-      "type": "object"
     }
   }
 }

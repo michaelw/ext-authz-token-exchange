@@ -88,7 +88,7 @@ RUN --mount=type=cache,target=/go-cache \
 # Run stage
 FROM gcr.io/distroless/static-debian12 AS prod
 ARG WORKSPACE
-USER nobody
+USER 65532:65532
 
 WORKDIR /app
 COPY --from=build ${WORKSPACE}/bin/ext-authz-token-exchange-service /app/ext-authz-token-exchange-service
@@ -100,7 +100,7 @@ ENTRYPOINT ["/app/ext-authz-token-exchange-service"]
 # E2E fake token endpoint image. Keep this separate from production.
 FROM gcr.io/distroless/static-debian12 AS fake-token-endpoint
 ARG WORKSPACE
-USER nobody
+USER 65532:65532
 
 WORKDIR /app
 COPY --from=build ${WORKSPACE}/bin/fake-token-endpoint /app/fake-token-endpoint

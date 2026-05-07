@@ -197,85 +197,35 @@ func uninstallHelmRelease(ctx context.Context, releaseName, namespace string) {
 	}
 }
 
+func imageValues(image string) string {
+	if repo, digest, ok := strings.Cut(image, "@"); ok {
+		return fmt.Sprintf("  repository: %q\n  digest: %q", repo, digest)
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon > lastSlash {
+		return fmt.Sprintf("  repository: %q\n  tag: %q", image[:lastColon], image[lastColon+1:])
+	}
+	return fmt.Sprintf("  repository: %q\n  tag: %q", image, "latest")
+}
+
 func pluginValues() string {
 	defaultEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/token/success", tokenEndpointName, env.demoNamespace, tokenEndpointPort)
-	return fmt.Sprintf(`service:
-  serviceAccountName: ext-authz-token-exchange
-  containers:
-    - name: ext-authz-token-exchange-service
-      image: %q
-      imagePullPolicy: IfNotPresent
-      env:
-        - name: GRPC_PORT
-          value: "3001"
-        - name: OAUTH_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: %q
-              key: client_id
-        - name: OAUTH_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: %q
-              key: client_secret
-        - name: TOKEN_ENDPOINT_AUTH_METHOD
-          value: "client_secret_basic"
-        - name: TOKEN_EXCHANGE_GRANT_TYPE
-          value: "urn:ietf:params:oauth:grant-type:token-exchange"
-        - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
-          value: "urn:ietf:params:oauth:token-type:access_token"
-        - name: CONFIGMAP_LABEL_SELECTOR
-          value: "%s=%s"
-        - name: CONFIGMAP_NAMESPACE_SELECTOR
-          value: %q
-        - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
-          value: "false"
-        - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
-          value: "true"
-        - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
-          value: %q
-        - name: TOKEN_ENDPOINT_ALLOWLIST
-          value: ""
-        - name: TOKEN_EXCHANGE_BEARER_REALM
-          value: %q
-        - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
-          value: "false"
-        - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
-          value: "false"
-        # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
-        - name: TOKEN_EXCHANGE_INSECURE_LOG_TOKENS
-          value: "true"
-        - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
-          value: "2s"
-        - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
-          value: "1s"
-        - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
-          value: "1s"
-        - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
-          value: "2s"
-        - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
-          value: "30s"
-        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
-          value: "10"
-        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
-          value: "5"
-      ports:
-        - name: grpc-authz
-          containerPort: 3001
-      resources:
-        requests:
-          cpu: 50m
-          memory: 64Mi
-        limits:
-          cpu: 500m
-          memory: 256Mi
-  service:
-    type: ClusterIP
-    ports:
-      - name: grpc-api
-        port: 3001
-        containerPort: grpc-authz
-        appProtocol: grpc
+	return fmt.Sprintf(`image:
+%s
+env:
+  TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
+  TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: %q
+  TOKEN_EXCHANGE_BEARER_REALM: %q
+  # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
+  TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
 oauth:
   createSecret: true
   secretName: %q
@@ -285,8 +235,7 @@ oauth:
     name: %q
     clientIDKey: client_id
     clientSecretKey: client_secret
-`, env.pluginImage, oauthSecretName, oauthSecretName, policyLabelKey, policyLabelValue,
-		policyNamespaceSelector, defaultEndpoint, defaultBearerRealm,
+`, imageValues(env.pluginImage), defaultEndpoint, defaultBearerRealm,
 		oauthSecretName, env.oauthClientID, env.oauthClientSecret, oauthSecretName)
 }
 
@@ -457,7 +406,7 @@ func setPluginEnv(ctx context.Context, name, value string) {
 		}
 		for i := range deployment.Spec.Template.Spec.Containers {
 			container := &deployment.Spec.Template.Spec.Containers[i]
-			if container.Name != "ext-authz-token-exchange-service" {
+			if container.Name != "ext-authz-token-exchange" {
 				continue
 			}
 			for j := range container.Env {
@@ -471,7 +420,7 @@ func setPluginEnv(ctx context.Context, name, value string) {
 			_, err = env.kube.AppsV1().Deployments(env.namespace).Update(ctx, deployment, metav1.UpdateOptions{})
 			return err
 		}
-		return fmt.Errorf("deployment %s/%s does not contain ext-authz-token-exchange-service", env.namespace, env.releaseName)
+		return fmt.Errorf("deployment %s/%s does not contain ext-authz-token-exchange", env.namespace, env.releaseName)
 	})).To(Succeed())
 	waitForDeployment(ctx, env.namespace, env.releaseName)
 }
@@ -480,9 +429,28 @@ func waitForDeployment(ctx context.Context, namespace, name string) {
 	Eventually(func(g Gomega) {
 		deployment, err := env.kube.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
+		replicas := int32(1)
+		if deployment.Spec.Replicas != nil {
+			replicas = *deployment.Spec.Replicas
+		}
 		g.Expect(deployment.Status.ObservedGeneration).To(BeNumerically(">=", deployment.Generation))
-		g.Expect(deployment.Status.AvailableReplicas).To(BeNumerically(">=", 1))
-		g.Expect(deployment.Status.UpdatedReplicas).To(Equal(*deployment.Spec.Replicas))
+		g.Expect(deployment.Status.UpdatedReplicas).To(Equal(replicas))
+		g.Expect(deployment.Status.ReadyReplicas).To(Equal(replicas))
+		g.Expect(deployment.Status.AvailableReplicas).To(Equal(replicas))
+
+		selector := metav1.FormatLabelSelector(deployment.Spec.Selector)
+		pods, err := env.kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(pods.Items).To(HaveLen(int(replicas)))
+		for i := range pods.Items {
+			pod := pods.Items[i]
+			g.Expect(pod.DeletionTimestamp).To(BeNil())
+			g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
+			g.Expect(pod.Status.ContainerStatuses).NotTo(BeEmpty())
+			for _, status := range pod.Status.ContainerStatuses {
+				g.Expect(status.Ready).To(BeTrue())
+			}
+		}
 	}, 2*time.Minute, 2*time.Second).Should(Succeed())
 }
 
@@ -565,7 +533,7 @@ func tokenEndpointLogs(ctx context.Context) string {
 
 func pluginLogs(ctx context.Context) string {
 	pods, err := env.kube.CoreV1().Pods(env.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/component=" + env.releaseName,
+		LabelSelector: "app.kubernetes.io/instance=" + env.releaseName + ",app.kubernetes.io/name=ext-authz-token-exchange",
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return podLogs(ctx, pods.Items)

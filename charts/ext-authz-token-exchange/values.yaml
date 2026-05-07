@@ -1,83 +1,98 @@
+image:
+  repository: ghcr.io/michaelw/ext-authz-token-exchange
+  # set by Chart.yaml appVersion
+  # tag: latest
+  # use locally built images if available
+  pullPolicy: IfNotPresent
+
+deployments:
+  default:
+    enabled: true
+
+deploymentAnnotations:
+  reloader.stakater.com/auto: "true"
+
+serviceAccountName: ext-authz-token-exchange
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+env:
+  OAUTH_CLIENT_ID:
+    valueFrom:
+      secretKeyRef:
+        name: ext-authz-token-exchange-oauth
+        key: client_id
+  OAUTH_CLIENT_SECRET:
+    valueFrom:
+      secretKeyRef:
+        name: ext-authz-token-exchange-oauth
+        key: client_secret
+  TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED: "false"
+  # CONFIGMAP_LABEL_SELECTOR: ext-authz-token-exchange.magneticflux.net/enabled=true
+  # CONFIGMAP_NAMESPACE_SELECTOR: ext-authz-token-exchange.magneticflux.net/policy=enabled
+  # GRPC_PORT: "3001"
+  # TOKEN_ENDPOINT_ALLOWLIST: ""
+  # TOKEN_ENDPOINT_AUTH_METHOD: client_secret_basic
+  # TOKEN_ENDPOINT_DIAL_TIMEOUT: 3s
+  # TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT: 90s
+  # TOKEN_ENDPOINT_MAX_IDLE_CONNS: "100"
+  # TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST: "10"
+  # TOKEN_ENDPOINT_REQUEST_TIMEOUT: 5s
+  # TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT: 5s
+  # TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT: 3s
+  # TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "false"
+  # TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS: "false"
+  # TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange
+  # TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: ""
+  # TOKEN_EXCHANGE_ERROR_PASSTHROUGH: "false"
+  # TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
+  # TOKEN_EXCHANGE_GRANT_TYPE: urn:ietf:params:oauth:grant-type:token-exchange
+  # TOKEN_EXCHANGE_REQUIRE_ISSUED_TOKEN_TYPE: "true"
+  # TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
+
+ports:
+  grpc-authz:
+    containerPort: 3001
+
+livenessProbe:
+  grpc:
+    port: 3001
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  grpc:
+    port: 3001
+  initialDelaySeconds: 1
+  periodSeconds: 2
+  failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 128Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+
 service:
-  serviceAccountName: ext-authz-token-exchange
-  annotations:
-    eloader.stakater.com/auto: "true"
-  containers:
-    - name: ext-authz-token-exchange-service
-      image: ghcr.io/michaelw/ext-authz-token-exchange
-      # use locally built images if available
-      imagePullPolicy: IfNotPresent
-      env:
-        - name: GRPC_PORT
-          value: "3001"
-        - name: OAUTH_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: ext-authz-token-exchange-oauth
-              key: client_id
-        - name: OAUTH_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: ext-authz-token-exchange-oauth
-              key: client_secret
-        - name: TOKEN_ENDPOINT_AUTH_METHOD
-          value: "client_secret_basic"
-        - name: TOKEN_EXCHANGE_GRANT_TYPE
-          value: "urn:ietf:params:oauth:grant-type:token-exchange"
-        - name: TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE
-          value: "urn:ietf:params:oauth:token-type:access_token"
-        - name: CONFIGMAP_LABEL_SELECTOR
-          value: "ext-authz-token-exchange.magneticflux.net/enabled=true"
-        - name: CONFIGMAP_NAMESPACE_SELECTOR
-          value: "ext-authz-token-exchange.magneticflux.net/policy=enabled"
-        - name: TOKEN_EXCHANGE_ERROR_PASSTHROUGH
-          value: "false"
-        - name: TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT
-          value: "false"
-        - name: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT
-          value: ""
-        - name: TOKEN_ENDPOINT_ALLOWLIST
-          value: ""
-        - name: TOKEN_EXCHANGE_BEARER_REALM
-          value: "ext-authz-token-exchange"
-        - name: TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS
-          value: "false"
-        - name: TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED
-          value: "false"
-        - name: TOKEN_ENDPOINT_REQUEST_TIMEOUT
-          value: "5s"
-        - name: TOKEN_ENDPOINT_DIAL_TIMEOUT
-          value: "3s"
-        - name: TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT
-          value: "3s"
-        - name: TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT
-          value: "5s"
-        - name: TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT
-          value: "90s"
-        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS
-          value: "100"
-        - name: TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST
-          value: "10"
-      ports:
-        - name: grpc-authz
-          containerPort: 3001
-      resources:
-        requests:
-          cpu: 200m
-          memory: 128Mi
-        limits:
-          cpu: 1000m
-          memory: 1024Mi
-  volumes:
-    - name: tmp-dir
-      emptyDir: {}
-  service:
-    type: LoadBalancer
-    ports:
-      - name: grpc-api
-        port: 3001
-        containerPort: grpc-authz
-        appProtocol: grpc
+  type: ClusterIP
+  ports:
+    grpc-api:
+      port: 3001
+      targetPort: grpc-authz
+      appProtocol: grpc
 
 oauth:
   createSecret: false
