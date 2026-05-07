@@ -18,30 +18,22 @@
 {{- fail "oauth.existingSecret.clientSecretKey is required" }}
 {{- end }}
 {{- $oauthSecretName := include "ext-authz-token-exchange.oauthSecretName" . }}
-{{- $container := index .Values.service.containers 0 }}
-{{- $clientIDSecretName := "" }}
-{{- $clientIDSecretKey := "" }}
-{{- $clientSecretSecretName := "" }}
-{{- $clientSecretSecretKey := "" }}
-{{- range $env := $container.env }}
-{{- if eq $env.name "OAUTH_CLIENT_ID" }}
-{{- $clientIDSecretName = $env.valueFrom.secretKeyRef.name }}
-{{- $clientIDSecretKey = $env.valueFrom.secretKeyRef.key }}
-{{- end }}
-{{- if eq $env.name "OAUTH_CLIENT_SECRET" }}
-{{- $clientSecretSecretName = $env.valueFrom.secretKeyRef.name }}
-{{- $clientSecretSecretKey = $env.valueFrom.secretKeyRef.key }}
-{{- end }}
-{{- end }}
+{{- $env := .Values.env | default dict }}
+{{- $clientIDSecret := dig "OAUTH_CLIENT_ID" "valueFrom" "secretKeyRef" (dict) $env }}
+{{- $clientSecretSecret := dig "OAUTH_CLIENT_SECRET" "valueFrom" "secretKeyRef" (dict) $env }}
+{{- $clientIDSecretName := $clientIDSecret.name | default "" }}
+{{- $clientIDSecretKey := $clientIDSecret.key | default "" }}
+{{- $clientSecretSecretName := $clientSecretSecret.name | default "" }}
+{{- $clientSecretSecretKey := $clientSecretSecret.key | default "" }}
 {{- if ne $clientIDSecretName $oauthSecretName }}
-{{- fail "service.containers[0].env OAUTH_CLIENT_ID secretKeyRef.name must match the selected OAuth Secret name" }}
+{{- fail "env.OAUTH_CLIENT_ID secretKeyRef.name must match the selected OAuth Secret name" }}
 {{- end }}
 {{- if ne $clientIDSecretKey .Values.oauth.existingSecret.clientIDKey }}
-{{- fail "service.containers[0].env OAUTH_CLIENT_ID secretKeyRef.key must match oauth.existingSecret.clientIDKey" }}
+{{- fail "env.OAUTH_CLIENT_ID secretKeyRef.key must match oauth.existingSecret.clientIDKey" }}
 {{- end }}
 {{- if ne $clientSecretSecretName $oauthSecretName }}
-{{- fail "service.containers[0].env OAUTH_CLIENT_SECRET secretKeyRef.name must match the selected OAuth Secret name" }}
+{{- fail "env.OAUTH_CLIENT_SECRET secretKeyRef.name must match the selected OAuth Secret name" }}
 {{- end }}
 {{- if ne $clientSecretSecretKey .Values.oauth.existingSecret.clientSecretKey }}
-{{- fail "service.containers[0].env OAUTH_CLIENT_SECRET secretKeyRef.key must match oauth.existingSecret.clientSecretKey" }}
+{{- fail "env.OAUTH_CLIENT_SECRET secretKeyRef.key must match oauth.existingSecret.clientSecretKey" }}
 {{- end }}

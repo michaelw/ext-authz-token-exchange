@@ -49,10 +49,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Name of the Kubernetes Service rendered by the component-chart dependency.
+Name of the Kubernetes Service rendered by common.itsumi.
 */}}
 {{- define "ext-authz-token-exchange.serviceName" -}}
-{{- default .Release.Name .Values.service.service.name | trunc 63 | trimSuffix "-" }}
+{{- include "ext-authz-token-exchange.fullname" . }}
 {{- end }}
 
 {{/*

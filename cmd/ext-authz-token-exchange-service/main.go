@@ -9,6 +9,8 @@ import (
 	"syscall"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -51,10 +53,14 @@ func main() {
 		grpc.UnaryInterceptor(server.LoggingInterceptor()),
 	)
 	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchange.NewClient(cfg, nil)))
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(grpcServer, healthServer)
 	reflection.Register(grpcServer)
 
 	go func() {
 		<-ctx.Done()
+		healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
 		grpcServer.GracefulStop()
 	}()
 

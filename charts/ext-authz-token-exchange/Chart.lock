@@ -1,6 +1,6 @@
 dependencies:
-- name: component-chart
-  repository: https://charts.devspace.sh
-  version: 0.9.1
-digest: sha256:668d35855880a4ed665efaa987c7f03d36df8e14cc3ae80333d44bf9442ce2ab
-generated: "2026-05-04T20:14:42.724771-05:00"
+- name: common.itsumi
+  repository: oci://ghcr.io/michaelw
+  version: 0.5.1
+digest: sha256:14acf0958fd76a0dc2ac74a5d840bc8740e9075476f6ad7ec38e64c5bb8e6c96
+generated: "2026-05-06T13:20:00.783815-05:00"
