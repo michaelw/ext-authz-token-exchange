@@ -21,6 +21,19 @@
       "platformAutomerge": true
     },
     {
+      "description": "Automerge Dockerfile patch updates after required CI passes",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "merge-commit",
+      "platformAutomerge": true
+    },
+    {
       "matchManagers": [
         "gomod"
       ],
