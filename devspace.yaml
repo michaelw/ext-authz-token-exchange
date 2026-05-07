@@ -25,6 +25,11 @@ vars:
     value: "dev-${DEVSPACE_USER}-${DEVSPACE_TIMESTAMP}"
   PROD_TAG:
     value: "latest" # XXX versioning scheme for production images
+  ISSUER_PROFILE:
+    source: command
+    command: ./scripts/devspace-detect-issuer.sh ${DEVSPACE_PROFILE}
+    default: fake
+    alwaysResolve: true
 
 profiles:
   - name: with-infra
@@ -60,12 +65,97 @@ profiles:
           ensure_pull_secrets --all
           build_images prod fake-token-endpoint
           helm dependency build charts/ext-authz-token-exchange
+          kubectl create namespace ext-authz-token-exchange --dry-run=client -o yaml | kubectl apply -f -
           for ns in service-yellow service-red service-blue; do
             kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
             kubectl label namespace "$ns" ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
           done
           create_deployments --all
-
+  - name: with-fake-issuer
+    activation:
+      - vars:
+          ISSUER_PROFILE: fake
+    merge:
+      deployments:
+        ext-authz-token-exchange:
+          helm:
+            values:
+              env:
+                TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
+                TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
+                TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
+                # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
+                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+              oauth:
+                createSecret: true
+                secretName: ext-authz-token-exchange-oauth
+                clientID: e2e-client
+                clientSecret: e2e-secret
+                existingSecret:
+                  name: ext-authz-token-exchange-oauth
+                  clientIDKey: client_id
+                  clientSecretKey: client_secret
+  - name: with-keycloak
+    activation:
+      - vars:
+          ISSUER_PROFILE: keycloak
+    merge:
+      deployments:
+        ext-authz-token-exchange:
+          helm:
+            values:
+              env:
+                TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
+                TOKEN_EXCHANGE_BEARER_REALM: token-exchange-e2e
+                TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+              oauth:
+                createSecret: false
+                existingSecret:
+                  name: ext-authz-token-exchange-keycloak-oauth
+                  clientIDKey: client_id
+                  clientSecretKey: client_secret
+        ext-authz-token-exchange-e2e:
+          namespace: ext-authz-token-exchange-e2e
+          helm:
+            releaseName: ext-authz-token-exchange-e2e
+            chart:
+              name: ./charts/ext-authz-token-exchange-e2e
+            values:
+              host: httpbin.int.kube
+              namespacePrefix: service
+              systemNamespace: ext-authz-token-exchange-e2e
+              fakeTokenEndpoint:
+                image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint
+              teams:
+                - color: yellow
+                  scope: profile
+                  pathPrefix: /anything/keycloak-audience
+                  tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                  resources: []
+                  audiences:
+                    - tx-audience-client
+                  scenarios:
+                    - name: keycloak-resource
+                      scope: profile
+                      pathPrefix: /anything/keycloak-resource
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources:
+                        - https://httpbin.int.kube/anything/keycloak-resource
+                      audiences:
+                        - tx-audience-client
+        keycloak:
+          namespace: ext-authz-token-exchange-e2e
+          helm:
+            releaseName: keycloak
+            chart:
+              name: ./charts/keycloak
+            values:
+              namespace: ext-authz-token-exchange-e2e
+              pluginNamespace: ext-authz-token-exchange
+              keycloak:
+                externalHost: keycloak.int.kube
+                externalURL: https://keycloak.int.kube
 # Images to build and push
 images:
   # Development image - not pushed to production registry
@@ -115,11 +205,6 @@ deployments:
           tag: ${runtime.images.prod.tag}
         env:
           GRPC_LOG_HEALTH_CHECKS: "false"
-          TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
-          TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
-          TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
-          # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
-          TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
           OTEL_TRACES_EXPORTER: otlp
           OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
           OTEL_SERVICE_NAME: ext-authz-token-exchange
@@ -131,15 +216,6 @@ deployments:
           limits:
             cpu: 500m
             memory: 256Mi
-        oauth:
-          createSecret: true
-          secretName: ext-authz-token-exchange-oauth
-          clientID: e2e-client
-          clientSecret: e2e-secret
-          existingSecret:
-            name: ext-authz-token-exchange-oauth
-            clientIDKey: client_id
-            clientSecretKey: client_secret
 
 # Development configuration
 dev:
@@ -349,17 +425,21 @@ commands:
     command: |
       echo "I: target=smoke"
       devspace deploy -p local-test
-      E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.int.kube}" \
-      E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
-      go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
+      devspace run test-e2e $@
 
   test-e2e:
-    description: "Run Kubernetes e2e tests against the local-test deployment"
+    description: "Run Kubernetes e2e tests against the detected local-test issuer"
     section: build
     command: |
       echo "I: target=test-e2e"
+      issuer="${E2E_ISSUER:-}"
+      if [ -z "$issuer" ]; then
+        issuer="$(./scripts/devspace-detect-issuer.sh)"
+      fi
+      echo "I: issuer=$issuer"
       E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.int.kube}" \
       E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
+      E2E_ISSUER="$issuer" \
       go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
 
   demo-dashboard:

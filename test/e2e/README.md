@@ -28,9 +28,49 @@ devspace deploy -p local-test
 devspace run test-e2e
 ```
 
+To explicitly switch a previously deployed Keycloak stack back to the fake
+issuer, run:
+
+```sh
+devspace deploy -p local-test -p with-fake-issuer
+devspace run test-e2e
+```
+
+To deploy the same local demo stack with a real Keycloak RFC 8693 issuer, add
+the opt-in Keycloak profile:
+
+```sh
+devspace deploy -p local-test -p with-keycloak
+devspace run test-e2e
+```
+
+If the cluster does not already provide Gateway, DNS, and certificate
+infrastructure for `*.int.kube`, include the infra profile:
+
+```sh
+devspace deploy -p with-infra -p local-test -p with-keycloak
+devspace run test-e2e
+```
+
+The `with-keycloak` profile deploys Keycloak as a separate Helm release rather
+than making the e2e chart an umbrella chart. The Keycloak release owns the realm
+import and creates the plugin OAuth client Secret in the plugin namespace. The
+plugin chart consumes that Secret through `oauth.existingSecret`, so the
+Keycloak client ID and secret are not embedded directly in plugin environment
+values.
+
 `devspace run test-e2e` uses the Ginkgo runner, so repeated runs are not served
 from the Go test cache. Pass Ginkgo flags directly, for example
 `devspace run test-e2e -v`.
+
+`devspace run test-e2e` detects the deployed plugin token endpoint and runs the
+matching issuer specs. The deployed issuer profile also self-holds for later
+DevSpace commands. Use `devspace deploy -p local-test -p with-keycloak` to
+switch to Keycloak, and `devspace deploy -p local-test -p with-fake-issuer` to
+switch back to fake. In the Keycloak mode, the specs fetch a subject token from
+`tx-subject-client`, exchange it through the plugin as `tx-exchanger-client`,
+and verify that the upstream bearer token is signed by Keycloak for
+`tx-audience-client`.
 
 The `local-test` profile builds the plugin and fake token endpoint images, then
 deploys the plugin chart as release `ext-authz-token-exchange` and the demo/e2e
@@ -74,8 +114,10 @@ embedded static assets. It is not copied into the production `prod` image; that
 image intentionally copies only `ext-authz-token-exchange-service`.
 
 The dashboard reads plugin logs from `DEMO_PLUGIN_NAMESPACE` and
-`DEMO_PLUGIN_DEPLOYMENT`, which default to `ext-authz-token-exchange`. It reads
-fake issuer logs from `DEMO_SYSTEM_NAMESPACE`, which defaults to
+`DEMO_PLUGIN_DEPLOYMENT`, which default to `ext-authz-token-exchange`. It
+detects the deployed plugin token endpoint, selects the matching fake or
+Keycloak scenario file, and labels the selected issuer in the header and logs
+panel. It reads issuer logs from `DEMO_SYSTEM_NAMESPACE`, which defaults to
 `ext-authz-token-exchange-e2e`.
 
 For a recorded demo, a useful four-terminal layout is:
@@ -87,7 +129,7 @@ go run ./cmd/demo-scenario all
 # 2. Central plugin logs.
 kubectl logs -f -n ext-authz-token-exchange deploy/ext-authz-token-exchange
 
-# 3. Fake token endpoint logs.
+# 3. Issuer logs. Use deploy/keycloak for the with-keycloak profile.
 kubectl logs -f -n ext-authz-token-exchange-e2e deploy/fake-token-endpoint
 
 # 4. App-owned policy watch across namespaces.
@@ -256,6 +298,43 @@ Useful overrides:
 - `E2E_SKIP_CLEANUP=true`: Keep test namespaces for inspection.
 - `E2E_SKIP_INSTALL=true`: Test an already deployed local-test chart release.
 - `E2E_INSECURE_SKIP_VERIFY=false`: Enforce TLS verification for the gateway URL.
+- `E2E_ISSUER=keycloak`: Run the Keycloak-gated e2e specs instead of the fake issuer specs.
+- `E2E_KEYCLOAK_BASE_URL`: External Keycloak base URL. Defaults to `https://keycloak.int.kube`.
+- `E2E_KEYCLOAK_ISSUER`: Expected issuer claim for exchanged tokens. Defaults to `https://keycloak.int.kube/realms/token-exchange-e2e`.
+
+## Manual Keycloak Demo
+
+After `devspace deploy -p local-test -p with-keycloak`, fetch a fresh subject
+token through the local Gateway route:
+
+```sh
+export DEMO_BEARER_TOKEN="$(
+  curl -fsS https://keycloak.int.kube/realms/token-exchange-e2e/protocol/openid-connect/token \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    -d grant_type=password \
+    -d client_id=tx-subject-client \
+    -d client_secret=tx-subject-secret \
+    -d username=token-user \
+    -d password=token-user-password \
+    -d scope=profile |
+  jq -r .access_token
+)"
+```
+
+Run the Keycloak-focused demo scenarios:
+
+```sh
+devspace run demo-dashboard
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-audience
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-resource
+```
+
+The profile uses these local-only clients:
+
+- `tx-subject-client`: issues inbound subject tokens.
+- `tx-exchanger-client`: confidential client used by the plugin.
+- `tx-audience-client`: requested audience for exchanged tokens.
 
 The suite skips automatically when `E2E_BASE_URL` is not set, so `go test ./...`
 remains safe for ordinary unit-test runs.

@@ -76,8 +76,17 @@ devspace deploy -p with-infra
 # plugin plus demo/e2e resources, assumes infrastructure exists
 devspace deploy -p local-test
 
+# switch the local demo/e2e resources back to the fake issuer
+devspace deploy -p local-test -p with-fake-issuer
+
 # plugin plus demo/e2e resources and required infrastructure from scratch
 devspace deploy -p with-infra -p local-test
+
+# plugin plus demo/e2e resources and a real local Keycloak issuer
+devspace deploy -p local-test -p with-keycloak
+
+# same Keycloak stack, plus Gateway/DNS/certificate infrastructure
+devspace deploy -p with-infra -p local-test -p with-keycloak
 ```
 
 After deployment, run the e2e assertions against the already deployed releases:
@@ -85,6 +94,48 @@ After deployment, run the e2e assertions against the already deployed releases:
 ```bash
 devspace run test-e2e
 ```
+
+`devspace run test-e2e` inspects the deployed plugin token endpoint and runs the
+matching specs: fake-token scenarios for the default `local-test` stack, or
+Keycloak-gated scenarios for the `with-keycloak` stack. The active issuer profile
+also self-holds for later DevSpace commands: use
+`devspace deploy -p local-test -p with-keycloak` to switch to Keycloak, and
+`devspace deploy -p local-test -p with-fake-issuer` to switch back to fake.
+
+For manual Keycloak testing, fetch a subject token through the local Gateway
+route at `https://keycloak.int.kube`:
+
+```bash
+export DEMO_BEARER_TOKEN="$(
+  curl -fsS https://keycloak.int.kube/realms/token-exchange-e2e/protocol/openid-connect/token \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    -d grant_type=password \
+    -d client_id=tx-subject-client \
+    -d client_secret=tx-subject-secret \
+    -d username=token-user \
+    -d password=token-user-password \
+    -d scope=profile |
+  jq -r .access_token
+)"
+```
+
+Then run the Keycloak demo scenarios through the Gateway:
+
+```bash
+devspace run demo-dashboard
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-audience
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-resource
+```
+
+The dashboard also detects the deployed plugin token endpoint. It selects the
+fake or Keycloak scenario file automatically and shows the selected issuer in
+the header and logs panel.
+
+The `keycloak-audience` scenario should reach httpbin with an upstream
+Keycloak-issued bearer token. The `keycloak-resource` scenario keeps resource
+coverage separate from the audience-only baseline so provider behavior stays
+visible during manual testing.
 
 DevSpace updates the built image tags in Helm values during deployment, so this
 flow can use locally built images without publishing them to the default GHCR
