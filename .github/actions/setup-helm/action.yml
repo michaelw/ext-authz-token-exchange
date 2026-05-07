@@ -1,0 +1,16 @@
+name: Setup Helm
+description: Install the Helm version used by repository workflows.
+
+inputs:
+  version:
+    description: Helm version to install.
+    required: false
+    default: v4.1.1
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Helm
+      uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+      with:
+        version: ${{ inputs.version }}
