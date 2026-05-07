@@ -105,6 +105,7 @@ When using DevSpace:
 
 ```sh
 devspace run test
+devspace run coverage
 ```
 
 ### Test Style
@@ -125,8 +126,7 @@ The e2e suite expects local cluster infrastructure and a deployed demo stack.
 For the common local-test flow:
 
 ```sh
-devspace deploy -p local-test
-devspace run test-e2e
+devspace run smoke
 ```
 
 For a fresh cluster that also needs the supporting infrastructure:
@@ -175,11 +175,18 @@ test fixture changes.
 ## GitHub Actions CI/CD
 
 Pull requests run separate GitHub Actions checks for pre-commit hygiene, Go
-tests, Go coverage, command builds, and Helm validation. The closest local
-equivalents are:
+tests, Go coverage, command builds, and Helm validation. Run the local
+CI-equivalent validation before pushing:
+
+```sh
+devspace run verify
+```
+
+`verify` does not require a Kubernetes cluster. It runs these underlying checks:
 
 ```sh
 pre-commit run --all-files
+devspace run actionlint
 go test ./...
 go test -coverprofile=coverage.out ./...
 go build ./cmd/...
@@ -194,7 +201,10 @@ Go coverage is uploaded to Codecov and `coverage.out` remains available as a
 workflow artifact for local debugging or fallback. Rendered Helm manifests are
 uploaded as workflow artifacts. Cluster-backed e2e remains optional because it
 requires local-test Gateway/Istio infrastructure; use
-`devspace deploy -p local-test` and `devspace run test-e2e` for that smoke path.
+`devspace run smoke` for that smoke path.
+
+DevSpace is the repository command runner for local validation. If it becomes
+awkward for non-cluster checks, Taskfile is the next preferred option.
 
 Releases are managed by Release Please. Conventional commits merged to `main`
 update the release PR, changelog, `.release-please-manifest.json`, and the
