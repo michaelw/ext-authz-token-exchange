@@ -96,6 +96,11 @@ go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
 
+Pull requests upload Go coverage to Codecov from `coverage.out`. Configure the
+repository Actions secret `CODECOV_TOKEN` after authorizing Codecov for this
+repository. Coverage gates are intentionally not enforced yet; Codecov is used
+for reporting, PR review context, and history.
+
 When using DevSpace:
 
 ```sh
@@ -166,6 +171,58 @@ devspace purge -p with-infra -p local-test
 When changing chart templates, verify the affected deployment profile by
 rendering or deploying it. Keep production chart changes separate from e2e-only
 test fixture changes.
+
+## GitHub Actions CI/CD
+
+Pull requests run separate GitHub Actions checks for pre-commit hygiene, Go
+tests, Go coverage, command builds, and Helm validation. The closest local
+equivalents are:
+
+```sh
+pre-commit run --all-files
+go test ./...
+go test -coverprofile=coverage.out ./...
+go build ./cmd/...
+helm dependency build charts/ext-authz-token-exchange
+helm lint charts/ext-authz-token-exchange
+helm lint charts/ext-authz-token-exchange-e2e
+helm template ext-authz-token-exchange charts/ext-authz-token-exchange --namespace ext-authz-token-exchange
+helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e --namespace ext-authz-token-exchange-e2e
+```
+
+Go coverage is uploaded to Codecov and `coverage.out` remains available as a
+workflow artifact for local debugging or fallback. Rendered Helm manifests are
+uploaded as workflow artifacts. Cluster-backed e2e remains optional because it
+requires local-test Gateway/Istio infrastructure; use
+`devspace deploy -p local-test` and `devspace run test-e2e` for that smoke path.
+
+Releases are managed by Release Please. Conventional commits merged to `main`
+update the release PR, changelog, `.release-please-manifest.json`, and the
+production chart `version` and `appVersion`. The service images and chart share
+one version for now; split plugin and chart versions only after chart-only
+releases need their own compatibility policy.
+
+When a Release Please release is created, GitHub Actions publishes:
+
+- `ghcr.io/michaelw/ext-authz-token-exchange:<version>`
+- `ghcr.io/michaelw/ext-authz-token-exchange:sha-<commit>`
+- `ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:<version>`
+- `ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:sha-<commit>`
+- `oci://ghcr.io/michaelw/ext-authz-token-exchange:<version>`
+
+The chart package is also attached to the GitHub Release. The release workflow
+validates the published OCI chart with `helm pull`, `helm show chart`, and
+`helm show values`. A manual `Test Published Chart` workflow can re-check a
+specific published chart version.
+
+Container image builds request Docker BuildKit provenance and SBOM output, and
+GitHub artifact attestations are pushed for both release images. Verify
+provenance with the GitHub CLI when needed:
+
+```sh
+gh attestation verify oci://ghcr.io/michaelw/ext-authz-token-exchange:<version> --repo michaelw/ext-authz-token-exchange
+gh attestation verify oci://ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:<version> --repo michaelw/ext-authz-token-exchange
+```
 
 ## Formatting and Module Hygiene
 

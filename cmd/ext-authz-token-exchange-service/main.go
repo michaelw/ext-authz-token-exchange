@@ -39,10 +39,7 @@ func main() {
 		}
 	}()
 
-	grpcPort := os.Getenv("GRPC_PORT")
-	if grpcPort == "" {
-		grpcPort = "3001"
-	}
+	grpcPort := grpcPortFromEnv()
 
 	lis, err := net.Listen("tcp", ":"+grpcPort)
 	if err != nil {
@@ -68,4 +65,12 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)
 	}
+}
+
+func grpcPortFromEnv() string {
+	grpcPort := os.Getenv("GRPC_PORT")
+	if grpcPort == "" {
+		return "3001"
+	}
+	return grpcPort
 }
