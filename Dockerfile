@@ -5,7 +5,7 @@ ARG WORKSPACE=/workspaces/ext-authz-token-exchange
 ARG USER=devuser
 
 # Base stage
-FROM golang:1.26.2-bookworm AS base
+FROM golang:1.26.3-bookworm AS base
 ARG WORKSPACE
 ARG USER
 
