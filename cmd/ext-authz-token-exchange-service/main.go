@@ -19,6 +19,8 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"github.com/michaelw/ext-authz-token-exchange/internal/server"
+	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
 
 const healthCheckMethod = "/grpc.health.v1.Health/Check"
@@ -31,6 +33,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
+
+	shutdownTelemetry, err := telemetry.Init(ctx)
+	if err != nil {
+		log.Fatalf("failed to initialize telemetry: %v", err)
+	}
+	defer func() {
+		if err := shutdownTelemetry(context.Background()); err != nil {
+			log.Printf("failed to shut down telemetry: %v", err)
+		}
+	}()
 
 	policyStore, err := policy.NewConfigMapStore(cfg)
 	if err != nil {
@@ -50,6 +62,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithPropagators(telemetry.Propagators()))),
 		grpc.UnaryInterceptor(server.LoggingInterceptorWithOptions(loggingOptions(cfg))),
 	)
 	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchange.NewClient(cfg, nil)))

@@ -13,6 +13,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
@@ -245,7 +249,79 @@ var _ = Describe("Client", func() {
 		Expect(strings.TrimSpace(oauthErr.Body)).To(Equal(`{"error":"invalid_request"}`))
 	})
 
-	It("builds an HTTP client with configured bounded timeouts", func() {
+	It("propagates trace context to the token endpoint request", func() {
+		var traceparent string
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			traceparent = r.Header.Get("traceparent")
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"access_token":      "exchanged",
+				"token_type":        "Bearer",
+				"issued_token_type": config.DefaultIssuedTokenType,
+			})
+		}))
+		defer tokenEndpoint.Close()
+
+		traceID, err := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+		Expect(err).NotTo(HaveOccurred())
+		spanID, err := trace.SpanIDFromHex("00f067aa0ba902b7")
+		Expect(err).NotTo(HaveOccurred())
+		spanContext := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: trace.FlagsSampled,
+		})
+		ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
+
+		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(ctx, policy.Entry{
+			TokenEndpoint: tokenEndpoint.URL,
+			Scope:         "read",
+		}, "subject")
+
+		Expect(oauthErr).To(BeNil())
+		Expect(traceparent).To(MatchRegexp(`^00-4bf92f3577b34da6a3ce929d0e0e4736-[0-9a-f]{16}-01$`))
+	})
+
+	It("records a token endpoint HTTP client span under an extracted remote parent", func() {
+		recorder := tracetest.NewSpanRecorder()
+		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+		previousProvider := otel.GetTracerProvider()
+		otel.SetTracerProvider(provider)
+		defer otel.SetTracerProvider(previousProvider)
+
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"access_token":      "exchanged",
+				"token_type":        "Bearer",
+				"issued_token_type": config.DefaultIssuedTokenType,
+			})
+		}))
+		defer tokenEndpoint.Close()
+
+		traceID, err := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+		Expect(err).NotTo(HaveOccurred())
+		spanID, err := trace.SpanIDFromHex("00f067aa0ba902b7")
+		Expect(err).NotTo(HaveOccurred())
+		remoteParent := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: trace.FlagsSampled,
+			Remote:     true,
+		})
+
+		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(trace.ContextWithSpanContext(context.Background(), remoteParent), policy.Entry{
+			TokenEndpoint: tokenEndpoint.URL,
+			Scope:         "read",
+		}, "subject")
+
+		Expect(oauthErr).To(BeNil())
+		spans := recorder.Ended()
+		Expect(spans).To(HaveLen(1))
+		Expect(spans[0].Name()).To(Equal("HTTP POST"))
+		Expect(spans[0].SpanContext().TraceID().String()).To(Equal("4bf92f3577b34da6a3ce929d0e0e4736"))
+		Expect(spans[0].Parent().SpanID().String()).To(Equal("00f067aa0ba902b7"))
+	})
+
+	It("builds an HTTP client and base transport with configured bounded timeouts", func() {
 		cfg.TokenEndpointRequestTimeout = 7 * time.Second
 		cfg.TokenEndpointDialTimeout = 2 * time.Second
 		cfg.TokenEndpointTLSHandshakeTimeout = 3 * time.Second
@@ -257,8 +333,9 @@ var _ = Describe("Client", func() {
 		client := exchange.NewHTTPClient(cfg)
 
 		Expect(client.Timeout).To(Equal(7 * time.Second))
-		transport, ok := client.Transport.(*http.Transport)
-		Expect(ok).To(BeTrue())
+		Expect(client.Transport).NotTo(BeNil())
+
+		transport := exchange.NewHTTPTransport(cfg)
 		Expect(transport.TLSHandshakeTimeout).To(Equal(3 * time.Second))
 		Expect(transport.ResponseHeaderTimeout).To(Equal(4 * time.Second))
 		Expect(transport.IdleConnTimeout).To(Equal(5 * time.Second))

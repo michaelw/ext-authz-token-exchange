@@ -13,6 +13,9 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
+	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	grpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -134,6 +137,14 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 			"error": "bearer_token_required",
 		}, []headerPair{{Name: "WWW-Authenticate", Value: bearerChallenge(s.cfg.BearerRealm, decision.Entry.Scope)}}), nil
 	}
+
+	ctx = telemetry.ExtractHTTPHeaders(ctx, headers)
+	ctx, span := otel.Tracer("github.com/michaelw/ext-authz-token-exchange/internal/server").Start(
+		ctx,
+		"ext_authz Check",
+		trace.WithSpanKind(trace.SpanKindServer),
+	)
+	defer span.End()
 
 	result, oauthErr := s.exchanger.Exchange(ctx, decision.Entry, subjectToken)
 	if oauthErr != nil {

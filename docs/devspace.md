@@ -90,6 +90,10 @@ DevSpace updates the built image tags in Helm values during deployment, so this
 flow can use locally built images without publishing them to the default GHCR
 repository when the cluster supports DevSpace's image handling.
 
+To verify OpenTelemetry tracing through the local Gateway, plugin, token
+endpoint, OpenTelemetry Collector, and Jaeger, follow the
+[Tracing Tutorial](tracing.md).
+
 ## Available Commands
 
 ```bash

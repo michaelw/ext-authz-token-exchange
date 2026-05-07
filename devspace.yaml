@@ -47,6 +47,11 @@ profiles:
               systemNamespace: ext-authz-token-exchange-e2e
               fakeTokenEndpoint:
                 image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint
+                env:
+                  OTEL_TRACES_EXPORTER: otlp
+                  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+                  OTEL_SERVICE_NAME: fake-token-endpoint
+                  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
     patches:
       - op: replace
         path: pipelines.deploy.run
@@ -115,6 +120,10 @@ deployments:
           TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
           # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
           TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+          OTEL_TRACES_EXPORTER: otlp
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+          OTEL_SERVICE_NAME: ext-authz-token-exchange
+          OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
         resources:
           requests:
             cpu: 50m

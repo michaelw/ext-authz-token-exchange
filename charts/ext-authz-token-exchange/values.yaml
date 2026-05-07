@@ -95,6 +95,11 @@ env:
   # TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "false"
   # TOKEN_EXCHANGE_REQUIRE_ISSUED_TOKEN_TYPE: "true"
   # TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
+  # OTEL_TRACES_EXPORTER: otlp
+  # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  # OTEL_SERVICE_NAME: ext-authz-token-exchange
+  # OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
+  # OTEL_SDK_DISABLED: "false"
 
 rbac:
   create: true

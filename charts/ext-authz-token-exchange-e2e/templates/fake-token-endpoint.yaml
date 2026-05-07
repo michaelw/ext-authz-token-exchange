@@ -24,6 +24,13 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.fakeTokenEndpoint.port }}
+{{- with .Values.fakeTokenEndpoint.env }}
+          env:
+{{- range $name, $value := . }}
+            - name: {{ $name | quote }}
+              value: {{ $value | quote }}
+{{- end }}
+{{- end }}
           readinessProbe:
             httpGet:
               path: /healthz

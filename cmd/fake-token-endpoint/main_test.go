@@ -8,6 +8,12 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
@@ -63,6 +69,61 @@ func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
 	assertStringArrayClaim(t, payload, "aud", []string{"httpbin-yellow"})
 	if _, ok := payload["client_secret"]; ok {
 		t.Fatalf("payload must not include client_secret: %#v", payload)
+	}
+}
+
+func TestFakeTokenEndpointRecordsServerSpanUnderIncomingTrace(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	defer otel.SetTracerProvider(previousProvider)
+	defer otel.SetTextMapPropagator(previousPropagator)
+
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(recorder),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
+	)
+	defer func() {
+		if err := provider.Shutdown(t.Context()); err != nil {
+			t.Fatalf("shutdown tracer provider: %v", err)
+		}
+	}()
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(telemetry.Propagators())
+
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
+	form.Set("subject_token", "incoming-yellow")
+	form.Set("subject_token_type", accessTokenType)
+
+	req := httptest.NewRequest(http.MethodPost, "/token/yellow", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", contentTypeFormEncoded)
+	req.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	req.SetBasicAuth("e2e-client", "e2e-secret")
+	rec := httptest.NewRecorder()
+
+	fakeTokenEndpointHandler("e2e-client", "e2e-secret").ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if span.Name() != "fake_token_endpoint token" {
+		t.Fatalf("span name = %q, want fake_token_endpoint token", span.Name())
+	}
+	if span.SpanKind() != trace.SpanKindServer {
+		t.Fatalf("span kind = %s, want server", span.SpanKind())
+	}
+	if got := span.SpanContext().TraceID().String(); got != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Fatalf("trace ID = %s, want fixed incoming trace ID", got)
+	}
+	if got := span.Parent().SpanID().String(); got != "00f067aa0ba902b7" {
+		t.Fatalf("parent span ID = %s, want incoming parent", got)
 	}
 }
 
