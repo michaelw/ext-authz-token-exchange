@@ -75,6 +75,7 @@ var _ = Describe("RuntimeConfig", func() {
 	It("loads the default namespace selector from the environment", func() {
 		setenv("OAUTH_CLIENT_ID", "client")
 		setenv("OAUTH_CLIENT_SECRET", "secret")
+		unsetenv("GRPC_LOG_HEALTH_CHECKS")
 		unsetenv("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS")
 		unsetenv("TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED")
 
@@ -82,6 +83,7 @@ var _ = Describe("RuntimeConfig", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.NamespaceSelector).To(Equal(config.DefaultConfigMapNamespaceSelector))
+		Expect(cfg.LogHealthChecks).To(BeTrue())
 		Expect(cfg.InsecureLogTokens).To(BeFalse())
 		Expect(cfg.DefaultDenyUnmatched).To(BeFalse())
 	})
@@ -106,6 +108,17 @@ var _ = Describe("RuntimeConfig", func() {
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.InsecureLogTokens).To(BeTrue())
+	})
+
+	It("loads health check logging as default-on unless explicitly disabled", func() {
+		setenv("OAUTH_CLIENT_ID", "client")
+		setenv("OAUTH_CLIENT_SECRET", "secret")
+		setenv("GRPC_LOG_HEALTH_CHECKS", "false")
+
+		cfg, err := config.LoadFromEnv()
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.LogHealthChecks).To(BeFalse())
 	})
 
 	It("allows overriding the namespace selector", func() {

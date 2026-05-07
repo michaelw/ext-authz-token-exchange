@@ -214,6 +214,7 @@ func pluginValues() string {
 	return fmt.Sprintf(`image:
 %s
 env:
+  GRPC_LOG_HEALTH_CHECKS: "false"
   TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
   TOKEN_EXCHANGE_BEARER_REALM: %q
   TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: %q

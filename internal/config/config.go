@@ -46,6 +46,7 @@ type RuntimeConfig struct {
 	AllowHTTPTokenEndpoint             bool
 	ErrorPassthrough                   bool
 	InsecureLogTokens                  bool
+	LogHealthChecks                    bool
 	RequireIssuedTokenType             bool
 	ExpectedIssuedTokenType            string
 	BearerRealm                        string
@@ -76,6 +77,7 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		AllowHTTPTokenEndpoint:             envBool("TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT", false),
 		ErrorPassthrough:                   envBool("TOKEN_EXCHANGE_ERROR_PASSTHROUGH", false),
 		InsecureLogTokens:                  envBool("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS", false),
+		LogHealthChecks:                    envBool("GRPC_LOG_HEALTH_CHECKS", true),
 		RequireIssuedTokenType:             envBool("TOKEN_EXCHANGE_REQUIRE_ISSUED_TOKEN_TYPE", true),
 		ExpectedIssuedTokenType:            envDefault("TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE", DefaultIssuedTokenType),
 		BearerRealm:                        envDefault("TOKEN_EXCHANGE_BEARER_REALM", "ext-authz-token-exchange"),

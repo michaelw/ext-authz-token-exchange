@@ -109,6 +109,7 @@ deployments:
           repository: ${runtime.images.prod.image}
           tag: ${runtime.images.prod.tag}
         env:
+          GRPC_LOG_HEALTH_CHECKS: "false"
           TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
           TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
           TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success

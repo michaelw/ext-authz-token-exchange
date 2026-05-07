@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"google.golang.org/grpc"
@@ -19,6 +20,8 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"github.com/michaelw/ext-authz-token-exchange/internal/server"
 )
+
+const healthCheckMethod = "/grpc.health.v1.Health/Check"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -47,7 +50,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(server.LoggingInterceptor()),
+		grpc.UnaryInterceptor(server.LoggingInterceptorWithOptions(loggingOptions(cfg))),
 	)
 	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchange.NewClient(cfg, nil)))
 	healthServer := health.NewServer()
@@ -65,6 +68,23 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)
 	}
+}
+
+func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {
+	methods := server.AuthzLoggingMethods()
+	methods[healthCheckMethod] = server.LoggingMethod{
+		LogEnabled:        cfg.LogHealthChecks,
+		SummarizeResponse: summarizeHealthResponse,
+	}
+	return server.LoggingOptions{Methods: methods}
+}
+
+func summarizeHealthResponse(resp any) string {
+	healthResp, ok := resp.(*healthpb.HealthCheckResponse)
+	if !ok {
+		return "unknown"
+	}
+	return "health_status=" + strings.ToLower(healthResp.GetStatus().String())
 }
 
 func grpcPortFromEnv() string {

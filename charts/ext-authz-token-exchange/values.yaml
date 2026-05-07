@@ -71,6 +71,7 @@ oauth:
     clientSecretKey: client_secret
 
 env:
+  GRPC_LOG_HEALTH_CHECKS: "true"
   TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED: "false"
   # CONFIGMAP_LABEL_SELECTOR: ext-authz-token-exchange.magneticflux.net/enabled=true
   # CONFIGMAP_NAMESPACE_SELECTOR: ext-authz-token-exchange.magneticflux.net/policy=enabled
