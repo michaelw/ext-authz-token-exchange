@@ -104,8 +104,14 @@ async function refreshStatus({ showChecking = false } = {}) {
     setStatusChip("plugin-status", "Plugin", status.plugin);
     setStatusChip("issuer-status", state.issuer.label, status.issuer);
   } catch (error) {
-    setStatusChip("plugin-status", "Plugin", { warning: error.message });
-    setStatusChip("issuer-status", state.issuer.label || "Issuer", { warning: error.message });
+    setStatusChip("plugin-status", "Dashboard API", {
+      unavailable: true,
+      warning: error.message,
+    });
+    setStatusChip("issuer-status", "Components", {
+      unavailable: true,
+      warning: "Plugin and issuer status unavailable because the dashboard API did not answer.",
+    });
   } finally {
     state.statusRefreshing = false;
   }
@@ -114,6 +120,12 @@ async function refreshStatus({ showChecking = false } = {}) {
 function setStatusChip(id, label, status = {}) {
   const chip = $(id);
   chip.classList.remove("good", "fail", "running");
+  if (status.unavailable) {
+    chip.classList.add("fail");
+    chip.textContent = `${label}: unavailable`;
+    chip.title = status.warning || "";
+    return;
+  }
   if (status.checking) {
     chip.classList.add("running");
     chip.textContent = `${label}: checking`;
@@ -135,24 +147,42 @@ function renderScenarioList() {
   list.innerHTML = "";
   for (const scenario of state.scenarios) {
     const result = state.results.get(scenario.name);
+    const selected = scenario.name === state.selected?.name;
+    const status = scenarioRunStatus(result);
     const button = document.createElement("button");
     button.className = [
       "scenario",
-      scenario.name === state.selected?.name ? "active" : "",
+      selected ? "active" : "",
       result?.passed === true ? "pass" : "",
       result?.passed === false ? "fail" : "",
     ].filter(Boolean).join(" ");
     button.type = "button";
+    button.setAttribute("aria-label", `${scenario.name}: ${status.label}`);
     button.addEventListener("click", () => selectScenario(scenario.name));
     button.innerHTML = `
       <span class="stripe ${scenarioColor(scenario)}"></span>
-      <span>
-        <span class="scenario-name">${escapeHTML(scenario.name)}</span>
+      <span class="scenario-content">
+        <span class="scenario-heading">
+          <span class="scenario-name">${escapeHTML(scenario.name)}</span>
+          <span class="scenario-state">
+            <span class="scenario-badge ${status.className}">${status.label}</span>
+          </span>
+        </span>
         <span class="scenario-summary">${escapeHTML(scenario.summary || "")}</span>
       </span>
     `;
     list.appendChild(button);
   }
+}
+
+function scenarioRunStatus(result) {
+  if (result?.passed === true) {
+    return { label: "Pass", className: "pass" };
+  }
+  if (result?.passed === false) {
+    return { label: "Fail", className: "fail" };
+  }
+  return { label: "Not run", className: "idle" };
 }
 
 function selectScenario(name) {
