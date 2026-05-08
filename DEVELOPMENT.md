@@ -226,12 +226,15 @@ When a Release Please release is created, GitHub Actions publishes:
 - `ghcr.io/michaelw/ext-authz-token-exchange:sha-<commit>`
 - `ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:<version>`
 - `ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:sha-<commit>`
-- `oci://ghcr.io/michaelw/ext-authz-token-exchange:<version>`
+- `oci://ghcr.io/michaelw/charts/ext-authz-token-exchange:<version>`
 
 The chart package is also attached to the GitHub Release. The release workflow
 validates the published OCI chart with `helm pull`, `helm show chart`, and
 `helm show values`. A manual `Test Published Chart` workflow can re-check a
-specific published chart version.
+specific published chart version. Helm pushes the chart package to
+`oci://ghcr.io/michaelw/charts`; pull, install, and upgrade commands include the
+chart basename, for example
+`oci://ghcr.io/michaelw/charts/ext-authz-token-exchange`.
 
 Container image builds request Docker BuildKit provenance and SBOM output, and
 GitHub artifact attestations are pushed for both release images. Verify

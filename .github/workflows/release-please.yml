@@ -14,7 +14,7 @@ env:
   FAKE_TOKEN_ENDPOINT_IMAGE: ghcr.io/${{ github.repository_owner }}/ext-authz-token-exchange-fake-token-endpoint
   CHART_NAME: ext-authz-token-exchange
   CHART_PATH: charts/ext-authz-token-exchange
-  CHART_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}
+  CHART_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
   release-please:
