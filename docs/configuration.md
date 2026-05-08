@@ -212,6 +212,41 @@ Durations use Go duration strings such as `500ms`, `2s`, or `1m`.
 | `TOKEN_ENDPOINT_MAX_IDLE_CONNS` | `100` | No | Maximum idle connections. Must not be negative. |
 | `TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST` | `10` | No | Maximum idle connections per host. Must not be negative. |
 
+### OpenTelemetry Tracing
+
+The service extracts W3C Trace Context (`traceparent`, `tracestate`) and
+baggage from Envoy `CheckRequest` HTTP headers, then propagates that context to
+token endpoint subrequests. The gRPC ext-authz server and outbound token
+endpoint HTTP client are instrumented. Without an OTLP exporter configured,
+instrumentation is inert but propagation still works inside the request path.
+The local fake token endpoint can use the same `OTEL_*` settings when the e2e
+demo needs a token issuer application span.
+For a local walkthrough with Jaeger screenshots, see the
+[Tracing Tutorial](tracing.md).
+
+| Environment variable | Default | Required | Description |
+| --- | --- | --- | --- |
+| `OTEL_TRACES_EXPORTER` | empty | No | Set to `otlp` to enable trace export. Empty or `none` leaves tracing inert. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry SDK default | No | Base OTLP endpoint used by the exporter, for example `http://otel-collector:4317`. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | empty | No | Trace-specific OTLP endpoint. Takes precedence over `OTEL_EXPORTER_OTLP_ENDPOINT`. |
+| `OTEL_SERVICE_NAME` | `ext-authz-token-exchange` | No | Service name attached to exported spans. |
+| `OTEL_RESOURCE_ATTRIBUTES` | empty | No | Additional resource attributes, such as `deployment.environment=dev`. |
+| `OTEL_SDK_DISABLED` | `false` | No | Set to `true` to disable SDK initialization. |
+
+Minimal values example for a cluster-local collector:
+
+```yaml
+env:
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  OTEL_SERVICE_NAME: ext-authz-token-exchange
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
+```
+
+B3 propagation is not enabled by default in this release. If a deployment needs
+B3 for Envoy or Istio compatibility, track that as an explicit compatibility
+decision so the supported propagation surface stays documented.
+
 ## Kubernetes Deployment Configuration
 
 The production chart lives in `charts/ext-authz-token-exchange`. The local demo

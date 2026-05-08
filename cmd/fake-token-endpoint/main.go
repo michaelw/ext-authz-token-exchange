@@ -1,39 +1,79 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 )
 
 const (
 	defaultListenAddr      = ":8080"
 	defaultClientID        = "e2e-client"
 	defaultClientSecret    = "e2e-secret"
+	defaultServiceName     = "fake-token-endpoint"
 	accessTokenType        = "urn:ietf:params:oauth:token-type:access_token"
 	contentTypeJSON        = "application/json"
 	contentTypeFormEncoded = "application/x-www-form-urlencoded"
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	addr := envDefault("FAKE_TOKEN_ENDPOINT_ADDR", defaultListenAddr)
 	clientID := envDefault("FAKE_TOKEN_ENDPOINT_CLIENT_ID", defaultClientID)
 	clientSecret := envDefault("FAKE_TOKEN_ENDPOINT_CLIENT_SECRET", defaultClientSecret)
 
+	shutdownTelemetry, err := telemetry.InitWithServiceName(ctx, defaultServiceName)
+	if err != nil {
+		log.Fatalf("failed to initialize telemetry: %v", err)
+	}
+	defer func() {
+		if err := shutdownTelemetry(context.Background()); err != nil {
+			log.Printf("failed to shut down telemetry: %v", err)
+		}
+	}()
+
+	server := &http.Server{
+		Addr:    addr,
+		Handler: fakeTokenEndpointHandler(clientID, clientSecret),
+	}
+	go func() {
+		<-ctx.Done()
+		if err := server.Shutdown(context.Background()); err != nil {
+			log.Printf("fake token endpoint shutdown failed: %v", err)
+		}
+	}()
+
+	log.Printf("starting fake token endpoint on %s", addr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("fake token endpoint failed: %v", err)
+	}
+}
+
+func fakeTokenEndpointHandler(clientID, clientSecret string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/token/", tokenHandler(clientID, clientSecret))
-
-	log.Printf("starting fake token endpoint on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("fake token endpoint failed: %v", err)
-	}
+	mux.Handle("/token/", otelhttp.NewHandler(
+		tokenHandler(clientID, clientSecret),
+		"fake_token_endpoint token",
+		otelhttp.WithPropagators(telemetry.Propagators()),
+		otelhttp.WithTracerProvider(otel.GetTracerProvider()),
+	))
+	return mux
 }
 
 func tokenHandler(clientID, clientSecret string) http.HandlerFunc {

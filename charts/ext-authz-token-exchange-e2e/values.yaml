@@ -19,6 +19,7 @@ fakeTokenEndpoint:
   image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:latest
   imagePullPolicy: IfNotPresent
   port: 8080
+  env: {}
   resources:
     requests:
       cpu: 10m

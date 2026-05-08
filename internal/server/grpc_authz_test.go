@@ -2,12 +2,18 @@ package server_test
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/baggage"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
@@ -320,6 +326,144 @@ entries:
 		Expect(headerValue(resp.GetOkResponse().GetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
 	})
 
+	It("preserves raw OAuth error bodies and authenticate challenges from token exchange", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{
+			StatusCode:      http.StatusUnauthorized,
+			Body:            `{"error":"invalid_client","issuer_detail":"kept only when passthrough is enabled"}`,
+			WWWAuthenticate: []string{`Bearer realm="issuer", error="invalid_token"`},
+		}})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("Unauthorized"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"invalid_client","issuer_detail":"kept only when passthrough is enabled"}`))
+		Expect(headerValue(denied.GetHeaders(), "WWW-Authenticate")).To(Equal(`Bearer realm="issuer", error="invalid_token"`))
+	})
+
+	It("synthesizes OAuth deny JSON from sanitized error fields", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{
+			StatusCode:       http.StatusBadRequest,
+			Error:            "invalid_target",
+			ErrorDescription: "request failed (TXE-2001)",
+			Message:          "token exchange failed",
+			WWWAuthenticate:  []string{`Bearer realm="issuer"`},
+		}})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("BadRequest"))
+		Expect(denied.GetBody()).To(MatchJSON(`{
+			"error":"invalid_target",
+			"error_description":"request failed (TXE-2001)",
+			"message":"token exchange failed"
+		}`))
+		Expect(headerValue(denied.GetHeaders(), "WWW-Authenticate")).To(Equal(`Bearer realm="issuer"`))
+	})
+
+	It("falls back to server_error for empty OAuth deny bodies", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{
+			StatusCode: http.StatusInternalServerError,
+		}})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(denied.GetStatus().GetCode().String()).To(Equal("InternalServerError"))
+		Expect(denied.GetBody()).To(MatchJSON(`{"error":"server_error"}`))
+	})
+
+	It("extracts upstream trace context from Envoy HTTP request headers before token exchange", func() {
+		recorder := tracetest.NewSpanRecorder()
+		provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+		previousProvider := otel.GetTracerProvider()
+		otel.SetTracerProvider(provider)
+		defer otel.SetTracerProvider(previousProvider)
+
+		exchanger := &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}}
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      resources:
+        - https://orders.example.com/api/
+      tokenEndpoint: http://issuer.example/token
+`)), exchanger)
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+			"traceparent":   "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+			"tracestate":    "rojo=00f067aa0ba902b7",
+			"baggage":       "tenant=blue",
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.GetOkResponse()).NotTo(BeNil())
+		spanContext := trace.SpanContextFromContext(exchanger.ctx)
+		Expect(spanContext.IsValid()).To(BeTrue())
+		Expect(spanContext.IsRemote()).To(BeFalse())
+		Expect(spanContext.TraceID().String()).To(Equal("4bf92f3577b34da6a3ce929d0e0e4736"))
+		bag := baggage.FromContext(exchanger.ctx)
+		Expect(bag.Member("tenant").Value()).To(Equal("blue"))
+		Expect(recorder.Ended()).To(HaveLen(1))
+		Expect(recorder.Ended()[0].Name()).To(Equal("ext_authz Check"))
+		Expect(recorder.Ended()[0].Parent().SpanID().String()).To(Equal("00f067aa0ba902b7"))
+	})
+
 	It("fails closed when matching policy is unhealthy", func() {
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
@@ -347,10 +491,12 @@ type fakeExchanger struct {
 	result exchange.Result
 	err    *exchange.OAuthError
 	calls  int
+	ctx    context.Context
 }
 
-func (f *fakeExchanger) Exchange(context.Context, policy.Entry, string) (exchange.Result, *exchange.OAuthError) {
+func (f *fakeExchanger) Exchange(ctx context.Context, entry policy.Entry, subjectToken string) (exchange.Result, *exchange.OAuthError) {
 	f.calls++
+	f.ctx = ctx
 	return f.result, f.err
 }
 

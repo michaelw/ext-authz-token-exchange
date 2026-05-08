@@ -15,6 +15,9 @@ import (
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
+	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -78,21 +81,30 @@ func NewClient(cfg config.RuntimeConfig, httpClient *http.Client) *Client {
 func NewHTTPClient(cfg config.RuntimeConfig) *http.Client {
 	return &http.Client{
 		Timeout: durationDefault(cfg.TokenEndpointRequestTimeout, 5*time.Second),
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   durationDefault(cfg.TokenEndpointDialTimeout, 3*time.Second),
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-			TLSHandshakeTimeout:   durationDefault(cfg.TokenEndpointTLSHandshakeTimeout, 3*time.Second),
-			ResponseHeaderTimeout: durationDefault(cfg.TokenEndpointResponseHeaderTimeout, 5*time.Second),
-			ExpectContinueTimeout: 1 * time.Second,
-			IdleConnTimeout:       durationDefault(cfg.TokenEndpointIdleConnTimeout, 90*time.Second),
-			MaxIdleConns:          intDefault(cfg.TokenEndpointMaxIdleConns, 100),
-			MaxIdleConnsPerHost:   intDefault(cfg.TokenEndpointMaxIdleConnsPerHost, 10),
-		},
+		Transport: otelhttp.NewTransport(
+			NewHTTPTransport(cfg),
+			otelhttp.WithPropagators(telemetry.Propagators()),
+			otelhttp.WithTracerProvider(otel.GetTracerProvider()),
+		),
+	}
+}
+
+// NewHTTPTransport returns the bounded base transport used by NewHTTPClient.
+func NewHTTPTransport(cfg config.RuntimeConfig) *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   durationDefault(cfg.TokenEndpointDialTimeout, 3*time.Second),
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSHandshakeTimeout:   durationDefault(cfg.TokenEndpointTLSHandshakeTimeout, 3*time.Second),
+		ResponseHeaderTimeout: durationDefault(cfg.TokenEndpointResponseHeaderTimeout, 5*time.Second),
+		ExpectContinueTimeout: 1 * time.Second,
+		IdleConnTimeout:       durationDefault(cfg.TokenEndpointIdleConnTimeout, 90*time.Second),
+		MaxIdleConns:          intDefault(cfg.TokenEndpointMaxIdleConns, 100),
+		MaxIdleConnsPerHost:   intDefault(cfg.TokenEndpointMaxIdleConnsPerHost, 10),
 	}
 }
 

@@ -49,6 +49,9 @@ devspace deploy -p local-test
 devspace run test-e2e
 ```
 
+To verify OpenTelemetry spans for the ext-authz request and token endpoint
+subrequest, follow the [Tracing Tutorial](docs/tracing.md).
+
 ### Demo UI
 
 The local demo includes a browser UI for exercising token exchange scenarios
