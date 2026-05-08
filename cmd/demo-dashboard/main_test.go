@@ -3,13 +3,20 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/demo"
 )
@@ -150,6 +157,148 @@ func TestSelectIssuerKeepsExplicitScenarioConfig(t *testing.T) {
 	}
 	if applied.ConfigPath != "custom.yaml" {
 		t.Fatalf("ConfigPath = %q, want explicit custom.yaml", applied.ConfigPath)
+	}
+}
+
+func TestVerifyDashboardTokenStatuses(t *testing.T) {
+	oidcServer, key := newOIDCTestServer(t)
+	defer oidcServer.Close()
+
+	valid := signJWT(t, key, oidcServer.URL, "RS256", time.Now().Add(5*time.Minute))
+	expired := signJWT(t, key, oidcServer.URL, "RS256", time.Now().Add(-time.Minute))
+	unsupported := signJWT(t, key, oidcServer.URL, "HS256", time.Now().Add(5*time.Minute))
+	parts := strings.Split(valid, ".")
+	payload := defaultJWTClaims(oidcServer.URL, time.Now().Add(5*time.Minute))
+	payload["sub"] = "tampered"
+	tampered := parts[0] + "." + base64URLJSON(t, payload) + "." + parts[2]
+	notYetValidPayload := defaultJWTClaims(oidcServer.URL, time.Now().Add(15*time.Minute))
+	notYetValidPayload["nbf"] = time.Now().Add(10 * time.Minute).Unix()
+	notYetValid := signJWTClaims(t, key, "RS256", notYetValidPayload)
+
+	tests := []struct {
+		name       string
+		token      string
+		wantFormat string
+		wantAlg    string
+		wantStatus string
+		wantOK     bool
+	}{
+		{
+			name:       "valid RS256 token",
+			token:      valid,
+			wantFormat: "JWT",
+			wantAlg:    "RS256",
+			wantStatus: "signature verified",
+			wantOK:     true,
+		},
+		{
+			name:       "tampered signature",
+			token:      tampered,
+			wantFormat: "JWT",
+			wantAlg:    "RS256",
+			wantStatus: "signature invalid",
+		},
+		{
+			name:       "expired token",
+			token:      expired,
+			wantFormat: "JWT",
+			wantAlg:    "RS256",
+			wantStatus: "expired",
+		},
+		{
+			name:       "unsupported algorithm",
+			token:      unsupported,
+			wantFormat: "JWT",
+			wantAlg:    "HS256",
+			wantStatus: "unsupported algorithm",
+		},
+		{
+			name:       "not yet valid token",
+			token:      notYetValid,
+			wantFormat: "JWT",
+			wantAlg:    "RS256",
+			wantStatus: "not yet valid",
+		},
+		{
+			name:       "opaque token",
+			token:      "not-a-jwt",
+			wantFormat: "opaque token",
+			wantStatus: "opaque token",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := verifyDashboardToken(context.Background(), tt.token)
+			if got.Format != tt.wantFormat {
+				t.Fatalf("Format = %q, want %q; detail=%s", got.Format, tt.wantFormat, got.Detail)
+			}
+			if got.Algorithm != tt.wantAlg {
+				t.Fatalf("Algorithm = %q, want %q", got.Algorithm, tt.wantAlg)
+			}
+			if got.Status != tt.wantStatus {
+				t.Fatalf("Status = %q, want %q; detail=%s", got.Status, tt.wantStatus, got.Detail)
+			}
+			if got.Verified != tt.wantOK {
+				t.Fatalf("Verified = %v, want %v", got.Verified, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestVerifyDashboardTokenReportsDiscoveryFailure(t *testing.T) {
+	token := signJWT(t, mustRSAKey(t), "http://127.0.0.1:1", "RS256", time.Now().Add(5*time.Minute))
+
+	got := verifyDashboardToken(context.Background(), token)
+
+	if got.Format != "JWT" {
+		t.Fatalf("Format = %q, want JWT", got.Format)
+	}
+	if got.Status != "verification unavailable" {
+		t.Fatalf("Status = %q, want verification unavailable", got.Status)
+	}
+	if got.Detail == "" {
+		t.Fatalf("Detail is empty, want discovery error detail")
+	}
+}
+
+func TestVerifyDashboardTokenReportsJWKSFailure(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":   server.URL,
+			"jwks_uri": server.URL + "/missing-keys",
+		})
+	}))
+	defer server.Close()
+	token := signJWT(t, mustRSAKey(t), server.URL, "RS256", time.Now().Add(5*time.Minute))
+
+	got := verifyDashboardToken(context.Background(), token)
+
+	if got.Status != "verification unavailable" {
+		t.Fatalf("Status = %q, want verification unavailable; detail=%s", got.Status, got.Detail)
+	}
+}
+
+func TestVerifyTokenEndpoint(t *testing.T) {
+	s := &server{}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/token/verify", strings.NewReader(`{"token":"opaque"}`))
+
+	s.verifyToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got verifyTokenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Format != "opaque token" || got.Status != "opaque token" {
+		t.Fatalf("response = %+v, want opaque token format and status", got)
 	}
 }
 
@@ -397,4 +546,88 @@ func writeScenarioConfig(t *testing.T, body string) string {
 		t.Fatalf("write scenario config: %v", err)
 	}
 	return path
+}
+
+func newOIDCTestServer(t *testing.T) (*httptest.Server, *rsa.PrivateKey) {
+	t.Helper()
+	key := mustRSAKey(t)
+	const kid = "test-key"
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":   server.URL,
+				"jwks_uri": server.URL + "/keys",
+			})
+		case "/keys":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys": []map[string]string{rsaJWK(kid, &key.PublicKey)},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return server, key
+}
+
+func mustRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	return key
+}
+
+func signJWT(t *testing.T, key *rsa.PrivateKey, issuer, alg string, exp time.Time) string {
+	t.Helper()
+	return signJWTClaims(t, key, alg, defaultJWTClaims(issuer, exp))
+}
+
+func defaultJWTClaims(issuer string, exp time.Time) map[string]any {
+	return map[string]any{
+		"iss": issuer,
+		"sub": "token-user",
+		"aud": "tx-audience-client",
+		"azp": "tx-subject-client",
+		"exp": exp.Unix(),
+		"iat": time.Now().Add(-time.Minute).Unix(),
+	}
+}
+
+func signJWTClaims(t *testing.T, key *rsa.PrivateKey, alg string, payload map[string]any) string {
+	t.Helper()
+	header := map[string]any{
+		"alg": alg,
+		"typ": "JWT",
+		"kid": "test-key",
+	}
+	unsigned := base64URLJSON(t, header) + "." + base64URLJSON(t, payload)
+	digest := sha256.Sum256([]byte(unsigned))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatalf("sign JWT: %v", err)
+	}
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func base64URLJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JWT JSON: %v", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func rsaJWK(kid string, key *rsa.PublicKey) map[string]string {
+	return map[string]string{
+		"kty": "RSA",
+		"use": "sig",
+		"kid": kid,
+		"alg": "RS256",
+		"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+		"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+	}
 }

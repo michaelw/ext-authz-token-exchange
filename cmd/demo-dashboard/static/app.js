@@ -10,6 +10,9 @@ const state = {
   statusRefreshTimer: null,
   statusRefreshing: false,
   tokenTimeRefreshTimer: null,
+  tokenVerifyTimer: null,
+  tokenVerifyRequestID: 0,
+  tokenVerification: { token: "", pending: false, response: null },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -81,6 +84,7 @@ function startTokenTimeRefresh() {
   state.tokenTimeRefreshTimer = window.setInterval(() => {
     if (!document.hidden && state.selected) {
       renderInputTokenTimes();
+      refreshTokenVerificationAtTimeBoundary();
     }
   }, 1000);
 }
@@ -698,7 +702,7 @@ function renderInputTokenPanel(scenario = state.selected) {
   }
   const token = normalizeBearerInput(raw);
   const decoded = decodeJWT(token);
-  $("input-token-format").textContent = token ? decoded ? decoded.signatureStatus : "not a JWT" : "-";
+  $("input-token-format").textContent = token ? decoded ? "JWT" : "opaque token" : "-";
   $("input-token-algorithm").textContent = decoded?.header?.alg || "-";
   $("input-token-issuer").textContent = decoded?.payload?.iss || "-";
   $("input-token-subject").textContent = decoded?.payload?.sub || "-";
@@ -708,13 +712,7 @@ function renderInputTokenPanel(scenario = state.selected) {
   $("input-token-header").textContent = decoded ? JSON.stringify(decoded.header, null, 2) : "-";
   $("input-token-payload").textContent = decoded ? JSON.stringify(decoded.payload, null, 2) : "-";
   renderInputTokenTimes(decoded?.payload);
-  if (!token) {
-    setTokenStatus("-", "");
-  } else if (decoded) {
-    setTokenStatus(decoded.signatureStatus, "good");
-  } else {
-    setTokenStatus("input is not a JWT", "fail");
-  }
+  renderTokenVerification(token, decoded);
 }
 
 function renderInputTokenTimes(payload = decodedInputPayload()) {
@@ -729,15 +727,126 @@ function renderInputTokenTimes(payload = decodedInputPayload()) {
   }
 }
 
+function refreshTokenVerificationAtTimeBoundary() {
+  const token = normalizeBearerInput(tokenForScenario(state.selected));
+  const decoded = decodeJWT(token);
+  const status = state.tokenVerification.response?.status;
+  if (!token || !decoded || state.tokenVerification.token !== token) {
+    return;
+  }
+  const now = Date.now() / 1000;
+  if (status === "signature verified" && Number.isFinite(decoded.payload?.exp) && decoded.payload.exp <= now) {
+    state.tokenVerification = { token: "", pending: false, response: null };
+    renderTokenVerification(token, decoded);
+  }
+  if (status === "not yet valid" && Number.isFinite(decoded.payload?.nbf) && decoded.payload.nbf <= now) {
+    state.tokenVerification = { token: "", pending: false, response: null };
+    renderTokenVerification(token, decoded);
+  }
+}
+
 function decodedInputPayload() {
   const token = normalizeBearerInput(tokenForScenario(state.selected));
   return decodeJWT(token)?.payload || null;
 }
 
-function setTokenStatus(text, klass) {
+function setTokenStatus(text, klass, title = "") {
   const status = $("token-status");
   status.className = ["token-status", klass].filter(Boolean).join(" ");
   status.textContent = text;
+  status.title = title || "";
+}
+
+function renderTokenVerification(token, decoded) {
+  if (!token) {
+    state.tokenVerification = { token: "", pending: false, response: null };
+    window.clearTimeout(state.tokenVerifyTimer);
+    setTokenStatus("-", "");
+    return;
+  }
+  if (!decoded) {
+    state.tokenVerification = {
+      token,
+      pending: false,
+      response: { format: "opaque token", status: "opaque token", verified: false },
+    };
+    window.clearTimeout(state.tokenVerifyTimer);
+    setTokenStatus("opaque token", "");
+    return;
+  }
+
+  const current = state.tokenVerification;
+  if (current.token === token && current.response) {
+    applyTokenVerification(current.response);
+    return;
+  }
+  if (current.token === token && current.pending) {
+    setTokenStatus("verifying signature...", "");
+    return;
+  }
+
+  const requestID = ++state.tokenVerifyRequestID;
+  state.tokenVerification = { token, pending: true, response: null };
+  setTokenStatus("verifying signature...", "");
+  window.clearTimeout(state.tokenVerifyTimer);
+  state.tokenVerifyTimer = window.setTimeout(() => verifyToken(token, requestID), 250);
+}
+
+function applyTokenVerification(response) {
+  if (response.format) {
+    $("input-token-format").textContent = response.format;
+  }
+  if (response.algorithm) {
+    $("input-token-algorithm").textContent = response.algorithm;
+  }
+  setTokenStatus(response.status || "-", tokenStatusClass(response), response.detail || "");
+}
+
+async function verifyToken(token, requestID) {
+  try {
+    const response = await api("/api/token/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!isCurrentTokenVerification(token, requestID)) {
+      return;
+    }
+    state.tokenVerification = { token, pending: false, response };
+    applyTokenVerification(response);
+  } catch (error) {
+    if (!isCurrentTokenVerification(token, requestID)) {
+      return;
+    }
+    const response = {
+      format: "JWT",
+      verified: false,
+      status: "verification unavailable",
+      detail: error.message,
+    };
+    state.tokenVerification = { token, pending: false, response };
+    applyTokenVerification(response);
+  }
+}
+
+function isCurrentTokenVerification(token, requestID) {
+  return requestID === state.tokenVerifyRequestID &&
+    normalizeBearerInput(tokenForScenario(state.selected)) === token;
+}
+
+function tokenStatusClass(response = {}) {
+  if (response.verified || response.status === "signature verified") {
+    return "good";
+  }
+  if ([
+    "expired",
+    "not yet valid",
+    "signature invalid",
+    "unsupported algorithm",
+  ].includes(response.status)) {
+    return "fail";
+  }
+  return "";
 }
 
 function handleTokenInput(event) {
@@ -766,7 +875,9 @@ async function fetchScenarioToken() {
     state.results.delete(scenario.name);
     renderSelected();
     renderScenarioList();
-    setTokenStatus(response.warning || `fetched from ${response.source}`, response.warning ? "" : "good");
+    if (response.warning) {
+      setTokenStatus(response.warning, "");
+    }
   } catch (error) {
     setTokenStatus(error.message, "fail");
   } finally {

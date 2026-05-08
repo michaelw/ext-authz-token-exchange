@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/michaelw/ext-authz-token-exchange/internal/demo"
 	"github.com/pkg/browser"
 )
@@ -66,6 +68,7 @@ func main() {
 	mux.HandleFunc("POST /api/scenarios/run-all", s.runAll)
 	mux.HandleFunc("POST /api/scenarios/{name}/token", s.scenarioToken)
 	mux.HandleFunc("POST /api/scenarios/{name}/run", s.runOne)
+	mux.HandleFunc("POST /api/token/verify", s.verifyToken)
 	mux.HandleFunc("GET /api/policies/{namespace}/{name}", s.policy)
 	mux.HandleFunc("GET /api/logs/{component}", s.logs)
 	mux.HandleFunc("GET /favicon.ico", favicon)
@@ -132,6 +135,18 @@ type tokenResponse struct {
 	Bearer  string `json:"bearer"`
 	Source  string `json:"source"`
 	Warning string `json:"warning,omitempty"`
+}
+
+type verifyTokenRequest struct {
+	Token string `json:"token"`
+}
+
+type verifyTokenResponse struct {
+	Format    string `json:"format"`
+	Algorithm string `json:"algorithm,omitempty"`
+	Verified  bool   `json:"verified"`
+	Status    string `json:"status"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 func deploymentStatus(parent context.Context, namespace, deployment string) componentStatus {
@@ -216,6 +231,16 @@ func (s *server) scenarioToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *server) verifyToken(w http.ResponseWriter, r *http.Request) {
+	var req verifyTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode verify request: %w", err))
+		return
+	}
+	resp := verifyDashboardToken(r.Context(), req.Token)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -470,6 +495,109 @@ func normalizeBearerInput(value string) string {
 		return strings.TrimSpace(value[len("Bearer "):])
 	}
 	return value
+}
+
+func verifyDashboardToken(parent context.Context, raw string) verifyTokenResponse {
+	token := normalizeBearerInput(raw)
+	if token == "" {
+		return verifyTokenResponse{Status: "-"}
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return verifyTokenResponse{Format: "opaque token", Status: "opaque token"}
+	}
+
+	var header struct {
+		Algorithm string `json:"alg"`
+		Type      string `json:"typ"`
+	}
+	if err := decodeBase64URLJSON(parts[0], &header); err != nil {
+		return verifyTokenResponse{Format: "opaque token", Status: "opaque token", Detail: err.Error()}
+	}
+	resp := verifyTokenResponse{Format: "JWT", Algorithm: header.Algorithm}
+	if header.Algorithm != "RS256" {
+		resp.Status = "unsupported algorithm"
+		resp.Detail = fmt.Sprintf("unsupported JWT alg %q", header.Algorithm)
+		return resp
+	}
+
+	var claims struct {
+		Issuer string   `json:"iss"`
+		NBF    oidcTime `json:"nbf"`
+	}
+	if err := decodeBase64URLJSON(parts[1], &claims); err != nil {
+		resp.Status = "opaque token"
+		resp.Detail = err.Error()
+		return resp
+	}
+	if claims.Issuer == "" {
+		resp.Status = "verification unavailable"
+		resp.Detail = "JWT does not contain iss claim"
+		return resp
+	}
+
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+	provider, err := oidc.NewProvider(ctx, claims.Issuer)
+	if err != nil {
+		resp.Status = "verification unavailable"
+		resp.Detail = err.Error()
+		return resp
+	}
+	verifier := provider.VerifierContext(ctx, &oidc.Config{
+		SkipClientIDCheck:    true,
+		SupportedSigningAlgs: []string{"RS256"},
+	})
+	if _, err := verifier.Verify(ctx, token); err != nil {
+		var expired *oidc.TokenExpiredError
+		if errors.As(err, &expired) {
+			resp.Status = "expired"
+			resp.Detail = err.Error()
+			return resp
+		}
+		if strings.Contains(err.Error(), "before the nbf") {
+			resp.Status = "not yet valid"
+			resp.Detail = err.Error()
+			return resp
+		}
+		if strings.Contains(err.Error(), "fetching keys") {
+			resp.Status = "verification unavailable"
+			resp.Detail = err.Error()
+			return resp
+		}
+		resp.Status = "signature invalid"
+		resp.Detail = err.Error()
+		return resp
+	}
+	if !claims.NBF.Time.IsZero() && time.Now().Before(claims.NBF.Time) {
+		resp.Status = "not yet valid"
+		resp.Detail = fmt.Sprintf("token is not valid before %s", claims.NBF.Time.Format(time.RFC3339))
+		return resp
+	}
+	resp.Verified = true
+	resp.Status = "signature verified"
+	return resp
+}
+
+type oidcTime struct {
+	Time time.Time
+}
+
+func (t *oidcTime) UnmarshalJSON(data []byte) error {
+	var seconds float64
+	if err := json.Unmarshal(data, &seconds); err != nil {
+		return err
+	}
+	t.Time = time.Unix(int64(seconds), 0)
+	return nil
+}
+
+func decodeBase64URLJSON(value string, target any) error {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(decoded, target)
 }
 
 func staticHandler() http.Handler {
