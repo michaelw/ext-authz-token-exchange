@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/stats"
 
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
@@ -63,10 +64,7 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.StatsHandler(otelgrpc.NewServerHandler(
-			otelgrpc.WithPropagators(telemetry.Propagators()),
-			otelgrpc.WithFilter(grpcTracingFilter()),
-		)),
+		grpc.StatsHandler(grpcStatsHandler()),
 		grpc.UnaryInterceptor(server.LoggingInterceptorWithOptions(loggingOptions(cfg))),
 	)
 	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchange.NewClient(cfg, nil)))
@@ -94,6 +92,13 @@ func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {
 		SummarizeResponse: summarizeHealthResponse,
 	}
 	return server.LoggingOptions{Methods: methods}
+}
+
+func grpcStatsHandler() stats.Handler {
+	return otelgrpc.NewServerHandler(
+		otelgrpc.WithPropagators(telemetry.Propagators()),
+		otelgrpc.WithFilter(grpcTracingFilter()),
+	)
 }
 
 func grpcTracingFilter() otelgrpc.Filter {
