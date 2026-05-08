@@ -1,6 +1,6 @@
 dependencies:
 - name: common.itsumi
-  repository: oci://ghcr.io/michaelw
-  version: 0.5.1
-digest: sha256:14acf0958fd76a0dc2ac74a5d840bc8740e9075476f6ad7ec38e64c5bb8e6c96
-generated: "2026-05-07T09:53:34.74937-05:00"
+  repository: oci://ghcr.io/michaelw/charts
+  version: 0.5.2
+digest: sha256:eb43f4acf9ec4f8af763b92c320747d55c3d06b91cc9f7194210107c61f89e59
+generated: "2026-05-08T13:59:06.071221-05:00"
