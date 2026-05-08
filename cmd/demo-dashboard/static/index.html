@@ -128,12 +128,55 @@
       <aside class="inspector">
         <div class="tabs">
           <button class="tab active" data-tab="curl" type="button">curl</button>
+          <button class="tab" data-tab="token" type="button">token</button>
           <button class="tab" data-tab="response" type="button">response</button>
           <button class="tab" data-tab="policy" type="button">policy</button>
           <button class="tab" data-tab="logs" type="button">logs</button>
           <button class="tab" data-tab="diagram" type="button">diagram</button>
         </div>
         <pre id="tab-curl" class="tab-panel active">Select a scenario.</pre>
+        <div id="tab-token" class="tab-panel token-panel">
+          <section class="token-editor">
+            <div class="token-header">
+              <h3>Input token</h3>
+              <div class="token-actions">
+                <button id="fetch-token" type="button">Fetch</button>
+                <button id="clear-token" type="button">Clear</button>
+                <button id="copy-input-token" type="button">Copy</button>
+              </div>
+            </div>
+            <textarea id="input-token" spellcheck="false" aria-label="Input bearer token"></textarea>
+            <p id="token-status" class="token-status">-</p>
+          </section>
+          <section class="token-decode">
+            <div class="token-claims-panel">
+              <h3>Decoded input</h3>
+              <dl class="token-claims">
+                <dt>Format</dt><dd id="input-token-format">-</dd>
+                <dt>Algorithm</dt><dd id="input-token-algorithm">-</dd>
+                <dt>Issuer</dt><dd id="input-token-issuer">-</dd>
+                <dt>Subject</dt><dd id="input-token-subject">-</dd>
+                <dt>Scope</dt><dd id="input-token-scope">-</dd>
+                <dt>Audience</dt><dd id="input-token-audience">-</dd>
+                <dt>Client</dt><dd id="input-token-client">-</dd>
+                <dt>Expires</dt><dd id="input-token-exp">-</dd>
+                <dt>Issued</dt><dd id="input-token-iat">-</dd>
+                <dt>Not before</dt><dd id="input-token-nbf">-</dd>
+                <dt>Auth time</dt><dd id="input-token-auth-time">-</dd>
+              </dl>
+            </div>
+            <div class="token-json-grid">
+              <section>
+                <h3>Header</h3>
+                <pre id="input-token-header">-</pre>
+              </section>
+              <section>
+                <h3>Payload</h3>
+                <pre id="input-token-payload">-</pre>
+              </section>
+            </div>
+          </section>
+        </div>
         <div id="tab-response" class="tab-panel response-panel">
           <section>
             <h3>Raw</h3>

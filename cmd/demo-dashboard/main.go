@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -26,6 +28,12 @@ var staticFiles embed.FS
 
 const defaultAddr = "127.0.0.1:8088"
 const keycloakConfigPath = "test/e2e/keycloak-demo-scenarios.yaml"
+const defaultKeycloakBaseURL = "https://keycloak.int.kube"
+const defaultKeycloakRealm = "token-exchange-e2e"
+const defaultSubjectClientID = "tx-subject-client"
+const defaultSubjectClientSecret = "tx-subject-secret"
+const defaultKeycloakUser = "token-user"
+const defaultKeycloakPassword = "token-user-password"
 
 type server struct {
 	opts   demo.Options
@@ -56,6 +64,7 @@ func main() {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/scenarios", s.scenarios)
 	mux.HandleFunc("POST /api/scenarios/run-all", s.runAll)
+	mux.HandleFunc("POST /api/scenarios/{name}/token", s.scenarioToken)
 	mux.HandleFunc("POST /api/scenarios/{name}/run", s.runOne)
 	mux.HandleFunc("GET /api/policies/{namespace}/{name}", s.policy)
 	mux.HandleFunc("GET /api/logs/{component}", s.logs)
@@ -115,6 +124,16 @@ type componentStatus struct {
 	Warning   string `json:"warning,omitempty"`
 }
 
+type runRequest struct {
+	Bearer *string `json:"bearer"`
+}
+
+type tokenResponse struct {
+	Bearer  string `json:"bearer"`
+	Source  string `json:"source"`
+	Warning string `json:"warning,omitempty"`
+}
+
 func deploymentStatus(parent context.Context, namespace, deployment string) componentStatus {
 	status := componentStatus{Namespace: namespace, Deploy: deployment}
 	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
@@ -165,12 +184,54 @@ func (s *server) runOne(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Errorf("unknown scenario %q", r.PathValue("name")))
 		return
 	}
+	override, err := bearerOverride(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if override != nil {
+		sc.Request.Bearer = normalizeBearerInput(*override)
+	}
 	result, _ := demo.Run(r.Context(), s.opts, sc)
 	status := http.StatusOK
 	if !result.Passed {
 		status = http.StatusBadGateway
 	}
 	writeJSON(w, status, result)
+}
+
+func (s *server) scenarioToken(w http.ResponseWriter, r *http.Request) {
+	cfg, err := demo.LoadConfig(s.opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	sc, ok := cfg.Find(r.PathValue("name"))
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("unknown scenario %q", r.PathValue("name")))
+		return
+	}
+	resp, err := s.tokenForScenario(r.Context(), sc.WithDefaults())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *server) tokenForScenario(ctx context.Context, sc demo.Scenario) (tokenResponse, error) {
+	if s.issuer.Name == "keycloak" {
+		token, err := fetchKeycloakDemoSubjectToken(ctx, s.opts)
+		if err != nil {
+			return tokenResponse{}, err
+		}
+		return tokenResponse{Bearer: token, Source: "keycloak"}, nil
+	}
+	resp := tokenResponse{Bearer: sc.Request.Bearer, Source: "scenario"}
+	if sc.Request.Bearer == "" {
+		resp.Warning = "scenario has no configured bearer token"
+	}
+	return resp, nil
 }
 
 func (s *server) runAll(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +394,82 @@ func (s issuerSelection) apply(opts demo.Options) demo.Options {
 		opts.ConfigPath = s.ScenarioConfig
 	}
 	return opts
+}
+
+func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+
+	baseURL := strings.TrimRight(envDefault("DEMO_KEYCLOAK_BASE_URL", defaultKeycloakBaseURL), "/")
+	realm := envDefault("DEMO_KEYCLOAK_REALM", defaultKeycloakRealm)
+	form := url.Values{}
+	form.Set("grant_type", "password")
+	form.Set("client_id", envDefault("DEMO_KEYCLOAK_SUBJECT_CLIENT_ID", defaultSubjectClientID))
+	form.Set("client_secret", envDefault("DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET", defaultSubjectClientSecret))
+	form.Set("username", envDefault("DEMO_KEYCLOAK_USER", defaultKeycloakUser))
+	form.Set("password", envDefault("DEMO_KEYCLOAK_PASSWORD", defaultKeycloakPassword))
+	form.Set("scope", "profile")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/realms/"+realm+"/protocol/openid-connect/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("fetch Keycloak demo subject token: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if opts.WithDefaults().InsecureTLS {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // local demo uses self-signed int.kube certs.
+	}
+	client := &http.Client{Transport: transport}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch Keycloak demo subject token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var parsed struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		Error       string `json:"error"`
+		Description string `json:"error_description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", fmt.Errorf("fetch Keycloak demo subject token: decode response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		detail := parsed.Error
+		if parsed.Description != "" {
+			detail += ": " + parsed.Description
+		}
+		if detail == "" {
+			detail = resp.Status
+		}
+		return "", fmt.Errorf("fetch Keycloak demo subject token: %s", detail)
+	}
+	if parsed.TokenType != "Bearer" || parsed.AccessToken == "" {
+		return "", fmt.Errorf("fetch Keycloak demo subject token: response did not contain a bearer access token")
+	}
+	return parsed.AccessToken, nil
+}
+
+func bearerOverride(r *http.Request) (*string, error) {
+	var req runRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("decode run request: %w", err)
+	}
+	return req.Bearer, nil
+}
+
+func normalizeBearerInput(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= len("Bearer ") && strings.EqualFold(value[:len("Bearer ")], "Bearer ") {
+		return strings.TrimSpace(value[len("Bearer "):])
+	}
+	return value
 }
 
 func staticHandler() http.Handler {

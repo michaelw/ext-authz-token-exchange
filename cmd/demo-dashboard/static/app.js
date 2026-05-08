@@ -3,10 +3,13 @@ const state = {
   issuer: { label: "Issuer" },
   selected: null,
   results: new Map(),
+  tokenValues: new Map(),
+  tokenOverrides: new Set(),
   diagramRenderID: 0,
   mermaidInitialized: false,
   statusRefreshTimer: null,
   statusRefreshing: false,
+  tokenTimeRefreshTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -41,6 +44,12 @@ async function load() {
   const data = await api("/api/scenarios");
   state.scenarios = data.scenarios;
   state.issuer = data.issuer || { label: "Issuer" };
+  for (const scenario of state.scenarios) {
+    if (!state.tokenValues.has(scenario.name)) {
+      state.tokenValues.set(scenario.name, scenario.request?.bearer || "");
+    }
+  }
+  await prefillScenarioTokens();
   $("gateway-chip").textContent = `Gateway: ${data.baseURL}`;
   $("scenario-config-chip").textContent = `Scenarios: ${state.issuer.name || "unknown"}`;
   $("scenario-config-chip").title = data.issuer?.scenarioConfig || "";
@@ -48,6 +57,7 @@ async function load() {
   $("issuer-logs-title").textContent = state.issuer.label || "Issuer";
   await refreshStatus({ showChecking: true });
   startStatusRefresh();
+  startTokenTimeRefresh();
   renderScenarioList();
   selectScenario(state.scenarios[0]?.name);
 }
@@ -62,6 +72,17 @@ function startStatusRefresh() {
     }
     refreshStatus();
   }, 5000);
+}
+
+function startTokenTimeRefresh() {
+  if (state.tokenTimeRefreshTimer) {
+    return;
+  }
+  state.tokenTimeRefreshTimer = window.setInterval(() => {
+    if (!document.hidden && state.selected) {
+      renderInputTokenTimes();
+    }
+  }, 1000);
 }
 
 async function refreshStatus({ showChecking = false } = {}) {
@@ -136,12 +157,71 @@ function selectScenario(name) {
   renderSelected();
 }
 
-function renderSelected() {
-  const scenario = state.selected;
+function tokenForScenario(scenario) {
   if (!scenario) {
+    return "";
+  }
+  return state.tokenValues.has(scenario.name)
+    ? state.tokenValues.get(scenario.name)
+    : scenario.request?.bearer || "";
+}
+
+function effectiveScenario(scenario) {
+  if (!scenario) {
+    return null;
+  }
+  return {
+    ...scenario,
+    request: {
+      ...(scenario.request || {}),
+      bearer: normalizeBearerInput(tokenForScenario(scenario)),
+    },
+  };
+}
+
+function normalizeBearerInput(value) {
+  value = String(value || "").trim();
+  return value.toLowerCase().startsWith("bearer ")
+    ? value.slice("bearer ".length).trim()
+    : value;
+}
+
+async function prefillScenarioTokens() {
+  for (const scenario of state.scenarios) {
+    if (!shouldPrefillScenarioToken(scenario)) {
+      continue;
+    }
+    try {
+      const response = await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
+      if (!state.tokenOverrides.has(scenario.name)) {
+        state.tokenValues.set(scenario.name, response.bearer || "");
+      }
+    } catch (error) {
+      console.warn(`prefill token for ${scenario.name}: ${error.message}`);
+    }
+  }
+}
+
+function shouldPrefillScenarioToken(scenario) {
+  if (state.tokenOverrides.has(scenario.name) || normalizeBearerInput(tokenForScenario(scenario))) {
+    return false;
+  }
+  if (state.issuer.name !== "keycloak") {
+    return false;
+  }
+  if (!scenario.exchange || scenario.exchange === "-") {
+    return false;
+  }
+  return (scenario.expect?.status || 200) < 400;
+}
+
+function renderSelected() {
+  const selected = state.selected;
+  if (!selected) {
     return;
   }
-  const result = state.results.get(scenario.name);
+  const scenario = effectiveScenario(selected);
+  const result = state.results.get(selected.name);
   $("scenario-title").textContent = scenario.name;
   $("scenario-summary").textContent = scenario.summary || "";
   $("client-detail").textContent = `${scenario.request.method} ${scenario.request.path}`;
@@ -153,8 +233,9 @@ function renderSelected() {
   $("httpbin-detail").textContent = scenario.expect?.upstreamAuthorization || "upstream";
   $("request-method").textContent = scenario.request.method;
   $("request-path").textContent = scenario.request.path;
-  $("request-token").textContent = scenario.request.bearer ? `Bearer ${scenario.request.bearer}` : "<none>";
+  setTokenDisplay($("request-token"), scenario.request.bearer ? `Bearer ${scenario.request.bearer}` : "");
   $("tab-curl").textContent = result?.curl || buildCurlPreview(scenario);
+  renderInputTokenPanel(selected);
   renderDiagram(scenario, result);
   loadPolicy(scenario);
 
@@ -207,15 +288,20 @@ function clearObserved() {
 
 async function runScenario(name) {
   await refreshStatus();
-  const scenario = state.scenarios.find((item) => item.name === name);
-  if (!scenario) {
+  const selected = state.scenarios.find((item) => item.name === name);
+  if (!selected) {
     return;
   }
   selectScenario(name);
+  const scenario = effectiveScenario(selected);
   setPill("Running", "running");
   renderFlow(scenario, { running: true });
   try {
-    const result = await api(`/api/scenarios/${encodeURIComponent(name)}/run`, { method: "POST" });
+    const result = await api(`/api/scenarios/${encodeURIComponent(name)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bearer: tokenForScenario(selected) }),
+    });
     state.results.set(name, result);
   } catch (error) {
     state.results.set(name, {
@@ -231,6 +317,7 @@ async function runScenario(name) {
 
 async function runAll() {
   await refreshStatus();
+  await prefillScenarioTokens();
   $("run-all").disabled = true;
   try {
     for (const scenario of state.scenarios) {
@@ -458,7 +545,7 @@ function buildMermaidDiagram(scenario, result) {
 function requestLine(request) {
   const parts = [`${request.method} ${request.path}`];
   if (request.bearer) {
-    parts.push(`Authorization: Bearer ${request.bearer}`);
+    parts.push(displayAuthorization(`Bearer ${request.bearer}`));
   }
   const headers = Object.entries(request.headers || {});
   if (headers.length) {
@@ -471,7 +558,7 @@ function tokenExchangeLine(scenario) {
   const request = scenario.request || {};
   const parts = [`POST ${scenario.exchange}`];
   if (request.bearer) {
-    parts.push(`subject_token=${request.bearer}`);
+    parts.push(`subject_token=${displayAuthorization(`Bearer ${request.bearer}`)}`);
   }
   return parts.join("<br/>");
 }
@@ -480,7 +567,7 @@ function issuerSuccessLine(scenario, observed, expect) {
   const auth = observed.upstreamAuthorization || expect.upstreamAuthorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (token) {
-    const decoded = decodeUnsignedJWT(token);
+    const decoded = decodeJWT(token);
     return decoded ? `200 access_token=${compactTokenSummary(decoded.payload)}` : `200 access_token=${token}`;
   }
   return "200 access_token";
@@ -600,6 +687,111 @@ function renderStructuredPreview(format, observed = state.results.get(state.sele
     : observed.prettyJSON || observed.prettyYAML || "-";
 }
 
+function renderInputTokenPanel(scenario = state.selected) {
+  if (!scenario) {
+    return;
+  }
+  const input = $("input-token");
+  const raw = tokenForScenario(scenario);
+  if (document.activeElement !== input) {
+    input.value = raw;
+  }
+  const token = normalizeBearerInput(raw);
+  const decoded = decodeJWT(token);
+  $("input-token-format").textContent = token ? decoded ? decoded.signatureStatus : "not a JWT" : "-";
+  $("input-token-algorithm").textContent = decoded?.header?.alg || "-";
+  $("input-token-issuer").textContent = decoded?.payload?.iss || "-";
+  $("input-token-subject").textContent = decoded?.payload?.sub || "-";
+  $("input-token-scope").textContent = decoded?.payload?.scope || "-";
+  $("input-token-audience").textContent = claimList(decoded?.payload?.aud);
+  $("input-token-client").textContent = decoded?.payload?.azp || decoded?.payload?.client_id || "-";
+  $("input-token-header").textContent = decoded ? JSON.stringify(decoded.header, null, 2) : "-";
+  $("input-token-payload").textContent = decoded ? JSON.stringify(decoded.payload, null, 2) : "-";
+  renderInputTokenTimes(decoded?.payload);
+  if (!token) {
+    setTokenStatus("-", "");
+  } else if (decoded) {
+    setTokenStatus(decoded.signatureStatus, "good");
+  } else {
+    setTokenStatus("input is not a JWT", "fail");
+  }
+}
+
+function renderInputTokenTimes(payload = decodedInputPayload()) {
+  const claims = [
+    ["exp", "input-token-exp", "expires"],
+    ["iat", "input-token-iat", "issued"],
+    ["nbf", "input-token-nbf", "valid"],
+    ["auth_time", "input-token-auth-time", "auth"],
+  ];
+  for (const [claim, id, mode] of claims) {
+    $(id).textContent = formatJWTTime(payload?.[claim], mode);
+  }
+}
+
+function decodedInputPayload() {
+  const token = normalizeBearerInput(tokenForScenario(state.selected));
+  return decodeJWT(token)?.payload || null;
+}
+
+function setTokenStatus(text, klass) {
+  const status = $("token-status");
+  status.className = ["token-status", klass].filter(Boolean).join(" ");
+  status.textContent = text;
+}
+
+function handleTokenInput(event) {
+  if (!state.selected) {
+    return;
+  }
+  state.tokenValues.set(state.selected.name, event.target.value);
+  state.tokenOverrides.add(state.selected.name);
+  state.results.delete(state.selected.name);
+  renderSelected();
+  renderScenarioList();
+}
+
+async function fetchScenarioToken() {
+  if (!state.selected) {
+    return;
+  }
+  const scenario = state.selected;
+  const button = $("fetch-token");
+  button.disabled = true;
+  setTokenStatus("fetching...", "");
+  try {
+    const response = await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
+    state.tokenValues.set(scenario.name, response.bearer || "");
+    state.tokenOverrides.add(scenario.name);
+    state.results.delete(scenario.name);
+    renderSelected();
+    renderScenarioList();
+    setTokenStatus(response.warning || `fetched from ${response.source}`, response.warning ? "" : "good");
+  } catch (error) {
+    setTokenStatus(error.message, "fail");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function clearScenarioToken() {
+  if (!state.selected) {
+    return;
+  }
+  state.tokenValues.set(state.selected.name, "");
+  state.tokenOverrides.add(state.selected.name);
+  state.results.delete(state.selected.name);
+  renderSelected();
+  renderScenarioList();
+}
+
+function copyScenarioToken() {
+  if (!state.selected) {
+    return;
+  }
+  copyText(tokenForScenario(state.selected), $("copy-input-token"));
+}
+
 function renderDecodedToken(auth) {
   const decoded = decodeBearerAuthorization(auth);
   const payload = decoded?.payload || {};
@@ -610,7 +802,7 @@ function renderDecodedToken(auth) {
   $("jwt-resource").textContent = claimList(payload.resource);
   $("jwt-audience").textContent = claimList(payload.aud);
   $("jwt-grant").textContent = payload.grant_type || "-";
-  $("jwt-client").textContent = payload.client_id || "-";
+  $("jwt-client").textContent = payload.azp || payload.client_id || "-";
 }
 
 function setHTTPBinDetail(auth) {
@@ -676,21 +868,25 @@ function decodeBearerAuthorization(auth) {
   if (!auth?.startsWith("Bearer ")) {
     return null;
   }
-  return decodeUnsignedJWT(auth.slice("Bearer ".length));
+  return decodeJWT(auth.slice("Bearer ".length));
 }
 
-function decodeUnsignedJWT(token) {
+function decodeJWT(token) {
   const parts = String(token || "").split(".");
-  if (parts.length !== 3 || parts[2] !== "") {
+  if (parts.length !== 3) {
     return null;
   }
   try {
     const header = base64URLDecodeJSON(parts[0]);
     const payload = base64URLDecodeJSON(parts[1]);
-    if (header?.alg !== "none" || header?.typ !== "JWT") {
+    if (!header || !payload) {
       return null;
     }
-    return { header, payload };
+    return {
+      header,
+      payload,
+      signatureStatus: header.alg === "none" && parts[2] === "" ? "unsigned JWT" : "signature not verified",
+    };
   } catch {
     return null;
   }
@@ -708,6 +904,7 @@ function compactTokenSummary(payload = {}) {
     "JWT",
     payload.scenario ? `scenario=${payload.scenario}` : "",
     payload.sub ? `sub=${payload.sub}` : "",
+    payload.azp ? `azp=${payload.azp}` : "",
     payload.aud ? `aud=${claimList(payload.aud)}` : "",
   ].filter(Boolean).join(" ");
 }
@@ -715,6 +912,7 @@ function compactTokenSummary(payload = {}) {
 function tokenTooltip(decoded) {
   const payload = decoded?.payload || {};
   return [
+    `signature: ${decoded?.signatureStatus || "-"}`,
     `iss: ${payload.iss || "-"}`,
     `scenario: ${payload.scenario || "-"}`,
     `sub: ${payload.sub || "-"}`,
@@ -722,7 +920,7 @@ function tokenTooltip(decoded) {
     `resource: ${claimList(payload.resource)}`,
     `aud: ${claimList(payload.aud)}`,
     `grant_type: ${payload.grant_type || "-"}`,
-    `client_id: ${payload.client_id || "-"}`,
+    `client: ${payload.azp || payload.client_id || "-"}`,
   ].join("\n");
 }
 
@@ -731,6 +929,45 @@ function claimList(value) {
     return value.length ? value.join(", ") : "-";
   }
   return value || "-";
+}
+
+function formatJWTTime(value, mode) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  const date = new Date(value * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  const local = date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
+  const delta = date.getTime() - Date.now();
+  return `${local} (${relativeTime(delta, mode)})`;
+}
+
+function relativeTime(deltaMs, mode) {
+  const past = deltaMs < 0;
+  const absSeconds = Math.floor(Math.abs(deltaMs) / 1000);
+  const units = [
+    ["year", 365 * 24 * 60 * 60],
+    ["month", 30 * 24 * 60 * 60],
+    ["day", 24 * 60 * 60],
+    ["hour", 60 * 60],
+    ["minute", 60],
+    ["second", 1],
+  ];
+  const [unit, seconds] = units.find(([, size]) => absSeconds >= size) || units[units.length - 1];
+  const amount = Math.max(1, Math.floor(absSeconds / seconds));
+  const label = `${amount} ${unit}${amount === 1 ? "" : "s"}`;
+  if (mode === "expires") {
+    return past ? `expired ${label} ago` : `in ${label}`;
+  }
+  if (mode === "valid") {
+    return past ? `${label} ago` : `in ${label}`;
+  }
+  return past ? `${label} ago` : `in ${label}`;
 }
 
 function truncateMiddle(value, maxLength) {
@@ -818,7 +1055,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && state.selected) {
+  if (event.key === "Enter" && state.selected && !event.target.closest("textarea, input, select, button")) {
     runScenario(state.selected.name);
   }
 });
@@ -844,6 +1081,10 @@ $("run-selected").addEventListener("click", () => {
 });
 $("refresh-logs").addEventListener("click", refreshLogs);
 $("refresh-policy").addEventListener("click", () => loadPolicy());
+$("input-token").addEventListener("input", handleTokenInput);
+$("fetch-token").addEventListener("click", fetchScenarioToken);
+$("clear-token").addEventListener("click", clearScenarioToken);
+$("copy-input-token").addEventListener("click", copyScenarioToken);
 $("theme-select").addEventListener("change", (event) => applyTheme(event.target.value));
 for (const button of document.querySelectorAll(".format-button")) {
   button.addEventListener("click", () => renderStructuredPreview(button.dataset.format));

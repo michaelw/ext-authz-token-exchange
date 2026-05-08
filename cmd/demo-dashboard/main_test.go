@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +153,224 @@ func TestSelectIssuerKeepsExplicitScenarioConfig(t *testing.T) {
 	}
 }
 
+func TestScenarioTokenFetchesKeycloakSubjectToken(t *testing.T) {
+	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/realms/token-exchange-e2e/protocol/openid-connect/token" {
+			t.Fatalf("Path = %q, want token endpoint", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("Method = %q, want POST", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		want := map[string]string{
+			"grant_type":    "password",
+			"client_id":     "tx-subject-client",
+			"client_secret": "tx-subject-secret",
+			"username":      "token-user",
+			"password":      "token-user-password",
+			"scope":         "profile",
+		}
+		for key, value := range want {
+			if got := r.Form.Get(key); got != value {
+				t.Fatalf("form %s = %q, want %q", key, got, value)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "subject-token",
+			"token_type":   "Bearer",
+		})
+	}))
+	defer keycloak.Close()
+	t.Setenv("DEMO_KEYCLOAK_BASE_URL", keycloak.URL)
+	opts := demoOptions()
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: keycloak-audience
+    request:
+      path: /anything/keycloak-audience
+`)
+	s := &server{opts: opts, issuer: keycloakIssuer()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/keycloak-audience/token", nil)
+	req.SetPathValue("name", "keycloak-audience")
+
+	s.scenarioToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got tokenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Bearer != "subject-token" {
+		t.Fatalf("Bearer = %q, want subject-token", got.Bearer)
+	}
+	if got.Source != "keycloak" {
+		t.Fatalf("Source = %q, want keycloak", got.Source)
+	}
+}
+
+func TestScenarioTokenReturnsFakeScenarioBearer(t *testing.T) {
+	opts := demoOptions()
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: yellow-success
+    request:
+      path: /anything/yellow
+      bearer: incoming-yellow
+`)
+	s := &server{opts: opts, issuer: fakeIssuer()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/yellow-success/token", nil)
+	req.SetPathValue("name", "yellow-success")
+
+	s.scenarioToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got tokenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Bearer != "incoming-yellow" {
+		t.Fatalf("Bearer = %q, want incoming-yellow", got.Bearer)
+	}
+	if got.Source != "scenario" {
+		t.Fatalf("Source = %q, want scenario", got.Source)
+	}
+}
+
+func TestRunOneUsesBearerOverride(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"headers": map[string][]string{
+				"Authorization": []string{r.Header.Get("Authorization")},
+			},
+		})
+	}))
+	defer upstream.Close()
+	opts := demoOptions()
+	opts.BaseURL = upstream.URL
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: yellow-success
+    request:
+      path: /anything/yellow
+      bearer: configured-token
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer pasted-token
+`)
+	s := &server{opts: opts, issuer: fakeIssuer()}
+	rr := httptest.NewRecorder()
+	reqBody := bytes.NewBufferString(`{"bearer":"Bearer pasted-token"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/yellow-success/run", reqBody)
+	req.SetPathValue("name", "yellow-success")
+
+	s.runOne(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got demo.Result
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Scenario.Request.Bearer != "pasted-token" {
+		t.Fatalf("scenario bearer = %q, want pasted-token", got.Scenario.Request.Bearer)
+	}
+	if got.Observed.Auth != "Bearer pasted-token" {
+		t.Fatalf("observed auth = %q, want pasted token", got.Observed.Auth)
+	}
+}
+
+func TestRunOneAllowsEmptyBearerOverride(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"headers": map[string][]string{},
+		})
+	}))
+	defer upstream.Close()
+	opts := demoOptions()
+	opts.BaseURL = upstream.URL
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: missing-bearer
+    request:
+      path: /anything/yellow
+      bearer: configured-token
+    expect:
+      status: 200
+`)
+	s := &server{opts: opts, issuer: fakeIssuer()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/missing-bearer/run", bytes.NewBufferString(`{"bearer":""}`))
+	req.SetPathValue("name", "missing-bearer")
+
+	s.runOne(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got demo.Result
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Scenario.Request.Bearer != "" {
+		t.Fatalf("scenario bearer = %q, want empty", got.Scenario.Request.Bearer)
+	}
+}
+
+func TestRunOneWithoutBodyKeepsConfiguredBearer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"headers": map[string][]string{
+				"Authorization": []string{r.Header.Get("Authorization")},
+			},
+		})
+	}))
+	defer upstream.Close()
+	opts := demoOptions()
+	opts.BaseURL = upstream.URL
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: yellow-success
+    request:
+      path: /anything/yellow
+      bearer: configured-token
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer configured-token
+`)
+	s := &server{opts: opts, issuer: fakeIssuer()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/yellow-success/run", nil)
+	req.SetPathValue("name", "yellow-success")
+
+	s.runOne(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got demo.Result
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Scenario.Request.Bearer != "configured-token" {
+		t.Fatalf("scenario bearer = %q, want configured-token", got.Scenario.Request.Bearer)
+	}
+	if got.Observed.Auth != "Bearer configured-token" {
+		t.Fatalf("observed auth = %q, want configured token", got.Observed.Auth)
+	}
+}
+
 func demoOptions() demo.Options {
 	return demo.Options{
 		ConfigPath:       "test/e2e/demo-scenarios.yaml",
@@ -166,4 +388,13 @@ func withKubectl(t *testing.T, script string) {
 		t.Fatalf("write fake kubectl: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func writeScenarioConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "scenarios.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write scenario config: %v", err)
+	}
+	return path
 }

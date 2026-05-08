@@ -304,8 +304,16 @@ Useful overrides:
 
 ## Manual Keycloak Demo
 
-After `devspace deploy -p local-test -p with-keycloak`, fetch a fresh subject
-token through the local Gateway route:
+After `devspace deploy -p local-test -p with-keycloak`, the dashboard detects
+the deployed Keycloak issuer. Use the token tab's `Fetch` button to place a
+fresh local subject token in the selected scenario's input field:
+
+```sh
+devspace run demo-dashboard
+```
+
+To run the command-line demo client, or to seed the dashboard field with an
+explicit token, fetch a fresh subject token through the local Gateway route:
 
 ```sh
 export DEMO_BEARER_TOKEN="$(
@@ -324,11 +332,16 @@ export DEMO_BEARER_TOKEN="$(
 Run the Keycloak-focused demo scenarios:
 
 ```sh
-devspace run demo-dashboard
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-audience
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-resource
 ```
+
+The dashboard token tab decodes JWT-shaped input tokens. Its `Fetch` action
+uses the local profile defaults and can be adjusted with
+`DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
+`DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
+`DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.
 
 The profile uses these local-only clients:
 
