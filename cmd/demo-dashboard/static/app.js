@@ -5,6 +5,7 @@ const state = {
   results: new Map(),
   tokenValues: new Map(),
   tokenOverrides: new Set(),
+  tokenFetches: new Map(),
   diagramRenderID: 0,
   mermaidInitialized: false,
   statusRefreshTimer: null,
@@ -62,10 +63,6 @@ async function load() {
   startStatusRefresh();
   startTokenTimeRefresh();
   refreshStatus({ showChecking: true });
-  prefillScenarioTokens().then(() => {
-    renderScenarioList();
-    renderSelected();
-  });
 }
 
 function startStatusRefresh() {
@@ -227,27 +224,39 @@ function normalizeBearerInput(value) {
     : value;
 }
 
-async function prefillScenarioTokens() {
-  await Promise.all(state.scenarios.map(async (scenario) => {
-    if (!shouldPrefillScenarioToken(scenario)) {
-      return;
-    }
-    try {
-      const response = await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
-      if (!state.tokenOverrides.has(scenario.name)) {
-        state.tokenValues.set(scenario.name, response.bearer || "");
-      }
-    } catch (error) {
-      console.warn(`prefill token for ${scenario.name}: ${error.message}`);
-    }
-  }));
-}
-
 function shouldPrefillScenarioToken(scenario) {
   if (state.tokenOverrides.has(scenario.name) || normalizeBearerInput(tokenForScenario(scenario))) {
     return false;
   }
   return isGeneratedTokenPrefill(scenario.request?.token?.prefill);
+}
+
+async function ensureScenarioToken(scenario) {
+  if (!shouldPrefillScenarioToken(scenario)) {
+    return;
+  }
+  if (state.selected?.name === scenario.name) {
+    setTokenStatus("fetching...", "");
+  }
+  if (!state.tokenFetches.has(scenario.name)) {
+    state.tokenFetches.set(scenario.name, fetchTokenForScenario(scenario));
+  }
+  const response = await state.tokenFetches.get(scenario.name);
+  if (!state.tokenOverrides.has(scenario.name)) {
+    state.tokenValues.set(scenario.name, response.bearer || "");
+    if (state.selected?.name === scenario.name) {
+      renderSelected();
+      renderScenarioList();
+    }
+  }
+}
+
+async function fetchTokenForScenario(scenario) {
+  try {
+    return await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
+  } finally {
+    state.tokenFetches.delete(scenario.name);
+  }
 }
 
 function isGeneratedTokenPrefill(prefill) {
@@ -333,10 +342,12 @@ async function runScenario(name) {
     return;
   }
   selectScenario(name);
-  const scenario = effectiveScenario(selected);
   setPill("Running", "running");
-  renderFlow(scenario, { running: true });
+  renderFlow(effectiveScenario(selected), { running: true });
   try {
+    await ensureScenarioToken(selected);
+    const scenario = effectiveScenario(selected);
+    renderFlow(scenario, { running: true });
     const result = await api(`/api/scenarios/${encodeURIComponent(name)}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -345,7 +356,7 @@ async function runScenario(name) {
     state.results.set(name, result);
   } catch (error) {
     state.results.set(name, {
-      scenario,
+      scenario: effectiveScenario(selected),
       passed: false,
       failures: [{ label: "request", want: "success", got: error.message }],
       observed: {},
@@ -357,7 +368,6 @@ async function runScenario(name) {
 
 async function runAll() {
   await refreshStatus();
-  await prefillScenarioTokens();
   $("run-all").disabled = true;
   try {
     for (const scenario of state.scenarios) {
@@ -905,7 +915,7 @@ async function fetchScenarioToken() {
   button.disabled = true;
   setTokenStatus("fetching...", "");
   try {
-    const response = await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
+    const response = await fetchTokenForScenario(scenario);
     state.tokenValues.set(scenario.name, response.bearer || "");
     state.tokenOverrides.add(scenario.name);
     state.results.delete(scenario.name);
