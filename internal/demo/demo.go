@@ -34,9 +34,6 @@ const (
 	DefaultConfigPath = "test/e2e/demo-scenarios.yaml"
 	// DefaultRequestTimeout bounds each demo HTTP request.
 	DefaultRequestTimeout = 10 * time.Second
-	// DefaultBearerTokenEnv is the env var used by manual scenarios that need a
-	// freshly issued subject token.
-	DefaultBearerTokenEnv = "DEMO_BEARER_TOKEN"
 )
 
 // Options configures scenario rendering and HTTP execution.
@@ -47,7 +44,6 @@ type Options struct {
 	SystemNamespace  string
 	PluginNamespace  string
 	PluginDeployment string
-	BearerToken      string
 	InsecureTLS      bool
 }
 
@@ -60,7 +56,6 @@ func LoadOptionsFromEnv() Options {
 		SystemNamespace:  envDefault("DEMO_SYSTEM_NAMESPACE", DefaultSystemNamespace),
 		PluginNamespace:  envDefault("DEMO_PLUGIN_NAMESPACE", DefaultPluginNamespace),
 		PluginDeployment: envDefault("DEMO_PLUGIN_DEPLOYMENT", DefaultPluginDeployment),
-		BearerToken:      envDefault(DefaultBearerTokenEnv, ""),
 		InsecureTLS:      envBool("DEMO_INSECURE_SKIP_VERIFY", true),
 	}
 }
@@ -92,8 +87,14 @@ type Behavior struct {
 type Request struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
-	Bearer  string            `json:"bearer"`
+	Token   RequestToken      `json:"token"`
 	Headers map[string]string `json:"headers"`
+}
+
+// RequestToken describes how demo tooling should seed a scenario's input token.
+type RequestToken struct {
+	Prefill string `json:"prefill"`
+	Value   string `json:"value,omitempty"`
 }
 
 // Expectation describes the observable response a scenario should produce.
@@ -142,7 +143,6 @@ type templateData struct {
 	BaseURLHost     string
 	NamespacePrefix string
 	SystemNamespace string
-	BearerToken     string
 }
 
 // LoadConfig reads, renders, parses, and validates the demo scenario config.
@@ -183,7 +183,6 @@ func RenderConfig(data []byte, opts Options) ([]byte, error) {
 		BaseURLHost:     baseURLHost,
 		NamespacePrefix: opts.NamespacePrefix,
 		SystemNamespace: opts.SystemNamespace,
-		BearerToken:     opts.BearerToken,
 	})
 	if err != nil {
 		return nil, err
@@ -217,6 +216,9 @@ func (cfg Config) Validate() error {
 		if strings.TrimSpace(sc.Behavior.Detail) == "" {
 			return fmt.Errorf("scenario %q must configure behavior.detail", sc.Name)
 		}
+		if err := sc.Request.Token.Validate(sc.Name); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -237,6 +239,9 @@ func (sc Scenario) WithDefaults() Scenario {
 		sc.Request.Method = http.MethodGet
 	}
 	sc.Request.Method = strings.ToUpper(sc.Request.Method)
+	if sc.Request.Token.Prefill == "" {
+		sc.Request.Token.Prefill = "none"
+	}
 	if sc.Policy == "" {
 		sc.Policy = "-"
 	}
@@ -247,6 +252,43 @@ func (sc Scenario) WithDefaults() Scenario {
 		sc.Expect.Status = http.StatusOK
 	}
 	return sc
+}
+
+// Validate checks a scenario token declaration.
+func (token RequestToken) Validate(scenarioName string) error {
+	switch token.Prefill {
+	case "none":
+		return nil
+	case "literal":
+		if token.Value == "" {
+			return fmt.Errorf("scenario %q request.token.value is required when request.token.prefill is literal", scenarioName)
+		}
+		return nil
+	case "keycloak-subject",
+		"keycloak-expired-subject",
+		"keycloak-unsigned-subject",
+		"keycloak-truncated-signature",
+		"keycloak-untrusted-issuer":
+		return nil
+	default:
+		return fmt.Errorf("scenario %q has unsupported request.token.prefill %q", scenarioName, token.Prefill)
+	}
+}
+
+// Bearer returns the scenario's effective literal bearer token, if any.
+func (token RequestToken) Bearer() string {
+	if token.Prefill != "literal" {
+		return ""
+	}
+	return token.Value
+}
+
+// WithBearer returns a literal token declaration for a manual override.
+func WithBearer(value string) RequestToken {
+	if value == "" {
+		return RequestToken{Prefill: "none"}
+	}
+	return RequestToken{Prefill: "literal", Value: value}
 }
 
 // WithDefaults fills derived defaults for demo options.
@@ -312,8 +354,8 @@ func Send(parent context.Context, opts Options, sc Scenario) (Observed, string, 
 	if err != nil {
 		return Observed{}, "", err
 	}
-	if sc.Request.Bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+sc.Request.Bearer)
+	if bearer := sc.Request.Token.Bearer(); bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	for key, value := range sc.Request.Headers {
 		req.Header.Set(key, value)
@@ -379,8 +421,8 @@ func Curl(opts Options, sc Scenario) string {
 		requestURL = opts.BaseURL + sc.Request.Path
 	}
 	parts := []string{"curl", "-sk", "-X", shellQuote(sc.Request.Method)}
-	if sc.Request.Bearer != "" {
-		parts = append(parts, "-H", shellQuote("Authorization: Bearer "+sc.Request.Bearer))
+	if bearer := sc.Request.Token.Bearer(); bearer != "" {
+		parts = append(parts, "-H", shellQuote("Authorization: Bearer "+bearer))
 	}
 	for key, value := range sc.Request.Headers {
 		parts = append(parts, "-H", shellQuote(key+": "+value))

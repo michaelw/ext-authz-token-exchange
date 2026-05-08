@@ -305,42 +305,24 @@ Useful overrides:
 ## Manual Keycloak Demo
 
 After `devspace deploy -p local-test -p with-keycloak`, the dashboard detects
-the deployed Keycloak issuer. Use the token tab's `Fetch` button to place a
-fresh local subject token in the selected scenario's input field:
+the deployed Keycloak issuer. Each scenario declares its input token shape in
+the scenario YAML, and the token tab's `Fetch` button generates the selected
+scenario's token when needed:
 
 ```sh
 devspace run demo-dashboard
 ```
 
-To run the command-line demo client, or to seed the dashboard field with an
-explicit token, fetch a fresh subject token through the local Gateway route:
-
-```sh
-export DEMO_BEARER_TOKEN="$(
-  curl -fsS https://keycloak.int.kube/realms/token-exchange-e2e/protocol/openid-connect/token \
-    -H 'Content-Type: application/x-www-form-urlencoded' \
-    -d grant_type=password \
-    -d client_id=tx-subject-client \
-    -d client_secret=tx-subject-secret \
-    -d username=token-user \
-    -d password=token-user-password \
-    -d scope=profile |
-  jq -r .access_token
-)"
-```
-
-Run the Keycloak-focused demo scenarios:
+Use the dashboard for Keycloak scenarios that declare generated token prefill
+types. The command-line demo client can still list the configured scenarios:
 
 ```sh
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-audience
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-resource
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-invalid-audience
 ```
 
 The dashboard token tab decodes JWT-shaped input tokens. Its `Fetch` action
-uses the local profile defaults, including invalid-token fixtures for the
-Keycloak negative scenarios, and can be adjusted with
+uses each scenario's `request.token.prefill`, including invalid-token fixtures
+for the Keycloak negative scenarios, and can be adjusted with
 `DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_ID`, `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_SECRET`,

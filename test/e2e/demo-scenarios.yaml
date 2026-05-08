@@ -5,7 +5,9 @@ scenarios:
     request:
       method: GET
       path: /anything/yellow
-      bearer: incoming-yellow
+      token:
+        prefill: literal
+        value: incoming-yellow
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     exchange: /token/yellow
     behavior:
@@ -19,7 +21,9 @@ scenarios:
     request:
       method: GET
       path: /anything/red
-      bearer: incoming-red
+      token:
+        prefill: literal
+        value: incoming-red
     policy: "{{ .NamespacePrefix }}-red/red-policy"
     exchange: /token/red
     behavior:
@@ -33,7 +37,9 @@ scenarios:
     request:
       method: GET
       path: /anything/blue
-      bearer: incoming-blue
+      token:
+        prefill: literal
+        value: incoming-blue
     policy: "{{ .NamespacePrefix }}-blue/blue-policy"
     exchange: /token/blue
     behavior:
@@ -47,6 +53,8 @@ scenarios:
     request:
       method: GET
       path: /anything/yellow
+      token:
+        prefill: none
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     behavior:
       summary: Denied before token exchange.
@@ -61,6 +69,8 @@ scenarios:
     request:
       method: OPTIONS
       path: /anything/yellow
+      token:
+        prefill: none
       headers:
         Origin: https://client.example.test
         Access-Control-Request-Method: GET
@@ -78,6 +88,8 @@ scenarios:
     request:
       method: OPTIONS
       path: /anything/yellow
+      token:
+        prefill: none
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     behavior:
       summary: Denied before token exchange.
@@ -92,7 +104,9 @@ scenarios:
     request:
       method: OPTIONS
       path: /anything/yellow
-      bearer: options-token
+      token:
+        prefill: literal
+        value: options-token
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     exchange: /token/yellow
     behavior:
@@ -106,7 +120,9 @@ scenarios:
     request:
       method: GET
       path: /anything/no-policy-match
-      bearer: original-token
+      token:
+        prefill: literal
+        value: original-token
     behavior:
       summary: Passes through without token exchange.
       detail: The plugin allows this request through unchanged, so the fake issuer is not called.
@@ -119,7 +135,9 @@ scenarios:
     request:
       method: GET
       path: /anything/denied
-      bearer: denied-token
+      token:
+        prefill: literal
+        value: denied-token
     policy: "{{ .NamespacePrefix }}-red/denied-policy"
     behavior:
       summary: Denied before token exchange.
@@ -133,7 +151,9 @@ scenarios:
     request:
       method: GET
       path: /anything/error-invalid-target
-      bearer: incoming-error
+      token:
+        prefill: literal
+        value: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-invalid-target-policy"
     exchange: /token/invalid-target
     behavior:
@@ -148,7 +168,9 @@ scenarios:
     request:
       method: GET
       path: /anything/error-invalid-grant
-      bearer: incoming-invalid-grant
+      token:
+        prefill: literal
+        value: incoming-invalid-grant
     policy: "{{ .NamespacePrefix }}-red/error-invalid-grant-policy"
     exchange: /token/invalid-grant
     behavior:
@@ -163,7 +185,9 @@ scenarios:
     request:
       method: GET
       path: /anything/error-expired-subject-token
-      bearer: eyJhbGciOiJub25lIn0.eyJleHAiOjF9.
+      token:
+        prefill: literal
+        value: eyJhbGciOiJub25lIn0.eyJleHAiOjF9.
     policy: "{{ .NamespacePrefix }}-red/error-expired-subject-token-policy"
     exchange: /token/expired-subject-token
     behavior:
@@ -178,7 +202,9 @@ scenarios:
     request:
       method: GET
       path: /anything/error-unauthorized
-      bearer: incoming-error
+      token:
+        prefill: literal
+        value: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-unauthorized-policy"
     exchange: /token/unauthorized
     behavior:
@@ -194,7 +220,9 @@ scenarios:
     request:
       method: GET
       path: /anything/error-forbidden
-      bearer: incoming-error
+      token:
+        prefill: literal
+        value: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-forbidden-policy"
     exchange: /token/forbidden
     behavior:
@@ -209,7 +237,9 @@ scenarios:
     request:
       method: GET
       path: /anything/error-malformed
-      bearer: incoming-error
+      token:
+        prefill: literal
+        value: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-malformed-policy"
     exchange: /token/malformed
     behavior:
