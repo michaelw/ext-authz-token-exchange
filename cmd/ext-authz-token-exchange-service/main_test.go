@@ -5,6 +5,7 @@ import (
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/stats"
 )
 
 func TestGRPCPortFromEnv(t *testing.T) {
@@ -38,6 +39,18 @@ func TestLoggingOptionsIncludesHealthMethod(t *testing.T) {
 	})
 	if got != "health_status=serving" {
 		t.Fatalf("unexpected health summary: %s", got)
+	}
+}
+
+func TestGRPCTracingFilterSkipsHealthChecks(t *testing.T) {
+	if grpcTracingFilter()(&stats.RPCTagInfo{FullMethodName: healthCheckMethod}) {
+		t.Fatalf("expected health check RPC to be filtered from tracing")
+	}
+}
+
+func TestGRPCTracingFilterKeepsAuthzChecks(t *testing.T) {
+	if !grpcTracingFilter()(&stats.RPCTagInfo{FullMethodName: "/envoy.service.auth.v3.Authorization/Check"}) {
+		t.Fatalf("expected ext-authz Check RPC to remain traceable")
 	}
 }
 

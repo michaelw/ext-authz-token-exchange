@@ -217,7 +217,8 @@ Durations use Go duration strings such as `500ms`, `2s`, or `1m`.
 The service extracts W3C Trace Context (`traceparent`, `tracestate`) and
 baggage from Envoy `CheckRequest` HTTP headers, then propagates that context to
 token endpoint subrequests. The gRPC ext-authz server and outbound token
-endpoint HTTP client are instrumented. Without an OTLP exporter configured,
+endpoint HTTP client are instrumented; gRPC health checks are intentionally not
+traced to avoid probe noise. Without an OTLP exporter configured,
 instrumentation is inert but propagation still works inside the request path.
 The local fake token endpoint can use the same `OTEL_*` settings when the e2e
 demo needs a token issuer application span.

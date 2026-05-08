@@ -21,6 +21,7 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/server"
 	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc/filters"
 )
 
 const healthCheckMethod = "/grpc.health.v1.Health/Check"
@@ -62,7 +63,10 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithPropagators(telemetry.Propagators()))),
+		grpc.StatsHandler(otelgrpc.NewServerHandler(
+			otelgrpc.WithPropagators(telemetry.Propagators()),
+			otelgrpc.WithFilter(grpcTracingFilter()),
+		)),
 		grpc.UnaryInterceptor(server.LoggingInterceptorWithOptions(loggingOptions(cfg))),
 	)
 	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchange.NewClient(cfg, nil)))
@@ -90,6 +94,10 @@ func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {
 		SummarizeResponse: summarizeHealthResponse,
 	}
 	return server.LoggingOptions{Methods: methods}
+}
+
+func grpcTracingFilter() otelgrpc.Filter {
+	return filters.Not(filters.HealthCheck())
 }
 
 func summarizeHealthResponse(resp any) string {
