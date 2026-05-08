@@ -5,7 +5,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-audience
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-subject
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -19,7 +20,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-resource
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-subject
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-resource-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -33,7 +35,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-expired-subject-token
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-expired-subject
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-expired-subject-token-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -47,7 +50,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-unsigned-subject-token
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-unsigned-subject
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-unsigned-subject-token-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -61,7 +65,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-truncated-signature
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-truncated-signature
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-truncated-signature-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -75,7 +80,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-untrusted-issuer
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-untrusted-issuer
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-untrusted-issuer-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -89,7 +95,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-invalid-audience
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-subject
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-invalid-audience-policy"
     exchange: Keycloak token exchange endpoint
     behavior:
@@ -103,7 +110,8 @@ scenarios:
     request:
       method: GET
       path: /anything/keycloak-invalid-scope
-      bearer: "{{ .BearerToken }}"
+      token:
+        prefill: keycloak-subject
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-invalid-scope-policy"
     exchange: Keycloak token exchange endpoint
     behavior:

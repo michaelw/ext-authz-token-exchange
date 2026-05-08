@@ -5,6 +5,7 @@ const state = {
   results: new Map(),
   tokenValues: new Map(),
   tokenOverrides: new Set(),
+  tokenFetches: new Map(),
   diagramRenderID: 0,
   mermaidInitialized: false,
   statusRefreshTimer: null,
@@ -49,20 +50,19 @@ async function load() {
   state.issuer = data.issuer || { label: "Issuer" };
   for (const scenario of state.scenarios) {
     if (!state.tokenValues.has(scenario.name)) {
-      state.tokenValues.set(scenario.name, scenario.request?.bearer || "");
+      state.tokenValues.set(scenario.name, scenario.request?.token?.value || "");
     }
   }
-  await prefillScenarioTokens();
   $("gateway-chip").textContent = `Gateway: ${data.baseURL}`;
   $("scenario-config-chip").textContent = `Scenarios: ${state.issuer.name || "unknown"}`;
   $("scenario-config-chip").title = data.issuer?.scenarioConfig || "";
   $("issuer-node-label").textContent = state.issuer.label || "Issuer";
   $("issuer-logs-title").textContent = state.issuer.label || "Issuer";
-  await refreshStatus({ showChecking: true });
-  startStatusRefresh();
-  startTokenTimeRefresh();
   renderScenarioList();
   selectScenario(state.scenarios[0]?.name);
+  startStatusRefresh();
+  startTokenTimeRefresh();
+  refreshStatus({ showChecking: true });
 }
 
 function startStatusRefresh() {
@@ -197,7 +197,7 @@ function tokenForScenario(scenario) {
   }
   return state.tokenValues.has(scenario.name)
     ? state.tokenValues.get(scenario.name)
-    : scenario.request?.bearer || "";
+    : scenario.request?.token?.value || "";
 }
 
 function effectiveScenario(scenario) {
@@ -208,7 +208,11 @@ function effectiveScenario(scenario) {
     ...scenario,
     request: {
       ...(scenario.request || {}),
-      bearer: normalizeBearerInput(tokenForScenario(scenario)),
+      token: {
+        ...(scenario.request?.token || {}),
+        prefill: normalizeBearerInput(tokenForScenario(scenario)) ? "literal" : "none",
+        value: normalizeBearerInput(tokenForScenario(scenario)),
+      },
     },
   };
 }
@@ -220,33 +224,43 @@ function normalizeBearerInput(value) {
     : value;
 }
 
-async function prefillScenarioTokens() {
-  for (const scenario of state.scenarios) {
-    if (!shouldPrefillScenarioToken(scenario)) {
-      continue;
-    }
-    try {
-      const response = await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
-      if (!state.tokenOverrides.has(scenario.name)) {
-        state.tokenValues.set(scenario.name, response.bearer || "");
-      }
-    } catch (error) {
-      console.warn(`prefill token for ${scenario.name}: ${error.message}`);
-    }
-  }
-}
-
 function shouldPrefillScenarioToken(scenario) {
   if (state.tokenOverrides.has(scenario.name) || normalizeBearerInput(tokenForScenario(scenario))) {
     return false;
   }
-  if (state.issuer.name !== "keycloak") {
-    return false;
+  return isGeneratedTokenPrefill(scenario.request?.token?.prefill);
+}
+
+async function ensureScenarioToken(scenario) {
+  if (!shouldPrefillScenarioToken(scenario)) {
+    return;
   }
-  if (!scenario.exchange || scenario.exchange === "-") {
-    return false;
+  if (state.selected?.name === scenario.name) {
+    setTokenStatus("fetching...", "");
   }
-  return (scenario.expect?.status || 200) < 400;
+  if (!state.tokenFetches.has(scenario.name)) {
+    state.tokenFetches.set(scenario.name, fetchTokenForScenario(scenario));
+  }
+  const response = await state.tokenFetches.get(scenario.name);
+  if (!state.tokenOverrides.has(scenario.name)) {
+    state.tokenValues.set(scenario.name, response.bearer || "");
+    if (state.selected?.name === scenario.name) {
+      renderSelected();
+      renderScenarioList();
+    }
+  }
+}
+
+async function fetchTokenForScenario(scenario) {
+  try {
+    return await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
+  } finally {
+    state.tokenFetches.delete(scenario.name);
+  }
+}
+
+function isGeneratedTokenPrefill(prefill) {
+  return String(prefill || "").startsWith("keycloak-");
 }
 
 function renderSelected() {
@@ -267,7 +281,8 @@ function renderSelected() {
   $("httpbin-detail").textContent = scenario.expect?.upstreamAuthorization || "upstream";
   $("request-method").textContent = scenario.request.method;
   $("request-path").textContent = scenario.request.path;
-  setTokenDisplay($("request-token"), scenario.request.bearer ? `Bearer ${scenario.request.bearer}` : "");
+  const requestBearer = scenario.request.token?.value || "";
+  setTokenDisplay($("request-token"), requestBearer ? `Bearer ${requestBearer}` : "");
   $("tab-curl").textContent = result?.curl || buildCurlPreview(scenario);
   renderInputTokenPanel(selected);
   renderDiagram(scenario, result);
@@ -327,10 +342,12 @@ async function runScenario(name) {
     return;
   }
   selectScenario(name);
-  const scenario = effectiveScenario(selected);
   setPill("Running", "running");
-  renderFlow(scenario, { running: true });
+  renderFlow(effectiveScenario(selected), { running: true });
   try {
+    await ensureScenarioToken(selected);
+    const scenario = effectiveScenario(selected);
+    renderFlow(scenario, { running: true });
     const result = await api(`/api/scenarios/${encodeURIComponent(name)}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -339,7 +356,7 @@ async function runScenario(name) {
     state.results.set(name, result);
   } catch (error) {
     state.results.set(name, {
-      scenario,
+      scenario: effectiveScenario(selected),
       passed: false,
       failures: [{ label: "request", want: "success", got: error.message }],
       observed: {},
@@ -351,7 +368,6 @@ async function runScenario(name) {
 
 async function runAll() {
   await refreshStatus();
-  await prefillScenarioTokens();
   $("run-all").disabled = true;
   try {
     for (const scenario of state.scenarios) {
@@ -578,8 +594,8 @@ function buildMermaidDiagram(scenario, result) {
 
 function requestLine(request) {
   const parts = [`${request.method} ${request.path}`];
-  if (request.bearer) {
-    parts.push(displayAuthorization(`Bearer ${request.bearer}`));
+  if (request.token?.value) {
+    parts.push(displayAuthorization(`Bearer ${request.token.value}`));
   }
   const headers = Object.entries(request.headers || {});
   if (headers.length) {
@@ -591,8 +607,8 @@ function requestLine(request) {
 function tokenExchangeLine(scenario) {
   const request = scenario.request || {};
   const parts = [`POST ${scenario.exchange}`];
-  if (request.bearer) {
-    parts.push(`subject_token=${displayAuthorization(`Bearer ${request.bearer}`)}`);
+  if (request.token?.value) {
+    parts.push(`subject_token=${displayAuthorization(`Bearer ${request.token.value}`)}`);
   }
   return parts.join("<br/>");
 }
@@ -899,7 +915,7 @@ async function fetchScenarioToken() {
   button.disabled = true;
   setTokenStatus("fetching...", "");
   try {
-    const response = await api(`/api/scenarios/${encodeURIComponent(scenario.name)}/token`, { method: "POST" });
+    const response = await fetchTokenForScenario(scenario);
     state.tokenValues.set(scenario.name, response.bearer || "");
     state.tokenOverrides.add(scenario.name);
     state.results.delete(scenario.name);
@@ -1146,8 +1162,8 @@ function isReasonableText(contentType, body) {
 
 function buildCurlPreview(scenario) {
   const parts = ["curl -sk", "-X", quote(scenario.request.method)];
-  if (scenario.request.bearer) {
-    parts.push("-H", quote(`Authorization: Bearer ${scenario.request.bearer}`));
+  if (scenario.request.token?.value) {
+    parts.push("-H", quote(`Authorization: Bearer ${scenario.request.token.value}`));
   }
   for (const [key, value] of Object.entries(scenario.request.headers || {})) {
     parts.push("-H", quote(`${key}: ${value}`));

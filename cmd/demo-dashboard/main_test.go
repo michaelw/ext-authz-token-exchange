@@ -339,6 +339,8 @@ scenarios:
   - name: keycloak-audience
     request:
       path: /anything/keycloak-audience
+      token:
+        prefill: keycloak-subject
     behavior:
       summary: Keycloak exchanges a token.
       detail: Keycloak returns a demo token.
@@ -365,6 +367,109 @@ scenarios:
 	}
 }
 
+func TestScenarioTokenUsesExplicitKeycloakPrefill(t *testing.T) {
+	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/realms/token-exchange-e2e/protocol/openid-connect/token" {
+			t.Fatalf("Path = %q, want token endpoint", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("client_id"); got != "tx-short-ttl-subject-client" {
+			t.Fatalf("client_id = %q, want short TTL client", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "short-ttl-token",
+			"token_type":   "Bearer",
+		})
+	}))
+	defer keycloak.Close()
+	t.Setenv("DEMO_KEYCLOAK_BASE_URL", keycloak.URL)
+	opts := demoOptions()
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: custom-expired-name
+    request:
+      path: /anything/keycloak-expired-subject-token
+      token:
+        prefill: keycloak-expired-subject
+    behavior:
+      summary: Keycloak rejects an expired token.
+      detail: The token shape comes from request.token.prefill, not the scenario name.
+`)
+	s := &server{opts: opts, issuer: keycloakIssuer()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/custom-expired-name/token", nil)
+	req.SetPathValue("name", "custom-expired-name")
+
+	s.scenarioToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got tokenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Bearer != "short-ttl-token" {
+		t.Fatalf("Bearer = %q, want short TTL token", got.Bearer)
+	}
+}
+
+func TestScenarioTokenUsesExplicitInvalidTokenPrefills(t *testing.T) {
+	tests := []struct {
+		name    string
+		prefill string
+		want    string
+	}{
+		{name: "unsigned custom name", prefill: "keycloak-unsigned-subject", want: `"alg":"none"`},
+		{name: "untrusted custom name", prefill: "keycloak-untrusted-issuer", want: "https://untrusted-issuer.example.test/realms/token-exchange-e2e"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (&server{opts: demoOptions(), issuer: keycloakIssuer()}).tokenForScenario(context.Background(), demo.Scenario{
+				Name: "custom-name",
+				Request: demo.Request{
+					Path:  "/anything/custom-name",
+					Token: demo.RequestToken{Prefill: tt.prefill},
+				},
+			}.WithDefaults())
+			if err != nil {
+				t.Fatalf("tokenForScenario: %v", err)
+			}
+			if !strings.Contains(decodedJWTForTest(t, got.Bearer), tt.want) {
+				t.Fatalf("token payload/header = %s, want to contain %q", decodedJWTForTest(t, got.Bearer), tt.want)
+			}
+		})
+	}
+}
+
+func TestScenarioTokenUsesExplicitTruncatedSignaturePrefill(t *testing.T) {
+	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "header.payload.signature",
+			"token_type":   "Bearer",
+		})
+	}))
+	defer keycloak.Close()
+	t.Setenv("DEMO_KEYCLOAK_BASE_URL", keycloak.URL)
+
+	got, err := (&server{opts: demoOptions(), issuer: keycloakIssuer()}).tokenForScenario(context.Background(), demo.Scenario{
+		Name: "custom-name",
+		Request: demo.Request{
+			Path:  "/anything/custom-name",
+			Token: demo.RequestToken{Prefill: "keycloak-truncated-signature"},
+		},
+	}.WithDefaults())
+
+	if err != nil {
+		t.Fatalf("tokenForScenario: %v", err)
+	}
+	if got.Bearer != "header.payload." {
+		t.Fatalf("Bearer = %q, want truncated signature token", got.Bearer)
+	}
+}
+
 func TestScenarioTokenReturnsFakeScenarioBearer(t *testing.T) {
 	opts := demoOptions()
 	opts.ConfigPath = writeScenarioConfig(t, `version: v1
@@ -372,7 +477,9 @@ scenarios:
   - name: yellow-success
     request:
       path: /anything/yellow
-      bearer: incoming-yellow
+      token:
+        prefill: literal
+        value: incoming-yellow
     behavior:
       summary: Returns a Bearer access token.
       detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
@@ -415,7 +522,9 @@ scenarios:
   - name: yellow-success
     request:
       path: /anything/yellow
-      bearer: configured-token
+      token:
+        prefill: literal
+        value: configured-token
     behavior:
       summary: Returns a Bearer access token.
       detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
@@ -438,8 +547,8 @@ scenarios:
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.Scenario.Request.Bearer != "pasted-token" {
-		t.Fatalf("scenario bearer = %q, want pasted-token", got.Scenario.Request.Bearer)
+	if got.Scenario.Request.Token != demo.WithBearer("pasted-token") {
+		t.Fatalf("scenario token = %+v, want pasted-token literal", got.Scenario.Request.Token)
 	}
 	if got.Observed.Auth != "Bearer pasted-token" {
 		t.Fatalf("observed auth = %q, want pasted token", got.Observed.Auth)
@@ -463,7 +572,9 @@ scenarios:
   - name: missing-bearer
     request:
       path: /anything/yellow
-      bearer: configured-token
+      token:
+        prefill: literal
+        value: configured-token
     behavior:
       summary: Returns a Bearer access token.
       detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
@@ -484,8 +595,8 @@ scenarios:
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.Scenario.Request.Bearer != "" {
-		t.Fatalf("scenario bearer = %q, want empty", got.Scenario.Request.Bearer)
+	if got.Scenario.Request.Token.Prefill != "none" || got.Scenario.Request.Token.Value != "" {
+		t.Fatalf("scenario token = %+v, want none", got.Scenario.Request.Token)
 	}
 }
 
@@ -505,7 +616,9 @@ scenarios:
   - name: yellow-success
     request:
       path: /anything/yellow
-      bearer: configured-token
+      token:
+        prefill: literal
+        value: configured-token
     behavior:
       summary: Returns a Bearer access token.
       detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
@@ -527,8 +640,8 @@ scenarios:
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.Scenario.Request.Bearer != "configured-token" {
-		t.Fatalf("scenario bearer = %q, want configured-token", got.Scenario.Request.Bearer)
+	if got.Scenario.Request.Token != demo.WithBearer("configured-token") {
+		t.Fatalf("scenario token = %+v, want configured-token literal", got.Scenario.Request.Token)
 	}
 	if got.Observed.Auth != "Bearer configured-token" {
 		t.Fatalf("observed auth = %q, want configured token", got.Observed.Auth)
@@ -634,6 +747,23 @@ func base64URLJSON(t *testing.T, value any) string {
 		t.Fatalf("marshal JWT JSON: %v", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func decodedJWTForTest(t *testing.T, token string) string {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token has %d parts, want 3", len(parts))
+	}
+	var decoded strings.Builder
+	for _, part := range parts[:2] {
+		raw, err := base64.RawURLEncoding.DecodeString(part)
+		if err != nil {
+			t.Fatalf("decode token part: %v", err)
+		}
+		decoded.Write(raw)
+	}
+	return decoded.String()
 }
 
 func rsaJWK(kid string, key *rsa.PublicKey) map[string]string {

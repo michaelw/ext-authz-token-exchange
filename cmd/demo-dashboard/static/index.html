@@ -38,94 +38,95 @@
         <div id="scenario-list" class="scenario-list"></div>
       </aside>
 
-      <section class="stage">
-        <div class="flow-header">
-          <div>
-            <h2 id="scenario-title">Select a scenario</h2>
-            <p id="scenario-summary">Run a demo scenario to watch the request move through the plugin.</p>
+      <div class="content">
+        <section class="stage">
+          <div class="flow-header">
+            <div>
+              <h2 id="scenario-title">Select a scenario</h2>
+              <p id="scenario-summary">Run a demo scenario to watch the request move through the plugin.</p>
+            </div>
+            <div class="flow-actions">
+              <button id="run-selected" type="button">Run selected</button>
+              <div class="result-pill" id="result-pill">Idle</div>
+            </div>
           </div>
-          <div class="flow-actions">
-            <button id="run-selected" type="button">Run selected</button>
-            <div class="result-pill" id="result-pill">Idle</div>
-          </div>
-        </div>
 
-        <div class="flow" id="flow">
-          <div class="node client" data-step="client">
-            <span>Client</span>
-            <strong id="client-detail">HTTP request</strong>
+          <div class="flow" id="flow">
+            <div class="node client" data-step="client">
+              <span>Client</span>
+              <strong id="client-detail">HTTP request</strong>
+            </div>
+            <div class="arrow"></div>
+            <div class="node gateway" data-step="gateway">
+              <span>Gateway API</span>
+              <strong>httpbin.int.kube</strong>
+            </div>
+            <div class="arrow"></div>
+            <div class="node plugin" data-step="plugin">
+              <span>ext-authz plugin</span>
+              <strong id="plugin-detail">match policy</strong>
+            </div>
+            <div class="arrow"></div>
+            <div class="node policy" data-step="policy">
+              <span>ConfigMap policy</span>
+              <strong id="policy-detail">-</strong>
+            </div>
+            <div class="arrow exchange-arrow"></div>
+            <div class="node issuer" data-step="issuer">
+              <span id="issuer-node-label">Issuer</span>
+              <strong id="issuer-detail">-</strong>
+              <small id="issuer-summary">-</small>
+            </div>
+            <div class="arrow final-arrow"></div>
+            <div class="node httpbin" data-step="httpbin">
+              <span>go-httpbin</span>
+              <strong id="httpbin-detail">upstream</strong>
+            </div>
           </div>
-          <div class="arrow"></div>
-          <div class="node gateway" data-step="gateway">
-            <span>Gateway API</span>
-            <strong>httpbin.int.kube</strong>
-          </div>
-          <div class="arrow"></div>
-          <div class="node plugin" data-step="plugin">
-            <span>ext-authz plugin</span>
-            <strong id="plugin-detail">match policy</strong>
-          </div>
-          <div class="arrow"></div>
-          <div class="node policy" data-step="policy">
-            <span>ConfigMap policy</span>
-            <strong id="policy-detail">-</strong>
-          </div>
-          <div class="arrow exchange-arrow"></div>
-          <div class="node issuer" data-step="issuer">
-            <span id="issuer-node-label">Issuer</span>
-            <strong id="issuer-detail">-</strong>
-            <small id="issuer-summary">-</small>
-          </div>
-          <div class="arrow final-arrow"></div>
-          <div class="node httpbin" data-step="httpbin">
-            <span>go-httpbin</span>
-            <strong id="httpbin-detail">upstream</strong>
-          </div>
-        </div>
 
-        <div class="detail-grid">
-          <section class="panel">
-            <h3>Request</h3>
-            <dl>
-              <dt>Method</dt><dd id="request-method">-</dd>
-              <dt>Path</dt><dd id="request-path">-</dd>
-              <dt>Input token</dt><dd id="request-token">-</dd>
-            </dl>
-          </section>
-          <section class="panel">
-            <h3>Observed</h3>
-            <dl>
-              <dt>Status</dt><dd id="observed-status">-</dd>
-              <dt>Authorization</dt><dd id="observed-auth">-</dd>
-              <dt>Error</dt><dd id="observed-error">-</dd>
-              <dt>Elapsed</dt><dd id="observed-elapsed">-</dd>
-            </dl>
-          </section>
-          <section class="panel">
-            <h3>Headers</h3>
-            <dl>
-              <dt>WWW-Authenticate</dt><dd id="observed-www">-</dd>
-              <dt>CORS origin</dt><dd id="observed-cors">-</dd>
-              <dt>Content-Type</dt><dd id="observed-content-type">-</dd>
-            </dl>
-          </section>
-          <section class="panel decoded-token-panel">
-            <h3>Decoded Token</h3>
-            <dl>
-              <dt>Issuer</dt><dd id="jwt-issuer">-</dd>
-              <dt>Scenario</dt><dd id="jwt-scenario">-</dd>
-              <dt>Subject</dt><dd id="jwt-subject">-</dd>
-              <dt>Scope</dt><dd id="jwt-scope">-</dd>
-              <dt>Resource</dt><dd id="jwt-resource">-</dd>
-              <dt>Audience</dt><dd id="jwt-audience">-</dd>
-              <dt>Grant</dt><dd id="jwt-grant">-</dd>
-              <dt>Client</dt><dd id="jwt-client">-</dd>
-            </dl>
-          </section>
-        </div>
-      </section>
+          <div class="detail-grid">
+            <section class="panel">
+              <h3>Request</h3>
+              <dl>
+                <dt>Method</dt><dd id="request-method">-</dd>
+                <dt>Path</dt><dd id="request-path">-</dd>
+                <dt>Input token</dt><dd id="request-token">-</dd>
+              </dl>
+            </section>
+            <section class="panel">
+              <h3>Observed</h3>
+              <dl>
+                <dt>Status</dt><dd id="observed-status">-</dd>
+                <dt>Authorization</dt><dd id="observed-auth">-</dd>
+                <dt>Error</dt><dd id="observed-error">-</dd>
+                <dt>Elapsed</dt><dd id="observed-elapsed">-</dd>
+              </dl>
+            </section>
+            <section class="panel">
+              <h3>Headers</h3>
+              <dl>
+                <dt>WWW-Authenticate</dt><dd id="observed-www">-</dd>
+                <dt>CORS origin</dt><dd id="observed-cors">-</dd>
+                <dt>Content-Type</dt><dd id="observed-content-type">-</dd>
+              </dl>
+            </section>
+            <section class="panel decoded-token-panel">
+              <h3>Decoded Token</h3>
+              <dl>
+                <dt>Issuer</dt><dd id="jwt-issuer">-</dd>
+                <dt>Scenario</dt><dd id="jwt-scenario">-</dd>
+                <dt>Subject</dt><dd id="jwt-subject">-</dd>
+                <dt>Scope</dt><dd id="jwt-scope">-</dd>
+                <dt>Resource</dt><dd id="jwt-resource">-</dd>
+                <dt>Audience</dt><dd id="jwt-audience">-</dd>
+                <dt>Grant</dt><dd id="jwt-grant">-</dd>
+                <dt>Client</dt><dd id="jwt-client">-</dd>
+              </dl>
+            </section>
+          </div>
+        </section>
 
-      <aside class="inspector">
+        <aside class="inspector">
         <div class="tabs">
           <button class="tab active" data-tab="curl" type="button">curl</button>
           <button class="tab" data-tab="token" type="button">token</button>
@@ -216,7 +217,8 @@
           <pre id="mermaid-error" class="mermaid-error" hidden></pre>
           <pre id="mermaid-source" class="mermaid-source"></pre>
         </div>
-      </aside>
+        </aside>
+      </div>
     </main>
 
     <script type="module">

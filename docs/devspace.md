@@ -102,45 +102,26 @@ also self-holds for later DevSpace commands: use
 `devspace deploy -p local-test -p with-keycloak` to switch to Keycloak, and
 `devspace deploy -p local-test -p with-fake-issuer` to switch back to fake.
 
-For manual Keycloak testing, start the dashboard and use the token tab's
-`Fetch` button to place a fresh local Keycloak subject token in the selected
-scenario's input field:
+For manual Keycloak testing, start the dashboard. Each scenario declares its
+input token shape in the scenario YAML, and the token tab's `Fetch` button
+generates the selected scenario's token when needed:
 
 ```bash
 devspace run demo-dashboard
 ```
 
-To run the command-line demo client, or to seed the dashboard field with an
-explicit token, fetch a subject token through the local Gateway route at
-`https://keycloak.int.kube`:
-
-```bash
-export DEMO_BEARER_TOKEN="$(
-  curl -fsS https://keycloak.int.kube/realms/token-exchange-e2e/protocol/openid-connect/token \
-    -H 'Content-Type: application/x-www-form-urlencoded' \
-    -d grant_type=password \
-    -d client_id=tx-subject-client \
-    -d client_secret=tx-subject-secret \
-    -d username=token-user \
-    -d password=token-user-password \
-    -d scope=profile |
-  jq -r .access_token
-)"
-```
-
-Then run the Keycloak demo scenarios through the Gateway:
+Use the dashboard for Keycloak scenarios that declare generated token prefill
+types. The command-line demo client can still list the configured scenarios:
 
 ```bash
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-audience
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-resource
 ```
 
 The dashboard also detects the deployed plugin token endpoint. It selects the
 fake or Keycloak scenario file automatically and shows the selected issuer in
 the header and logs panel. The token tab decodes JWT-shaped input tokens and
-uses the local Keycloak profile defaults for its `Fetch` action. Those defaults
-can be adjusted with
+uses the scenario's `request.token.prefill` plus local Keycloak profile defaults
+for its `Fetch` action. Those defaults can be adjusted with
 `DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.

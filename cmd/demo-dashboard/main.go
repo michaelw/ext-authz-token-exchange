@@ -212,7 +212,7 @@ func (s *server) runOne(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if override != nil {
-		sc.Request.Bearer = normalizeBearerInput(*override)
+		sc.Request.Token = demo.WithBearer(normalizeBearerInput(*override))
 	}
 	result, _ := demo.Run(r.Context(), s.opts, sc)
 	status := http.StatusOK
@@ -252,23 +252,34 @@ func (s *server) verifyToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) tokenForScenario(ctx context.Context, sc demo.Scenario) (tokenResponse, error) {
-	if s.issuer.Name == "keycloak" {
-		token, err := s.keycloakTokenForScenario(ctx, sc)
+	switch sc.Request.Token.Prefill {
+	case "none":
+		return tokenResponse{Source: "scenario", Warning: "scenario intentionally has no bearer token"}, nil
+	case "literal":
+		return tokenResponse{Bearer: sc.Request.Token.Value, Source: "scenario"}, nil
+	case "keycloak-subject",
+		"keycloak-expired-subject",
+		"keycloak-unsigned-subject",
+		"keycloak-truncated-signature",
+		"keycloak-untrusted-issuer":
+		token, err := s.keycloakTokenForScenario(ctx, sc.Request.Token.Prefill)
 		if err != nil {
 			return tokenResponse{}, err
 		}
 		return tokenResponse{Bearer: token, Source: "keycloak"}, nil
+	default:
+		return tokenResponse{}, fmt.Errorf("unsupported scenario token prefill %q", sc.Request.Token.Prefill)
 	}
-	resp := tokenResponse{Bearer: sc.Request.Bearer, Source: "scenario"}
-	if sc.Request.Bearer == "" {
-		resp.Warning = "scenario has no configured bearer token"
-	}
-	return resp, nil
 }
 
-func (s *server) keycloakTokenForScenario(ctx context.Context, sc demo.Scenario) (string, error) {
-	switch sc.Name {
-	case "keycloak-expired-subject-token":
+func (s *server) keycloakTokenForScenario(ctx context.Context, prefill string) (string, error) {
+	if s.issuer.Name != "keycloak" {
+		return "", fmt.Errorf("scenario token prefill %q requires the Keycloak issuer", prefill)
+	}
+	switch prefill {
+	case "keycloak-subject":
+		return fetchKeycloakDemoSubjectToken(ctx, s.opts, defaultKeycloakSubjectCredentials())
+	case "keycloak-expired-subject":
 		token, err := fetchKeycloakDemoSubjectToken(ctx, s.opts, keycloakSubjectCredentials{
 			clientID:     envDefault("DEMO_KEYCLOAK_SHORT_TTL_CLIENT_ID", defaultShortTTLClientID),
 			clientSecret: envDefault("DEMO_KEYCLOAK_SHORT_TTL_CLIENT_SECRET", defaultShortTTLClientSecret),
@@ -278,7 +289,7 @@ func (s *server) keycloakTokenForScenario(ctx context.Context, sc demo.Scenario)
 		}
 		time.Sleep(3 * time.Second)
 		return token, nil
-	case "keycloak-unsigned-subject-token":
+	case "keycloak-unsigned-subject":
 		return unsignedKeycloakSubjectToken(), nil
 	case "keycloak-truncated-signature":
 		token, err := fetchKeycloakDemoSubjectToken(ctx, s.opts, defaultKeycloakSubjectCredentials())
@@ -289,7 +300,7 @@ func (s *server) keycloakTokenForScenario(ctx context.Context, sc demo.Scenario)
 	case "keycloak-untrusted-issuer":
 		return signedUntrustedSubjectToken()
 	default:
-		return fetchKeycloakDemoSubjectToken(ctx, s.opts, defaultKeycloakSubjectCredentials())
+		return "", fmt.Errorf("unsupported Keycloak token prefill %q", prefill)
 	}
 }
 

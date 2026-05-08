@@ -89,8 +89,8 @@ func printScenario(result demo.Result) {
 	fmt.Printf("Scenario:  %s\n", sc.Name)
 	fmt.Printf("Summary:   %s\n", sc.Description)
 	fmt.Printf("Request:   %s %s\n", sc.Request.Method, sc.Request.Path)
-	if sc.Request.Bearer != "" {
-		fmt.Printf("Input:     Authorization: Bearer %s\n", sc.Request.Bearer)
+	if bearer := sc.Request.Token.Bearer(); bearer != "" {
+		fmt.Printf("Input:     Authorization: Bearer %s\n", bearer)
 	} else {
 		fmt.Println("Input:     Authorization: <none>")
 	}
