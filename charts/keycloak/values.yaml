@@ -28,6 +28,10 @@ clients:
   subject:
     id: tx-subject-client
     secret: tx-subject-secret
+  shortTTLSubject:
+    id: tx-short-ttl-subject-client
+    secret: tx-short-ttl-subject-secret
+    accessTokenLifespan: 2
   exchanger:
     id: tx-exchanger-client
     secret: tx-exchanger-secret

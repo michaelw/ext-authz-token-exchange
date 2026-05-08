@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
@@ -32,8 +36,11 @@ const defaultAddr = "127.0.0.1:8088"
 const keycloakConfigPath = "test/e2e/keycloak-demo-scenarios.yaml"
 const defaultKeycloakBaseURL = "https://keycloak.int.kube"
 const defaultKeycloakRealm = "token-exchange-e2e"
+const defaultKeycloakClientID = "tx-exchanger-client"
 const defaultSubjectClientID = "tx-subject-client"
 const defaultSubjectClientSecret = "tx-subject-secret"
+const defaultShortTTLClientID = "tx-short-ttl-subject-client"
+const defaultShortTTLClientSecret = "tx-short-ttl-subject-secret"
 const defaultKeycloakUser = "token-user"
 const defaultKeycloakPassword = "token-user-password"
 
@@ -246,7 +253,7 @@ func (s *server) verifyToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) tokenForScenario(ctx context.Context, sc demo.Scenario) (tokenResponse, error) {
 	if s.issuer.Name == "keycloak" {
-		token, err := fetchKeycloakDemoSubjectToken(ctx, s.opts)
+		token, err := s.keycloakTokenForScenario(ctx, sc)
 		if err != nil {
 			return tokenResponse{}, err
 		}
@@ -257,6 +264,33 @@ func (s *server) tokenForScenario(ctx context.Context, sc demo.Scenario) (tokenR
 		resp.Warning = "scenario has no configured bearer token"
 	}
 	return resp, nil
+}
+
+func (s *server) keycloakTokenForScenario(ctx context.Context, sc demo.Scenario) (string, error) {
+	switch sc.Name {
+	case "keycloak-expired-subject-token":
+		token, err := fetchKeycloakDemoSubjectToken(ctx, s.opts, keycloakSubjectCredentials{
+			clientID:     envDefault("DEMO_KEYCLOAK_SHORT_TTL_CLIENT_ID", defaultShortTTLClientID),
+			clientSecret: envDefault("DEMO_KEYCLOAK_SHORT_TTL_CLIENT_SECRET", defaultShortTTLClientSecret),
+		})
+		if err != nil {
+			return "", err
+		}
+		time.Sleep(3 * time.Second)
+		return token, nil
+	case "keycloak-unsigned-subject-token":
+		return unsignedKeycloakSubjectToken(), nil
+	case "keycloak-truncated-signature":
+		token, err := fetchKeycloakDemoSubjectToken(ctx, s.opts, defaultKeycloakSubjectCredentials())
+		if err != nil {
+			return "", err
+		}
+		return truncateSignature(token), nil
+	case "keycloak-untrusted-issuer":
+		return signedUntrustedSubjectToken()
+	default:
+		return fetchKeycloakDemoSubjectToken(ctx, s.opts, defaultKeycloakSubjectCredentials())
+	}
 }
 
 func (s *server) runAll(w http.ResponseWriter, r *http.Request) {
@@ -421,7 +455,19 @@ func (s issuerSelection) apply(opts demo.Options) demo.Options {
 	return opts
 }
 
-func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options) (string, error) {
+type keycloakSubjectCredentials struct {
+	clientID     string
+	clientSecret string
+}
+
+func defaultKeycloakSubjectCredentials() keycloakSubjectCredentials {
+	return keycloakSubjectCredentials{
+		clientID:     envDefault("DEMO_KEYCLOAK_SUBJECT_CLIENT_ID", defaultSubjectClientID),
+		clientSecret: envDefault("DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET", defaultSubjectClientSecret),
+	}
+}
+
+func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, credentials keycloakSubjectCredentials) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
@@ -429,8 +475,8 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options) (s
 	realm := envDefault("DEMO_KEYCLOAK_REALM", defaultKeycloakRealm)
 	form := url.Values{}
 	form.Set("grant_type", "password")
-	form.Set("client_id", envDefault("DEMO_KEYCLOAK_SUBJECT_CLIENT_ID", defaultSubjectClientID))
-	form.Set("client_secret", envDefault("DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET", defaultSubjectClientSecret))
+	form.Set("client_id", credentials.clientID)
+	form.Set("client_secret", credentials.clientSecret)
 	form.Set("username", envDefault("DEMO_KEYCLOAK_USER", defaultKeycloakUser))
 	form.Set("password", envDefault("DEMO_KEYCLOAK_PASSWORD", defaultKeycloakPassword))
 	form.Set("scope", "profile")
@@ -476,6 +522,58 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options) (s
 		return "", fmt.Errorf("fetch Keycloak demo subject token: response did not contain a bearer access token")
 	}
 	return parsed.AccessToken, nil
+}
+
+func unsignedKeycloakSubjectToken() string {
+	header := map[string]any{"alg": "none", "typ": "JWT"}
+	payload := map[string]any{
+		"iss": envDefault("DEMO_KEYCLOAK_BASE_URL", defaultKeycloakBaseURL) + "/realms/" + envDefault("DEMO_KEYCLOAK_REALM", defaultKeycloakRealm),
+		"sub": "unsigned-demo-subject",
+		"aud": envDefault("DEMO_KEYCLOAK_CLIENT_ID", defaultKeycloakClientID),
+		"azp": defaultSubjectClientID,
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"iat": time.Now().Add(-time.Minute).Unix(),
+	}
+	return encodeBase64URLJSON(header) + "." + encodeBase64URLJSON(payload) + "."
+}
+
+func truncateSignature(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return token
+	}
+	return parts[0] + "." + parts[1] + "."
+}
+
+func signedUntrustedSubjectToken() (string, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", err
+	}
+	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": "untrusted-demo-key"}
+	payload := map[string]any{
+		"iss": "https://untrusted-issuer.example.test/realms/token-exchange-e2e",
+		"sub": "untrusted-demo-subject",
+		"aud": envDefault("DEMO_KEYCLOAK_CLIENT_ID", defaultKeycloakClientID),
+		"azp": defaultSubjectClientID,
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"iat": time.Now().Add(-time.Minute).Unix(),
+	}
+	unsigned := encodeBase64URLJSON(header) + "." + encodeBase64URLJSON(payload)
+	digest := sha256.Sum256([]byte(unsigned))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	if err != nil {
+		return "", err
+	}
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func encodeBase64URLJSON(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
 func bearerOverride(r *http.Request) (*string, error) {

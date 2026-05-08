@@ -339,6 +339,9 @@ scenarios:
   - name: keycloak-audience
     request:
       path: /anything/keycloak-audience
+    behavior:
+      summary: Keycloak exchanges a token.
+      detail: Keycloak returns a demo token.
 `)
 	s := &server{opts: opts, issuer: keycloakIssuer()}
 	rr := httptest.NewRecorder()
@@ -370,6 +373,9 @@ scenarios:
     request:
       path: /anything/yellow
       bearer: incoming-yellow
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
 `)
 	s := &server{opts: opts, issuer: fakeIssuer()}
 	rr := httptest.NewRecorder()
@@ -410,6 +416,9 @@ scenarios:
     request:
       path: /anything/yellow
       bearer: configured-token
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
       upstreamAuthorization: Bearer pasted-token
@@ -455,6 +464,9 @@ scenarios:
     request:
       path: /anything/yellow
       bearer: configured-token
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
 `)
@@ -494,6 +506,9 @@ scenarios:
     request:
       path: /anything/yellow
       bearer: configured-token
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
       upstreamAuthorization: Bearer configured-token

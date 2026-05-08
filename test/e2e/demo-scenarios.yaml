@@ -8,6 +8,9 @@ scenarios:
       bearer: incoming-yellow
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     exchange: /token/yellow
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
 
@@ -19,6 +22,9 @@ scenarios:
       bearer: incoming-red
     policy: "{{ .NamespacePrefix }}-red/red-policy"
     exchange: /token/red
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
 
@@ -30,6 +36,9 @@ scenarios:
       bearer: incoming-blue
     policy: "{{ .NamespacePrefix }}-blue/blue-policy"
     exchange: /token/blue
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
 
@@ -39,6 +48,9 @@ scenarios:
       method: GET
       path: /anything/yellow
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    behavior:
+      summary: Denied before token exchange.
+      detail: The plugin returns this denial directly, so the fake issuer is not called.
     expect:
       status: 401
       error: bearer_token_required
@@ -54,6 +66,9 @@ scenarios:
         Access-Control-Request-Method: GET
         Access-Control-Request-Headers: Authorization
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    behavior:
+      summary: Preflight bypasses token exchange.
+      detail: This is a true CORS preflight request, so the plugin allows it through without calling the token endpoint.
     expect:
       status: 200
       corsOrigin: https://client.example.test
@@ -64,6 +79,9 @@ scenarios:
       method: OPTIONS
       path: /anything/yellow
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
+    behavior:
+      summary: Denied before token exchange.
+      detail: The plugin returns this denial directly, so the fake issuer is not called.
     expect:
       status: 401
       error: bearer_token_required
@@ -77,6 +95,9 @@ scenarios:
       bearer: options-token
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     exchange: /token/yellow
+    behavior:
+      summary: Returns a Bearer access token.
+      detail: Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.
     expect:
       status: 200
 
@@ -86,6 +107,9 @@ scenarios:
       method: GET
       path: /anything/no-policy-match
       bearer: original-token
+    behavior:
+      summary: Passes through without token exchange.
+      detail: The plugin allows this request through unchanged, so the fake issuer is not called.
     expect:
       status: 200
       upstreamAuthorization: Bearer original-token
@@ -97,6 +121,9 @@ scenarios:
       path: /anything/denied
       bearer: denied-token
     policy: "{{ .NamespacePrefix }}-red/denied-policy"
+    behavior:
+      summary: Denied before token exchange.
+      detail: The plugin returns this denial directly, so the fake issuer is not called.
     expect:
       status: 403
       error: policy_denied
@@ -109,6 +136,9 @@ scenarios:
       bearer: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-invalid-target-policy"
     exchange: /token/invalid-target
+    behavior:
+      summary: Rejects requested resource/audience target.
+      detail: Returns HTTP 400 with OAuth/RFC8693 error invalid_target. This represents a resource or audience the authorization server will not issue for.
     expect:
       status: 400
       error: invalid_target
@@ -121,6 +151,9 @@ scenarios:
       bearer: incoming-invalid-grant
     policy: "{{ .NamespacePrefix }}-red/error-invalid-grant-policy"
     exchange: /token/invalid-grant
+    behavior:
+      summary: Rejects the subject token as invalid.
+      detail: Returns HTTP 400 with OAuth error invalid_grant. This represents an incoming subject token the authorization server does not accept.
     expect:
       status: 400
       error: invalid_grant
@@ -133,6 +166,9 @@ scenarios:
       bearer: eyJhbGciOiJub25lIn0.eyJleHAiOjF9.
     policy: "{{ .NamespacePrefix }}-red/error-expired-subject-token-policy"
     exchange: /token/expired-subject-token
+    behavior:
+      summary: Rejects an expired subject token.
+      detail: Returns HTTP 400 with OAuth error invalid_grant for an expired but otherwise validly shaped subject token.
     expect:
       status: 400
       error: invalid_grant
@@ -145,6 +181,9 @@ scenarios:
       bearer: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-unauthorized-policy"
     exchange: /token/unauthorized
+    behavior:
+      summary: Rejects the token client.
+      detail: Returns HTTP 401 with OAuth error invalid_client and a WWW-Authenticate challenge from the issuer.
     expect:
       status: 401
       error: invalid_client
@@ -158,6 +197,9 @@ scenarios:
       bearer: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-forbidden-policy"
     exchange: /token/forbidden
+    behavior:
+      summary: Rejects target with a forbidden response.
+      detail: Returns HTTP 403 with invalid_target. The plugin treats this as token-service failure rather than request malformation.
     expect:
       status: 500
       error: invalid_target
@@ -170,6 +212,9 @@ scenarios:
       bearer: incoming-error
     policy: "{{ .NamespacePrefix }}-red/error-malformed-policy"
     exchange: /token/malformed
+    behavior:
+      summary: Returns malformed success JSON.
+      detail: Returns HTTP 200 with broken JSON, exercising the plugin's invalid token response handling.
     expect:
       status: 500
       error: invalid_request

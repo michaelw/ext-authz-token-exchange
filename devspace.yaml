@@ -144,6 +144,48 @@ profiles:
                         - https://httpbin.int.kube/anything/keycloak-resource
                       audiences:
                         - tx-audience-client
+                    - name: keycloak-expired-subject-token
+                      scope: profile
+                      pathPrefix: /anything/keycloak-expired-subject-token
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources: []
+                      audiences:
+                        - tx-audience-client
+                    - name: keycloak-unsigned-subject-token
+                      scope: profile
+                      pathPrefix: /anything/keycloak-unsigned-subject-token
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources: []
+                      audiences:
+                        - tx-audience-client
+                    - name: keycloak-truncated-signature
+                      scope: profile
+                      pathPrefix: /anything/keycloak-truncated-signature
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources: []
+                      audiences:
+                        - tx-audience-client
+                    - name: keycloak-untrusted-issuer
+                      scope: profile
+                      pathPrefix: /anything/keycloak-untrusted-issuer
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources: []
+                      audiences:
+                        - tx-audience-client
+                    - name: keycloak-invalid-audience
+                      scope: profile
+                      pathPrefix: /anything/keycloak-invalid-audience
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources: []
+                      audiences:
+                        - tx-missing-audience-client
+                    - name: keycloak-invalid-scope
+                      scope: tx-missing-scope
+                      pathPrefix: /anything/keycloak-invalid-scope
+                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      resources: []
+                      audiences:
+                        - tx-audience-client
         keycloak:
           namespace: ext-authz-token-exchange-e2e
           helm:

@@ -3,6 +3,7 @@ package e2e_test
 import (
 	"context"
 	"crypto"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -55,13 +56,49 @@ var _ = Describe("keycloak token exchange", Ordered, func() {
 			g.Expect(audienceClaim(claims)).To(ContainElement(env.audienceClientID))
 		}, 45*time.Second, time.Second).Should(Succeed())
 	})
+
+	DescribeTable("rejects invalid Keycloak subject tokens safely",
+		func(ctx SpecContext, path string, token func(SpecContext) string) {
+			resp, body := request(ctx, http.MethodGet, path, token(ctx), nil)
+			expectSafeOAuthError(resp, body)
+		},
+		Entry("expired subject token", "/anything/keycloak-expired-subject-token", fetchExpiredKeycloakSubjectToken),
+		Entry("unsigned subject token", "/anything/keycloak-unsigned-subject-token", func(SpecContext) string {
+			return unsignedKeycloakSubjectToken()
+		}),
+		Entry("truncated signature", "/anything/keycloak-truncated-signature", func(ctx SpecContext) string {
+			return truncateSignature(fetchKeycloakSubjectToken(ctx))
+		}),
+		Entry("untrusted issuer", "/anything/keycloak-untrusted-issuer", func(SpecContext) string {
+			return signedUntrustedSubjectToken()
+		}),
+	)
+
+	DescribeTable("maps Keycloak token exchange target errors safely",
+		func(ctx SpecContext, path string) {
+			resp, body := request(ctx, http.MethodGet, path, fetchKeycloakSubjectToken(ctx), nil)
+			expectSafeOAuthError(resp, body)
+		},
+		Entry("unknown audience", "/anything/keycloak-invalid-audience"),
+		Entry("invalid scope", "/anything/keycloak-invalid-scope"),
+	)
 })
 
 func fetchKeycloakSubjectToken(ctx context.Context) string {
+	return fetchKeycloakSubjectTokenWithClient(ctx, env.subjectClientID, env.subjectClientSecret)
+}
+
+func fetchExpiredKeycloakSubjectToken(ctx SpecContext) string {
+	token := fetchKeycloakSubjectTokenWithClient(ctx, env.shortTTLClientID, env.shortTTLSecret)
+	time.Sleep(3 * time.Second)
+	return token
+}
+
+func fetchKeycloakSubjectTokenWithClient(ctx context.Context, clientID, clientSecret string) string {
 	form := url.Values{}
 	form.Set("grant_type", "password")
-	form.Set("client_id", env.subjectClientID)
-	form.Set("client_secret", env.subjectClientSecret)
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
 	form.Set("username", env.keycloakUser)
 	form.Set("password", env.keycloakPassword)
 	form.Set("scope", "profile")
@@ -84,6 +121,21 @@ func fetchKeycloakSubjectToken(ctx context.Context) string {
 	Expect(parsed.TokenType).To(Equal("Bearer"))
 	Expect(parsed.AccessToken).NotTo(BeEmpty())
 	return parsed.AccessToken
+}
+
+func expectSafeOAuthError(resp *http.Response, body []byte) {
+	Expect(resp.StatusCode).To(Equal(http.StatusBadRequest), string(body))
+	var parsed map[string]string
+	Expect(json.Unmarshal(body, &parsed)).To(Succeed(), string(body))
+	Expect(parsed["error"]).To(Or(
+		Equal("invalid_client"),
+		Equal("invalid_request"),
+		Equal("invalid_grant"),
+		Equal("invalid_scope"),
+		Equal("invalid_target"),
+	))
+	Expect(parsed["error_description"]).To(ContainSubstring("TXE-"))
+	Expect(parsed["error_description"]).NotTo(ContainSubstring("Keycloak"))
 }
 
 func verifyKeycloakJWT(ctx context.Context, g Gomega, auth string) map[string]any {
@@ -166,6 +218,50 @@ func rsaKeyFromJWK(n, e string) (*rsa.PublicKey, error) {
 		N: new(big.Int).SetBytes(modulusBytes),
 		E: exponent,
 	}, nil
+}
+
+func unsignedKeycloakSubjectToken() string {
+	header := map[string]any{"alg": "none", "typ": "JWT"}
+	payload := map[string]any{
+		"iss": env.keycloakIssuerURL,
+		"sub": "unsigned-e2e-subject",
+		"aud": env.keycloakClientID,
+		"azp": env.subjectClientID,
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"iat": time.Now().Add(-time.Minute).Unix(),
+	}
+	return encodeBase64URLJSON(header) + "." + encodeBase64URLJSON(payload) + "."
+}
+
+func truncateSignature(token string) string {
+	parts := strings.Split(token, ".")
+	Expect(parts).To(HaveLen(3))
+	return parts[0] + "." + parts[1] + "."
+}
+
+func signedUntrustedSubjectToken() string {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	Expect(err).NotTo(HaveOccurred())
+	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": "untrusted-e2e-key"}
+	payload := map[string]any{
+		"iss": "https://untrusted-issuer.example.test/realms/token-exchange-e2e",
+		"sub": "untrusted-e2e-subject",
+		"aud": env.keycloakClientID,
+		"azp": env.subjectClientID,
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+		"iat": time.Now().Add(-time.Minute).Unix(),
+	}
+	unsigned := encodeBase64URLJSON(header) + "." + encodeBase64URLJSON(payload)
+	digest := sha256.Sum256([]byte(unsigned))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+	Expect(err).NotTo(HaveOccurred())
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func encodeBase64URLJSON(value any) string {
+	encoded, err := json.Marshal(value)
+	Expect(err).NotTo(HaveOccurred())
+	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
 func audienceClaim(claims map[string]any) []string {

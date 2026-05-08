@@ -36,7 +36,7 @@ devspace deploy -p local-test -p with-fake-issuer
 devspace run test-e2e
 ```
 
-To deploy the same local demo stack with a real Keycloak RFC 8693 issuer, add
+To deploy the same local demo stack with a Keycloak RFC 8693 issuer, add
 the opt-in Keycloak profile:
 
 ```sh
@@ -335,17 +335,21 @@ Run the Keycloak-focused demo scenarios:
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-audience
 go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-resource
+go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml keycloak-invalid-audience
 ```
 
 The dashboard token tab decodes JWT-shaped input tokens. Its `Fetch` action
-uses the local profile defaults and can be adjusted with
+uses the local profile defaults, including invalid-token fixtures for the
+Keycloak negative scenarios, and can be adjusted with
 `DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
+`DEMO_KEYCLOAK_SHORT_TTL_CLIENT_ID`, `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.
 
 The profile uses these local-only clients:
 
 - `tx-subject-client`: issues inbound subject tokens.
+- `tx-short-ttl-subject-client`: issues short-lived inbound subject tokens for expiry scenarios.
 - `tx-exchanger-client`: confidential client used by the plugin.
 - `tx-audience-client`: requested audience for exchanged tokens.
 

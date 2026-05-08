@@ -61,6 +61,8 @@ const (
 	defaultKeycloakSecret      = "tx-exchanger-secret"
 	defaultSubjectClientID     = "tx-subject-client"
 	defaultSubjectClientSecret = "tx-subject-secret"
+	defaultShortTTLClientID    = "tx-short-ttl-subject-client"
+	defaultShortTTLSecret      = "tx-short-ttl-subject-secret"
 	defaultAudienceClientID    = "tx-audience-client"
 	defaultKeycloakUser        = "token-user"
 	defaultKeycloakPassword    = "token-user-password"
@@ -126,6 +128,8 @@ type e2eEnv struct {
 	keycloakSecret      string
 	subjectClientID     string
 	subjectClientSecret string
+	shortTTLClientID    string
+	shortTTLSecret      string
 	audienceClientID    string
 	keycloakUser        string
 	keycloakPassword    string
@@ -165,6 +169,8 @@ func loadE2EEnv() e2eEnv {
 		keycloakSecret:      envDefault("E2E_KEYCLOAK_CLIENT_SECRET", defaultKeycloakSecret),
 		subjectClientID:     envDefault("E2E_KEYCLOAK_SUBJECT_CLIENT_ID", defaultSubjectClientID),
 		subjectClientSecret: envDefault("E2E_KEYCLOAK_SUBJECT_CLIENT_SECRET", defaultSubjectClientSecret),
+		shortTTLClientID:    envDefault("E2E_KEYCLOAK_SHORT_TTL_CLIENT_ID", defaultShortTTLClientID),
+		shortTTLSecret:      envDefault("E2E_KEYCLOAK_SHORT_TTL_CLIENT_SECRET", defaultShortTTLSecret),
 		audienceClientID:    envDefault("E2E_KEYCLOAK_AUDIENCE_CLIENT_ID", defaultAudienceClientID),
 		keycloakUser:        envDefault("E2E_KEYCLOAK_USER", defaultKeycloakUser),
 		keycloakPassword:    envDefault("E2E_KEYCLOAK_PASSWORD", defaultKeycloakPassword),
@@ -341,7 +347,54 @@ fakeTokenEndpoint:
           - %q
         audiences:
           - %q
-`, keycloakTokenEndpoint(), env.audienceClientID, keycloakTokenEndpoint(), env.httpbinResourceBase+"/anything/keycloak-resource", env.audienceClientID)
+      - name: keycloak-expired-subject-token
+        scope: profile
+        pathPrefix: /anything/keycloak-expired-subject-token
+        tokenEndpoint: %q
+        resources: []
+        audiences:
+          - %q
+      - name: keycloak-unsigned-subject-token
+        scope: profile
+        pathPrefix: /anything/keycloak-unsigned-subject-token
+        tokenEndpoint: %q
+        resources: []
+        audiences:
+          - %q
+      - name: keycloak-truncated-signature
+        scope: profile
+        pathPrefix: /anything/keycloak-truncated-signature
+        tokenEndpoint: %q
+        resources: []
+        audiences:
+          - %q
+      - name: keycloak-untrusted-issuer
+        scope: profile
+        pathPrefix: /anything/keycloak-untrusted-issuer
+        tokenEndpoint: %q
+        resources: []
+        audiences:
+          - %q
+      - name: keycloak-invalid-audience
+        scope: profile
+        pathPrefix: /anything/keycloak-invalid-audience
+        tokenEndpoint: %q
+        resources: []
+        audiences:
+          - tx-missing-audience-client
+      - name: keycloak-invalid-scope
+        scope: tx-missing-scope
+        pathPrefix: /anything/keycloak-invalid-scope
+        tokenEndpoint: %q
+        resources: []
+        audiences:
+          - %q
+`, keycloakTokenEndpoint(), env.audienceClientID, keycloakTokenEndpoint(), env.httpbinResourceBase+"/anything/keycloak-resource", env.audienceClientID,
+		keycloakTokenEndpoint(), env.audienceClientID,
+		keycloakTokenEndpoint(), env.audienceClientID,
+		keycloakTokenEndpoint(), env.audienceClientID,
+		keycloakTokenEndpoint(), env.audienceClientID,
+		keycloakTokenEndpoint(), keycloakTokenEndpoint(), env.audienceClientID)
 }
 
 func keycloakValues() string {
@@ -356,6 +409,10 @@ clients:
   subject:
     id: %q
     secret: %q
+  shortTTLSubject:
+    id: %q
+    secret: %q
+    accessTokenLifespan: 2
   exchanger:
     id: %q
     secret: %q
@@ -366,6 +423,7 @@ testUser:
   password: %q
 `, env.demoNamespace, env.namespace, env.keycloakName, env.keycloakRealm, env.keycloakBaseURL, keycloakURLHost(env.keycloakBaseURL),
 		env.subjectClientID, env.subjectClientSecret,
+		env.shortTTLClientID, env.shortTTLSecret,
 		env.keycloakClientID, env.keycloakSecret,
 		env.audienceClientID,
 		env.keycloakUser, env.keycloakPassword)

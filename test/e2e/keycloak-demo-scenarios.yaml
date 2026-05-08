@@ -1,23 +1,113 @@
 version: v1
 scenarios:
   - name: keycloak-audience
-    summary: real Keycloak issuer exchanges the inbound subject token for the target audience
+    summary: Keycloak issuer exchanges the inbound subject token for the target audience
     request:
       method: GET
       path: /anything/keycloak-audience
       bearer: "{{ .BearerToken }}"
     policy: "{{ .NamespacePrefix }}-yellow/yellow-policy"
     exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak performs standard token exchange for the requested audience.
+      detail: Keycloak validates the inbound subject token and returns a signed access token for tx-audience-client.
     expect:
       status: 200
 
   - name: keycloak-resource
-    summary: real Keycloak issuer exchanges when resource is configured separately from the audience case
+    summary: Keycloak issuer exchanges with resource and audience requested by policy
     request:
       method: GET
       path: /anything/keycloak-resource
       bearer: "{{ .BearerToken }}"
     policy: "{{ .NamespacePrefix }}-yellow/keycloak-resource-policy"
     exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak receives a token exchange request with resource and audience parameters.
+      detail: The plugin policy requests resource=https://httpbin.int.kube/anything/keycloak-resource and audience=tx-audience-client; Keycloak returns a signed access token for the configured audience.
     expect:
       status: 200
+
+  - name: keycloak-expired-subject-token
+    summary: Keycloak rejects an expired subject token
+    request:
+      method: GET
+      path: /anything/keycloak-expired-subject-token
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-expired-subject-token-policy"
+    exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak rejects a subject token whose lifetime has elapsed.
+      detail: The demo fetches a short-lived subject token, waits for it to expire, and verifies the plugin maps Keycloak's rejection to a safe OAuth error.
+    expect:
+      status: 400
+
+  - name: keycloak-unsigned-subject-token
+    summary: Keycloak rejects an unsigned subject token
+    request:
+      method: GET
+      path: /anything/keycloak-unsigned-subject-token
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-unsigned-subject-token-policy"
+    exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak rejects a JWT-shaped subject token with alg=none.
+      detail: The plugin forwards the unsigned subject token to Keycloak and returns only a sanitized OAuth error to the downstream caller.
+    expect:
+      status: 400
+
+  - name: keycloak-truncated-signature
+    summary: Keycloak rejects a subject token with its signature removed
+    request:
+      method: GET
+      path: /anything/keycloak-truncated-signature
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-truncated-signature-policy"
+    exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak rejects a signed subject token after the signature segment is cut off.
+      detail: This exercises malformed JWT signature handling while keeping Keycloak error details out of the downstream response.
+    expect:
+      status: 400
+
+  - name: keycloak-untrusted-issuer
+    summary: Keycloak rejects a subject token from an untrusted issuer
+    request:
+      method: GET
+      path: /anything/keycloak-untrusted-issuer
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-untrusted-issuer-policy"
+    exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak rejects a signed subject token whose issuer is not trusted by the realm.
+      detail: The token is signed locally for the demo, but Keycloak does not trust that issuer or key and the plugin returns a safe OAuth error.
+    expect:
+      status: 400
+
+  - name: keycloak-invalid-audience
+    summary: Keycloak rejects a token exchange request for an unknown audience
+    request:
+      method: GET
+      path: /anything/keycloak-invalid-audience
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-invalid-audience-policy"
+    exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak rejects a token exchange request whose audience is not configured in the realm.
+      detail: The subject token is valid, but the policy asks for tx-missing-audience-client and the plugin returns a safe OAuth error.
+    expect:
+      status: 400
+
+  - name: keycloak-invalid-scope
+    summary: Keycloak rejects a token exchange request for an invalid scope
+    request:
+      method: GET
+      path: /anything/keycloak-invalid-scope
+      bearer: "{{ .BearerToken }}"
+    policy: "{{ .NamespacePrefix }}-yellow/keycloak-invalid-scope-policy"
+    exchange: Keycloak token exchange endpoint
+    behavior:
+      summary: Keycloak rejects a token exchange request for a scope the client cannot receive.
+      detail: The subject token is valid, but the policy asks for tx-missing-scope and the plugin returns a safe OAuth error.
+    expect:
+      status: 400

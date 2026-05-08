@@ -82,7 +82,7 @@ type Scenario struct {
 	Expect      Expectation `json:"expect"`
 }
 
-// Behavior describes the fake token endpoint action for a scenario.
+// Behavior describes the issuer or plugin behavior a scenario demonstrates.
 type Behavior struct {
 	Summary string `json:"summary"`
 	Detail  string `json:"detail"`
@@ -211,6 +211,12 @@ func (cfg Config) Validate() error {
 		if strings.TrimSpace(sc.Request.Path) == "" {
 			return fmt.Errorf("scenario %q must configure request.path", sc.Name)
 		}
+		if strings.TrimSpace(sc.Behavior.Summary) == "" {
+			return fmt.Errorf("scenario %q must configure behavior.summary", sc.Name)
+		}
+		if strings.TrimSpace(sc.Behavior.Detail) == "" {
+			return fmt.Errorf("scenario %q must configure behavior.detail", sc.Name)
+		}
 	}
 	return nil
 }
@@ -240,112 +246,7 @@ func (sc Scenario) WithDefaults() Scenario {
 	if sc.Expect.Status == 0 {
 		sc.Expect.Status = http.StatusOK
 	}
-	sc.Behavior = ExchangeBehavior(sc.Exchange, sc.Request, sc.Expect)
 	return sc
-}
-
-// ExchangeBehavior returns demo metadata for a fake token endpoint path.
-func ExchangeBehavior(exchange string, req Request, expect Expectation) Behavior {
-	if noExchangeConfigured(exchange) {
-		return noExchangeBehavior(req, expect)
-	}
-	switch strings.TrimPrefix(exchange, "/token/") {
-	case "success", "yellow", "red", "blue":
-		return Behavior{
-			Summary: "Returns a Bearer access token.",
-			Detail:  "Returns HTTP 200 with access_token, issued_token_type=access_token, and token_type=Bearer.",
-		}
-	case "invalid-request":
-		return Behavior{
-			Summary: "Rejects malformed exchange requests.",
-			Detail:  "Returns HTTP 400 with OAuth error invalid_request for token exchange requests the issuer considers malformed.",
-		}
-	case "invalid-target":
-		return Behavior{
-			Summary: "Rejects requested resource/audience target.",
-			Detail:  "Returns HTTP 400 with OAuth/RFC8693 error invalid_target. This represents a resource or audience the authorization server will not issue for.",
-		}
-	case "invalid-grant":
-		return Behavior{
-			Summary: "Rejects the subject token as invalid.",
-			Detail:  "Returns HTTP 400 with OAuth error invalid_grant. This represents an incoming subject token the authorization server does not accept.",
-		}
-	case "expired-subject-token":
-		return Behavior{
-			Summary: "Rejects an expired subject token.",
-			Detail:  "Returns HTTP 400 with OAuth error invalid_grant for an expired but otherwise validly shaped subject token.",
-		}
-	case "unauthorized":
-		return Behavior{
-			Summary: "Rejects the token client.",
-			Detail:  "Returns HTTP 401 with OAuth error invalid_client and a WWW-Authenticate challenge from the issuer.",
-		}
-	case "forbidden":
-		return Behavior{
-			Summary: "Rejects target with a forbidden response.",
-			Detail:  "Returns HTTP 403 with invalid_target. The plugin treats this as token-service failure rather than request malformation.",
-		}
-	case "server-error":
-		return Behavior{
-			Summary: "Simulates token service failure.",
-			Detail:  "Returns HTTP 500 with a generic OAuth-style error body.",
-		}
-	case "malformed":
-		return Behavior{
-			Summary: "Returns malformed success JSON.",
-			Detail:  "Returns HTTP 200 with broken JSON, exercising the plugin's invalid token response handling.",
-		}
-	case "missing-access-token":
-		return Behavior{
-			Summary: "Omits the required access_token field.",
-			Detail:  "Returns HTTP 200 with token_type and issued_token_type but no access_token.",
-		}
-	case "wrong-token-type":
-		return Behavior{
-			Summary: "Returns a non-Bearer token type.",
-			Detail:  "Returns HTTP 200 with token_type=N_A, exercising the plugin's Bearer token_type validation.",
-		}
-	case "wrong-issued-token-type":
-		return Behavior{
-			Summary: "Returns the wrong issued token type.",
-			Detail:  "Returns HTTP 200 with issued_token_type=refresh_token, exercising the plugin's access-token issued_token_type validation.",
-		}
-	case "delay":
-		return Behavior{
-			Summary: "Sleeps long enough to trigger timeout handling.",
-			Detail:  "Delays for 10 seconds before returning success, exercising token endpoint request timeout handling.",
-		}
-	default:
-		return Behavior{
-			Summary: "Unknown fake token scenario.",
-			Detail:  "The fake issuer will return HTTP 400 invalid_request for an unknown /token/ scenario.",
-		}
-	}
-}
-
-func noExchangeConfigured(exchange string) bool {
-	return exchange == "" || exchange == "-"
-}
-
-func noExchangeBehavior(req Request, expect Expectation) Behavior {
-	if strings.EqualFold(req.Method, http.MethodOptions) && req.Headers["Origin"] != "" && req.Headers["Access-Control-Request-Method"] != "" {
-		return Behavior{
-			Summary: "Preflight bypasses token exchange.",
-			Detail:  "This is a true CORS preflight request, so the plugin allows it through without calling the token endpoint.",
-		}
-	}
-	// A no-exchange scenario with an error status is a local plugin denial.
-	// Token endpoint error scenarios set exchange to a /token/... path instead.
-	if expect.Status >= http.StatusBadRequest {
-		return Behavior{
-			Summary: "Denied before token exchange.",
-			Detail:  "The plugin returns this denial directly, so the fake issuer is not called.",
-		}
-	}
-	return Behavior{
-		Summary: "Passes through without token exchange.",
-		Detail:  "The plugin allows this request through unchanged, so the fake issuer is not called.",
-	}
 }
 
 // WithDefaults fills derived defaults for demo options.

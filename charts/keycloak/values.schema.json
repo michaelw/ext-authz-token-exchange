@@ -58,7 +58,7 @@
     "clients": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["subject", "exchanger", "audience"]
+      "required": ["subject", "shortTTLSubject", "exchanger", "audience"]
     },
     "secret": {
       "type": "object",
