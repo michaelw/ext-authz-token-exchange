@@ -144,3 +144,7 @@ For further information, refer to the [Development Guide](docs/development.md).
 Deploy a development container and connect it to VSCode
 
 - `devspace dev --vscode`
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

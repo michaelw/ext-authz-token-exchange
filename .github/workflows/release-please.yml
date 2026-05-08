@@ -86,6 +86,10 @@ jobs:
           push: true
           provenance: true
           sbom: true
+          build-args: |
+            VERSION=${{ needs.release-please.outputs.version }}
+            REVISION=${{ github.sha }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
           tags: |
             ${{ env.PROD_IMAGE }}:${{ needs.release-please.outputs.version }}
             ${{ env.PROD_IMAGE }}:sha-${{ github.sha }}
@@ -107,6 +111,10 @@ jobs:
           push: true
           provenance: true
           sbom: true
+          build-args: |
+            VERSION=${{ needs.release-please.outputs.version }}
+            REVISION=${{ github.sha }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
           tags: |
             ${{ env.FAKE_TOKEN_ENDPOINT_IMAGE }}:${{ needs.release-please.outputs.version }}
             ${{ env.FAKE_TOKEN_ENDPOINT_IMAGE }}:sha-${{ github.sha }}

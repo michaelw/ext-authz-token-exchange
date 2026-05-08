@@ -88,10 +88,21 @@ RUN --mount=type=cache,target=/go-cache \
 # Run stage
 FROM gcr.io/distroless/static-debian12 AS prod
 ARG WORKSPACE
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE=https://github.com/michaelw/ext-authz-token-exchange
 USER 65532:65532
 
 WORKDIR /app
 COPY --from=build ${WORKSPACE}/bin/ext-authz-token-exchange-service /app/ext-authz-token-exchange-service
+
+LABEL org.opencontainers.image.title="ext-authz-token-exchange" \
+      org.opencontainers.image.description="Envoy external authorization plugin for OAuth 2.0 token exchange" \
+      org.opencontainers.image.vendor="MagneticFlux LLC" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 
 EXPOSE 3001
 
@@ -100,10 +111,21 @@ ENTRYPOINT ["/app/ext-authz-token-exchange-service"]
 # E2E fake token endpoint image. Keep this separate from production.
 FROM gcr.io/distroless/static-debian12 AS fake-token-endpoint
 ARG WORKSPACE
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE=https://github.com/michaelw/ext-authz-token-exchange
 USER 65532:65532
 
 WORKDIR /app
 COPY --from=build ${WORKSPACE}/bin/fake-token-endpoint /app/fake-token-endpoint
+
+LABEL org.opencontainers.image.title="ext-authz-token-exchange-fake-token-endpoint" \
+      org.opencontainers.image.description="Fake OAuth token endpoint for ext-authz-token-exchange demos and e2e tests" \
+      org.opencontainers.image.vendor="MagneticFlux LLC" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 
 EXPOSE 8080
 
