@@ -37,7 +37,10 @@
       "matchManagers": [
         "gomod"
       ],
-      "enabled": true
+      "enabled": true,
+      "postUpdateOptions": [
+        "gomodTidy"
+      ]
     },
     {
       "matchManagers": [
