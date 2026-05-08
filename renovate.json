@@ -3,6 +3,9 @@
   "extends": [
     "config:recommended"
   ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "packageRules": [
     {
       "description": "Automerge Renovate version bumps after required CI passes",
