@@ -7,5 +7,5 @@ appVersion: "26.6.1"
 
 dependencies:
   - name: common.itsumi
-    version: 0.5.1
-    repository: oci://ghcr.io/michaelw
+    version: 0.5.2
+    repository: oci://ghcr.io/michaelw/charts
