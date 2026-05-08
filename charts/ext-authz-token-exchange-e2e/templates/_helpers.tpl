@@ -13,6 +13,18 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end }}
 
 {{- define "ext-authz-token-exchange-e2e.policyConfig" -}}
+{{- $resources := .resources }}
+{{- if not (hasKey . "resources") }}
+{{- $resources = list (printf "%s%s" $.Values.policy.httpbinResourceBase .pathPrefix) }}
+{{- end }}
+{{- $audiences := .audiences }}
+{{- if and (not (hasKey . "audiences")) .audience }}
+{{- $audiences = list .audience }}
+{{- end }}
+{{- $tokenEndpoint := .tokenEndpoint }}
+{{- if not $tokenEndpoint }}
+{{- $tokenEndpoint = include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
+{{- end }}
 version: v1
 entries:
   - match:
@@ -32,10 +44,18 @@ entries:
 {{- end }}
     exchange:
       scope: {{ .scope }}
+{{- if $resources }}
       resources:
-        - {{ $.Values.policy.httpbinResourceBase }}{{ .pathPrefix }}
+{{- range $resource := $resources }}
+        - {{ $resource | quote }}
+{{- end }}
+{{- end }}
+{{- if $audiences }}
       audiences:
-        - {{ .audience | quote }}
-      tokenEndpoint: {{ include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
+{{- range $audience := $audiences }}
+        - {{ $audience | quote }}
+{{- end }}
+{{- end }}
+      tokenEndpoint: {{ $tokenEndpoint }}
 {{- end }}
 {{- end }}

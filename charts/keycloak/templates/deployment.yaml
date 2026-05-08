@@ -1,0 +1,25 @@
+{{- $values := deepCopy .Values }}
+{{- $_ := set $values "image" .Values.keycloak.image }}
+{{- $_ := set $values "args" (list "start-dev" "--import-realm") }}
+{{- $_ := set $values "env" (dict
+  "KC_BOOTSTRAP_ADMIN_USERNAME" .Values.keycloak.adminUsername
+  "KC_BOOTSTRAP_ADMIN_PASSWORD" .Values.keycloak.adminPassword
+  "KC_HTTP_ENABLED" "true"
+  "KC_HOSTNAME_STRICT" "false"
+  "KC_HOSTNAME" .Values.keycloak.externalURL
+  "KC_PROXY_HEADERS" "xforwarded"
+  "KC_HEALTH_ENABLED" "true"
+) }}
+{{- $_ := set $values "ports" (dict "http" (dict "containerPort" .Values.keycloak.port)) }}
+{{- $_ := set $values "readinessProbe" (dict
+  "httpGet" (dict "path" (printf "/realms/%s" .Values.keycloak.realm) "port" "http")
+  "initialDelaySeconds" 15
+  "periodSeconds" 5
+  "failureThreshold" 24
+) }}
+{{- $_ := set $values "resources" .Values.keycloak.resources }}
+{{- $_ := set $values "deploymentAnnotations" (dict "reloader.stakater.com/auto" "true") }}
+{{- $_ := set $values "podAnnotations" (dict "ext-authz-token-exchange.magneticflux.net/realm-revision" (.Release.Revision | toString)) }}
+{{- $_ := set $values "volumeMounts" (dict "realm-import" (dict "mountPath" "/opt/keycloak/data/import" "readOnly" true)) }}
+{{- $_ := set $values "volumes" (dict "realm-import" (dict "configMap" (dict "name" (include "keycloak.realmConfigMapName" .)))) }}
+{{- include "common.itsumi.deployments.tpl" (merge (dict "Values" $values) (omit . "Values")) }}
