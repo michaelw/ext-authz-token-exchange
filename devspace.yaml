@@ -497,6 +497,14 @@ commands:
       E2E_ISSUER="$issuer" \
       go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
 
+  stress-e2e:
+    description: "Deploy local-test and run the small opt-in Kubernetes e2e stress test"
+    section: build
+    command: |
+      echo "I: target=stress-e2e"
+      devspace deploy -p local-test
+      devspace run test-e2e --label-filter=stress "$@"
+
   demo-dashboard:
     description: "Start the local token exchange demo dashboard"
     section: build
