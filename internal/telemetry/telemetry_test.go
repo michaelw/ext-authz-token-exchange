@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/baggage"
@@ -18,8 +19,10 @@ func TestInitLeavesTracingInertWhenSDKDisabled(t *testing.T) {
 
 	previousPropagator := otel.GetTextMapPropagator()
 	previousProvider := otel.GetTracerProvider()
+	previousMeterProvider := otel.GetMeterProvider()
 	defer otel.SetTextMapPropagator(previousPropagator)
 	defer otel.SetTracerProvider(previousProvider)
+	defer otel.SetMeterProvider(previousMeterProvider)
 
 	shutdown, err := InitWithServiceName(context.Background(), "custom-service")
 	if err != nil {
@@ -30,6 +33,9 @@ func TestInitLeavesTracingInertWhenSDKDisabled(t *testing.T) {
 	}
 	if got := otel.GetTracerProvider(); got != previousProvider {
 		t.Fatal("tracer provider changed while SDK was disabled")
+	}
+	if got := otel.GetMeterProvider(); got != previousMeterProvider {
+		t.Fatal("meter provider changed while SDK was disabled")
 	}
 
 	ctx := otel.GetTextMapPropagator().Extract(context.Background(), propagation.MapCarrier{
@@ -46,10 +52,13 @@ func TestInitLeavesTracingInertWhenSDKDisabled(t *testing.T) {
 
 func TestInitLeavesTracingInertWithoutOTLPExporter(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
 	previousProvider := otel.GetTracerProvider()
+	previousMeterProvider := otel.GetMeterProvider()
 	previousPropagator := otel.GetTextMapPropagator()
 	defer otel.SetTracerProvider(previousProvider)
+	defer otel.SetMeterProvider(previousMeterProvider)
 	defer otel.SetTextMapPropagator(previousPropagator)
 
 	shutdown, err := Init(context.Background())
@@ -62,6 +71,38 @@ func TestInitLeavesTracingInertWithoutOTLPExporter(t *testing.T) {
 	if got := otel.GetTracerProvider(); got != previousProvider {
 		t.Fatal("tracer provider changed without OTLP exporter")
 	}
+	if got := otel.GetMeterProvider(); got != previousMeterProvider {
+		t.Fatal("meter provider changed without OTLP exporter")
+	}
+}
+
+func TestInitConfiguresOTLPTraceAndMetricProviders(t *testing.T) {
+	t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
+	t.Setenv("OTEL_METRICS_EXPORTER", "otlp")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
+	t.Setenv("OTEL_SERVICE_NAME", "test-service")
+
+	previousProvider := otel.GetTracerProvider()
+	previousMeterProvider := otel.GetMeterProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	defer otel.SetTracerProvider(previousProvider)
+	defer otel.SetMeterProvider(previousMeterProvider)
+	defer otel.SetTextMapPropagator(previousPropagator)
+
+	shutdown, err := InitWithServiceName(context.Background(), "fallback-service")
+	if err != nil {
+		t.Fatalf("InitWithServiceName returned error: %v", err)
+	}
+	if got := otel.GetTracerProvider(); got == previousProvider {
+		t.Fatal("tracer provider did not change with OTLP traces enabled")
+	}
+	if got := otel.GetMeterProvider(); got == previousMeterProvider {
+		t.Fatal("meter provider did not change with OTLP metrics enabled")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = shutdown(ctx)
 }
 
 func TestTelemetryEnvHelpers(t *testing.T) {
@@ -81,6 +122,14 @@ func TestTelemetryEnvHelpers(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "console")
 	if otlpTracingEnabled() {
 		t.Fatal("otlpTracingEnabled = true, want false for non-otlp exporter")
+	}
+	t.Setenv("OTEL_METRICS_EXPORTER", " OTLP ")
+	if !otlpMetricsEnabled() {
+		t.Fatal("otlpMetricsEnabled = false, want true for trimmed otlp")
+	}
+	t.Setenv("OTEL_METRICS_EXPORTER", "prometheus")
+	if otlpMetricsEnabled() {
+		t.Fatal("otlpMetricsEnabled = true, want false for non-otlp exporter")
 	}
 
 	t.Setenv("OTEL_SERVICE_NAME", " configured-service ")
@@ -106,6 +155,22 @@ func TestOTLPTraceOptions(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://traces.example:4317")
 	if got := otlpTraceOptions(); len(got) != 1 {
 		t.Fatalf("otlpTraceOptions for traces endpoint length = %d, want traces endpoint option only", len(got))
+	}
+}
+
+func TestOTLPMetricOptions(t *testing.T) {
+	if got := otlpMetricOptions(); got != nil {
+		t.Fatalf("otlpMetricOptions with no endpoint = %#v, want nil", got)
+	}
+
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.example:4317")
+	if got := otlpMetricOptions(); len(got) != 2 {
+		t.Fatalf("otlpMetricOptions for http endpoint length = %d, want endpoint and insecure options", len(got))
+	}
+
+	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "https://metrics.example:4317")
+	if got := otlpMetricOptions(); len(got) != 1 {
+		t.Fatalf("otlpMetricOptions for metrics endpoint length = %d, want metrics endpoint option only", len(got))
 	}
 }
 

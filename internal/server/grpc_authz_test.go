@@ -9,6 +9,8 @@ import (
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/baggage"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -485,6 +487,112 @@ entries:
 		Expect(resp.GetDeniedResponse()).NotTo(BeNil())
 		Expect(resp.GetDeniedResponse().GetStatus().GetCode().String()).To(Equal("InternalServerError"))
 	})
+
+	It("records service-level RED metrics by decision and result class", func() {
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET", "OPTIONS"]
+    action: exchange
+    exchange:
+      scope: read:orders
+      tokenEndpoint: http://issuer.example/token
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/deny
+      methods: ["GET"]
+    action: deny
+`)), &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}})
+
+		_, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", nil))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
+			"origin":                        "https://app.example.com",
+			"access-control-request-method": "GET",
+		}))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", nil))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/deny/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "allow_unmatched",
+			"result":   "allowed",
+		})).To(BeNumerically(">=", 1))
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "allow_options_bypass",
+			"result":   "allowed",
+		})).To(BeNumerically(">=", 1))
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "deny_missing_bearer",
+			"result":   "auth_denied",
+		})).To(BeNumerically(">=", 1))
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "deny_explicit_policy",
+			"result":   "auth_denied",
+		})).To(BeNumerically(">=", 1))
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "allow_exchange",
+			"result":   "allowed",
+		})).To(BeNumerically(">=", 1))
+		Expect(serverMetricWithLabels("ext_authz_check_duration_seconds", map[string]string{
+			"decision": "allow_exchange",
+			"result":   "allowed",
+		})).To(BeNumerically(">=", 1))
+	})
+
+	It("classifies exchange errors as auth denials or system errors", func() {
+		authDenied := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{StatusCode: http.StatusBadRequest, Error: "invalid_grant"}})
+		systemError := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      tokenEndpoint: http://issuer.example/token
+`)), &fakeExchanger{err: &exchange.OAuthError{StatusCode: http.StatusInternalServerError, Error: "server_error"}})
+
+		_, err := authDenied.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = systemError.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
+			"authorization": "Bearer subject",
+		}))
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "deny_exchange_error",
+			"result":   "auth_denied",
+		})).To(BeNumerically(">=", 1))
+		Expect(serverMetricWithLabels("ext_authz_check_requests_total", map[string]string{
+			"decision": "deny_exchange_error",
+			"result":   "system_error",
+		})).To(BeNumerically(">=", 1))
+	})
 })
 
 type fakeExchanger struct {
@@ -540,4 +648,41 @@ func headerValue(headers []*envoy_config_core_v3.HeaderValueOption, name string)
 		}
 	}
 	return ""
+}
+
+func serverMetricWithLabels(name string, labels map[string]string) float64 {
+	families, err := prometheus.DefaultGatherer.Gather()
+	Expect(err).NotTo(HaveOccurred())
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if serverMetricHasLabels(metric, labels) {
+				if metric.GetCounter() != nil {
+					return metric.GetCounter().GetValue()
+				}
+				if metric.GetHistogram() != nil {
+					return float64(metric.GetHistogram().GetSampleCount())
+				}
+				if metric.GetGauge() != nil {
+					return metric.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func serverMetricHasLabels(metric *dto.Metric, labels map[string]string) bool {
+	actual := map[string]string{}
+	for _, label := range metric.GetLabel() {
+		actual[label.GetName()] = label.GetValue()
+	}
+	for name, value := range labels {
+		if actual[name] != value {
+			return false
+		}
+	}
+	return true
 }

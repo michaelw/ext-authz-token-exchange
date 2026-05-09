@@ -28,6 +28,9 @@ var _ = Describe("RuntimeConfig", func() {
 			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
 			RequireIssuedTokenType:             true,
 			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
+			MetricsEnabled:                     true,
+			MetricsPort:                        "3002",
+			MetricsPath:                        "/metrics",
 			TokenEndpointRequestTimeout:        time.Second,
 			TokenEndpointDialTimeout:           time.Second,
 			TokenEndpointTLSHandshakeTimeout:   time.Second,
@@ -86,6 +89,11 @@ var _ = Describe("RuntimeConfig", func() {
 		Expect(cfg.LogHealthChecks).To(BeTrue())
 		Expect(cfg.InsecureLogTokens).To(BeFalse())
 		Expect(cfg.DefaultDenyUnmatched).To(BeFalse())
+		Expect(cfg.MetricsEnabled).To(BeFalse())
+		Expect(cfg.MetricsPort).To(Equal("3002"))
+		Expect(cfg.MetricsPath).To(Equal("/metrics"))
+		Expect(cfg.TokenEndpointRequestTimeout).To(Equal(750 * time.Millisecond))
+		Expect(cfg.TokenEndpointResponseHeaderTimeout).To(Equal(500 * time.Millisecond))
 	})
 
 	It("loads default deny for unmatched requests only when explicitly enabled", func() {
@@ -151,6 +159,36 @@ var _ = Describe("RuntimeConfig", func() {
 		}
 
 		Expect(cfg.Validate()).To(MatchError(ContainSubstring("CONFIGMAP_NAMESPACE_SELECTOR is invalid")))
+	})
+
+	It("validates metrics listener settings when metrics are enabled", func() {
+		cfg := config.RuntimeConfig{
+			ClientID:                           "client",
+			ClientSecret:                       "secret",
+			TokenEndpointAuthMethod:            config.AuthMethodClientSecretBasic,
+			GrantType:                          config.DefaultGrantType,
+			SubjectTokenType:                   config.DefaultSubjectTokenType,
+			LabelSelector:                      config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
+			RequireIssuedTokenType:             true,
+			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
+			MetricsEnabled:                     true,
+			MetricsPort:                        "3002",
+			MetricsPath:                        "metrics",
+			TokenEndpointRequestTimeout:        time.Second,
+			TokenEndpointDialTimeout:           time.Second,
+			TokenEndpointTLSHandshakeTimeout:   time.Second,
+			TokenEndpointResponseHeaderTimeout: time.Second,
+			TokenEndpointIdleConnTimeout:       time.Second,
+		}
+
+		Expect(cfg.Validate()).To(MatchError(ContainSubstring("METRICS_PATH must start with /")))
+		cfg.MetricsPath = "/metrics"
+		Expect(cfg.Validate()).To(Succeed())
+		cfg.MetricsEnabled = false
+		cfg.MetricsPath = ""
+		cfg.MetricsPort = ""
+		Expect(cfg.Validate()).To(Succeed())
 	})
 })
 

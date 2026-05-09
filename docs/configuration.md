@@ -201,16 +201,125 @@ Successful token endpoint responses must include `access_token`, must have
 ### HTTP Client Settings
 
 Durations use Go duration strings such as `500ms`, `2s`, or `1m`.
+Because token exchange runs in the Envoy ext-authz hot path,
+`TOKEN_ENDPOINT_REQUEST_TIMEOUT` must be lower than `envoyFilter.timeout`.
+The default chart values keep the token endpoint request budget below the
+default `1s` Envoy ext-authz deadline.
 
 | Environment variable | Default | Required | Description |
 | --- | --- | --- | --- |
-| `TOKEN_ENDPOINT_REQUEST_TIMEOUT` | `5s` | No | Overall token endpoint request timeout. Must be positive. |
+| `TOKEN_ENDPOINT_REQUEST_TIMEOUT` | `750ms` | No | Overall token endpoint request timeout. Must be positive and lower than `envoyFilter.timeout`. |
 | `TOKEN_ENDPOINT_DIAL_TIMEOUT` | `3s` | No | TCP dial timeout. Must be positive. |
 | `TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT` | `3s` | No | TLS handshake timeout. Must be positive. |
-| `TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT` | `5s` | No | Timeout waiting for response headers. Must be positive. |
+| `TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT` | `500ms` | No | Timeout waiting for response headers. Must be positive. |
 | `TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT` | `90s` | No | Idle connection timeout. Must be positive. |
 | `TOKEN_ENDPOINT_MAX_IDLE_CONNS` | `100` | No | Maximum idle connections. Must not be negative. |
 | `TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST` | `10` | No | Maximum idle connections per host. Must not be negative. |
+
+### Metrics
+
+Metrics are recorded with OpenTelemetry instruments. The preferred Kubernetes
+path is OTLP metrics export to an OpenTelemetry Collector, using the same
+collector endpoint pattern as traces. A Prometheus `/metrics` listener is
+available as an opt-in fallback for clusters that scrape workloads directly.
+
+The main service-level RED metrics are:
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `ext_authz_check_requests_total` | Counter | Envoy ext-authz `Check` requests by `decision` and `result`. |
+| `ext_authz_check_duration_seconds` | Histogram | Envoy ext-authz `Check` duration by `decision` and `result`. |
+| `ext_authz_check_in_flight` | Gauge | Envoy ext-authz `Check` requests currently in flight. |
+
+The token endpoint dependency metrics are:
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `ext_authz_token_exchange_requests_total` | Counter | Token endpoint exchange attempts by endpoint host, result, error kind, and HTTP status class. |
+| `ext_authz_token_exchange_latency_seconds` | Histogram | Token endpoint exchange latency by endpoint host, result, error kind, and HTTP status class. |
+| `ext_authz_token_exchange_timeouts_total` | Counter | Token endpoint request timeouts by endpoint host. |
+| `ext_authz_token_exchange_context_cancellations_total` | Counter | Token endpoint requests canceled by the incoming ext-authz context by endpoint host. |
+| `ext_authz_token_exchange_in_flight` | Gauge | Token endpoint exchange requests currently in flight by endpoint host. |
+
+`result="auth_denied"` is for expected authorization denials, such as missing
+bearer tokens or issuer OAuth denials that map below HTTP 500. `result="system_error"`
+is for reliability failures such as unhealthy policy state or exchange errors
+that map to HTTP 500. Alert on system errors, timeout/cancellation behavior,
+and latency against the ext-authz deadline before alerting on all denials.
+
+When metrics are exported into a Prometheus-compatible backend, useful example
+PromQL includes:
+
+```promql
+sum(rate(ext_authz_check_requests_total{result="system_error"}[5m]))
+histogram_quantile(0.99, sum by (le) (rate(ext_authz_check_duration_seconds_bucket[5m])))
+sum(rate(ext_authz_token_exchange_requests_total{result="failure",http_status_class="5xx"}[5m])) by (endpoint_host)
+histogram_quantile(0.99, sum by (le, endpoint_host) (rate(ext_authz_token_exchange_latency_seconds_bucket[5m])))
+```
+
+Metric labels are limited to bounded decisions, result categories, endpoint
+host, error kind, and HTTP status class. They never include bearer tokens,
+exchanged tokens, client secrets, request paths, OAuth bodies, or full token
+endpoint URLs.
+
+### Grafana Dashboard
+
+The chart can render an opt-in Grafana RED dashboard ConfigMap for clusters
+that use the with-infra Grafana sidecar loader. It is disabled by default and,
+when enabled, renders in the Helm release namespace.
+
+```yaml
+grafanaDashboard:
+  enabled: true
+```
+
+The default ConfigMap labels and annotations match the with-infra sidecar
+convention:
+
+```yaml
+labels:
+  grafana_dashboard: "1"
+annotations:
+  grafana_folder: Ext AuthZ
+```
+
+The dashboard includes plugin RED metrics, token endpoint dependency metrics,
+Istio gateway traffic, Envoy ext-authz decision metrics, and optional provider
+backend transport panels. Provider backend panels require the environment's
+generated Envoy cluster name, supplied by deployment values:
+
+```yaml
+grafanaDashboard:
+  providerCluster: <envoy-provider-cluster-name>
+```
+
+Provider cluster names are infrastructure-specific, so the chart default is
+empty and the backend transport panels show no data until
+`grafanaDashboard.providerCluster` is configured.
+
+Relevant values:
+
+| Value | Default | Description |
+| --- | --- | --- |
+| `grafanaDashboard.enabled` | `false` | Render the Grafana dashboard ConfigMap. |
+| `grafanaDashboard.name` | `ext-authz-token-exchange-red-dashboard` | Dashboard ConfigMap name. |
+| `grafanaDashboard.labels.grafana_dashboard` | `"1"` | Label consumed by the with-infra Grafana sidecar. |
+| `grafanaDashboard.annotations.grafana_folder` | `Ext AuthZ` | Grafana folder annotation consumed by the sidecar. |
+| `grafanaDashboard.datasourceUid` | `prometheus` | Default Prometheus datasource UID. |
+| `grafanaDashboard.pluginJob` | `ext-authz-token-exchange` | Prometheus job label for plugin metrics. |
+| `grafanaDashboard.gatewayJob` | `observability/istio-gateway-api-gateway` | Prometheus job label for gateway Envoy metrics. |
+| `grafanaDashboard.gatewayWorkload` | `gateway-istio` | Istio source workload used for gateway traffic panels. |
+| `grafanaDashboard.providerCluster` | empty | Envoy provider-backend cluster name for optional transport panels. |
+| `grafanaDashboard.envoyTimeoutMs` | `1000` | Ext-authz timeout threshold marker for Check latency panels. |
+| `grafanaDashboard.tokenEndpointTimeoutSeconds` | `0.75` | Token endpoint timeout threshold marker for dependency latency panels. |
+
+Optional Prometheus scrape fallback:
+
+| Environment variable | Default | Required | Description |
+| --- | --- | --- | --- |
+| `METRICS_ENABLED` | `false` | No | Enables the fallback Prometheus metrics HTTP listener. |
+| `METRICS_PORT` | `3002` | Conditional | Metrics listener port when fallback scraping is enabled. |
+| `METRICS_PATH` | `/metrics` | Conditional | Metrics scrape path when fallback scraping is enabled. Must start with `/`. |
 
 ### OpenTelemetry Tracing
 
@@ -228,8 +337,10 @@ For a local walkthrough with Jaeger screenshots, see the
 | Environment variable | Default | Required | Description |
 | --- | --- | --- | --- |
 | `OTEL_TRACES_EXPORTER` | empty | No | Set to `otlp` to enable trace export. Empty or `none` leaves tracing inert. |
+| `OTEL_METRICS_EXPORTER` | empty | No | Set to `otlp` to enable OTLP metrics export. Empty or `none` leaves metric export inert. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry SDK default | No | Base OTLP endpoint used by the exporter, for example `http://otel-collector:4317`. |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | empty | No | Trace-specific OTLP endpoint. Takes precedence over `OTEL_EXPORTER_OTLP_ENDPOINT`. |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | empty | No | Metrics-specific OTLP endpoint. Takes precedence over `OTEL_EXPORTER_OTLP_ENDPOINT`. |
 | `OTEL_SERVICE_NAME` | `ext-authz-token-exchange` | No | Service name attached to exported spans. |
 | `OTEL_RESOURCE_ATTRIBUTES` | empty | No | Additional resource attributes, such as `deployment.environment=dev`. |
 | `OTEL_SDK_DISABLED` | `false` | No | Set to `true` to disable SDK initialization. |
@@ -239,10 +350,15 @@ Minimal values example for a cluster-local collector:
 ```yaml
 env:
   OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
   OTEL_SERVICE_NAME: ext-authz-token-exchange
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
 ```
+
+The collector must also have a `metrics` pipeline that receives OTLP metrics
+and exports them to the chosen metrics backend. A traces-only collector route
+accepts spans but does not make service metrics queryable.
 
 B3 propagation is not enabled by default in this release. If a deployment needs
 B3 for Envoy or Istio compatibility, track that as an explicit compatibility
@@ -304,24 +420,65 @@ If `rbac.create=false`, provide equivalent permissions out of band. Namespace
 label selection does not grant or restrict Kubernetes API permissions by
 itself.
 
-### EnvoyFilter
+### Gateway Authorization
 
-The chart renders an Istio `EnvoyFilter` that inserts
-`envoy.filters.http.ext_authz` before the router on gateway listeners selected
-by `envoyFilter.workloadSelectorLabels` or
-`envoyFilter.workloadSelectorLabelsOverride`.
+Gateway authorization wiring is disabled by default. Enable exactly one gateway
+integration mode when installing the chart:
+
+- `authorizationPolicy.enabled=true` uses Istio's native `CUSTOM`
+  `AuthorizationPolicy` and a mesh-level `extensionProvider`.
+- `envoyFilter.enabled=true` uses the legacy chart-owned `EnvoyFilter` that
+  inserts `envoy.filters.http.ext_authz` before the router.
+
+The `AuthorizationPolicy` mode expects infrastructure to provide an Istio
+provider, defaulting to `gateway-ext-authz-grpc`. The optional
+`gatewayExtAuthzService` resource creates a configurable provider host in the
+gateway namespace so the infra provider can stay generic. Its name does not
+have to be `gateway-ext-authz`; it only needs to match the service FQDN
+configured in `extensionProviders[].envoyExtAuthzGrpc.service`.
+
+The default local infra provider points at
+`gateway-ext-authz.istio-ingress.svc.cluster.local:3001`. By default, the chart
+renders an Istio `ServiceEntry` for that host and points it at this chart's
+plugin Service. That is the recommended shape for Istio `envoyExtAuthzGrpc`
+because the gateway needs the generic provider host as an Envoy cluster. If
+`gatewayExtAuthzService.serviceEntry.enabled=false`, the chart instead renders
+a Kubernetes Service alias.
 
 Relevant values:
 
 | Value | Default | Description |
 | --- | --- | --- |
+| `authorizationPolicy.enabled` | `false` | Render an Istio `AuthorizationPolicy` using `action: CUSTOM`. |
+| `authorizationPolicy.namespace` | `istio-ingress` | Namespace where the `AuthorizationPolicy` is created. |
+| `authorizationPolicy.providerName` | `gateway-ext-authz-grpc` | Istio extension provider name to reference. |
+| `authorizationPolicy.workloadSelectorLabels` | Gateway label selector | Default labels for selecting gateway workloads. |
+| `authorizationPolicy.workloadSelectorLabelsOverride` | `{}` | Complete replacement for the default authorization policy selector labels. |
+| `authorizationPolicy.rules` | `[{}]` | Authorization policy rules. The default applies to all selected gateway traffic. |
+| `gatewayExtAuthzService.enabled` | `false` | Render provider-host wiring for the generic Istio provider backend. |
+| `gatewayExtAuthzService.namespace` | `istio-ingress` | Namespace for the provider host resources. |
+| `gatewayExtAuthzService.name` | `gateway-ext-authz` | Provider host name. Must match the infra provider service name. |
+| `gatewayExtAuthzService.type` | `ExternalName` | Kubernetes Service type when `serviceEntry.enabled=false`. |
+| `gatewayExtAuthzService.externalName` | Plugin Service FQDN | Backend target. Empty uses this chart's plugin Service FQDN. |
+| `gatewayExtAuthzService.port` | `3001` | Provider host port. |
+| `gatewayExtAuthzService.targetPort` | `3001` | Backend target port. |
+| `gatewayExtAuthzService.appProtocol` | `grpc` | Kubernetes Service port app protocol when `serviceEntry.enabled=false`. |
+| `gatewayExtAuthzService.serviceEntry.enabled` | `true` | Render an Istio `ServiceEntry` for the generic provider host. When true, no Kubernetes Service alias is rendered. |
+| `gatewayExtAuthzService.serviceEntry.location` | `MESH_INTERNAL` | ServiceEntry location. |
+| `gatewayExtAuthzService.serviceEntry.resolution` | `DNS` | ServiceEntry endpoint resolution. |
+| `gatewayExtAuthzService.serviceEntry.protocol` | `GRPC` | ServiceEntry port protocol. |
+| `envoyFilter.enabled` | `false` | Render the legacy Istio `EnvoyFilter`. Mutually exclusive with `authorizationPolicy.enabled`. |
 | `envoyFilter.namespace` | `istio-ingress` | Namespace where the EnvoyFilter is created. |
 | `envoyFilter.workloadSelectorLabels` | Gateway label selector | Default labels for selecting gateway workloads. |
 | `envoyFilter.workloadSelectorLabelsOverride` | `{}` | Complete replacement for the default selector labels. |
 | `envoyFilter.timeout` | `1s` | Envoy ext-authz gRPC timeout. |
+| `service.ports.http-metrics.port` | `3002` | Optional Prometheus metrics Service port. |
+| `serviceMonitor.enabled` | `false` | Render a Prometheus Operator `ServiceMonitor` for the fallback `/metrics` endpoint. Enable only when direct Prometheus scraping is desired and the Prometheus Operator CRDs are installed. |
+| `serviceMonitor.interval` | `30s` | Metrics scrape interval. |
+| `serviceMonitor.scrapeTimeout` | `10s` | Metrics scrape timeout. |
 
-The filter is configured with `failure_mode_allow: false`, so Envoy fails
-closed if the external authorization service is unavailable or times out.
+The legacy filter is configured with `failure_mode_allow: false`, so Envoy
+fails closed if the external authorization service is unavailable or times out.
 
 ### Demo And E2E Deployment
 

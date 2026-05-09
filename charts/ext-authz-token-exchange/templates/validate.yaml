@@ -24,3 +24,6 @@
 {{- if hasKey $env "OAUTH_CLIENT_SECRET" }}
 {{- fail "env.OAUTH_CLIENT_SECRET is chart-managed; use oauth.existingSecret.clientSecretKey" }}
 {{- end }}
+{{- if and .Values.envoyFilter.enabled .Values.authorizationPolicy.enabled }}
+{{- fail "envoyFilter.enabled and authorizationPolicy.enabled are mutually exclusive gateway authz modes" }}
+{{- end }}

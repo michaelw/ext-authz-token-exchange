@@ -1,0 +1,22 @@
+{{- if .Values.authorizationPolicy.enabled }}
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}-authz
+  namespace: {{ .Values.authorizationPolicy.namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  selector:
+    matchLabels:
+{{- if .Values.authorizationPolicy.workloadSelectorLabelsOverride }}
+{{ toYaml .Values.authorizationPolicy.workloadSelectorLabelsOverride | indent 6 }}
+{{- else }}
+{{ toYaml .Values.authorizationPolicy.workloadSelectorLabels | indent 6 }}
+{{- end }}
+  action: CUSTOM
+  provider:
+    name: {{ .Values.authorizationPolicy.providerName | quote }}
+  rules:
+{{ toYaml .Values.authorizationPolicy.rules | indent 4 }}
+{{- end }}

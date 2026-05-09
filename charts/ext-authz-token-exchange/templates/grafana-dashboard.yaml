@@ -1,0 +1,1077 @@
+{{- if .Values.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.grafanaDashboard.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+{{- with .Values.grafanaDashboard.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+  annotations:
+{{- with .Values.grafanaDashboard.annotations }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+data:
+  ext-authz-red-dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "prometheus",
+              "uid": "$datasource"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Total ext-authz Check requests handled by the plugin.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(ext_authz_check_requests_total{job=\"$plugin_job\"}[$__rate_interval]))",
+              "legendFormat": "checks"
+            }
+          ],
+          "title": "Check RPS",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Allowed, auth-denied, and system-error Check request rate.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (result) (rate(ext_authz_check_requests_total{job=\"$plugin_job\"}[$__rate_interval]))",
+              "legendFormat": "{{ "{{" }}result{{ "}}" }}"
+            }
+          ],
+          "title": "Check Results",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Plugin Check latency. The red threshold is the Envoy ext-authz timeout.",
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": {{ divf .Values.grafanaDashboard.envoyTimeoutMs 1000.0 }}
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "id": 3,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(ext_authz_check_duration_seconds_bucket{job=\"$plugin_job\"}[$__rate_interval])))",
+              "legendFormat": "p95"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(ext_authz_check_duration_seconds_bucket{job=\"$plugin_job\"}[$__rate_interval])))",
+              "legendFormat": "p99"
+            }
+          ],
+          "title": "Check Latency",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Current ext-authz Check concurrency inside the plugin.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(ext_authz_check_in_flight{job=\"$plugin_job\"})",
+              "legendFormat": "in flight"
+            }
+          ],
+          "title": "Checks In Flight",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 4
+          },
+          "id": 10,
+          "panels": [],
+          "title": "Plugin RED",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Check request rate by decision and result.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "id": 11,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (decision, result) (rate(ext_authz_check_requests_total{job=\"$plugin_job\"}[$__rate_interval]))",
+              "legendFormat": "{{ "{{" }}decision{{ "}}" }} / {{ "{{" }}result{{ "}}" }}"
+            }
+          ],
+          "title": "Check Rate By Decision",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "System-error and auth-denied ratios over all Check requests.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "id": 12,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(ext_authz_check_requests_total{job=\"$plugin_job\",result=\"system_error\"}[$__rate_interval])) / clamp_min(sum(rate(ext_authz_check_requests_total{job=\"$plugin_job\"}[$__rate_interval])), 0.001)",
+              "legendFormat": "system error"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(ext_authz_check_requests_total{job=\"$plugin_job\",result=\"auth_denied\"}[$__rate_interval])) / clamp_min(sum(rate(ext_authz_check_requests_total{job=\"$plugin_job\"}[$__rate_interval])), 0.001)",
+              "legendFormat": "auth denied"
+            }
+          ],
+          "title": "Check Error Ratios",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 15
+          },
+          "id": 20,
+          "panels": [],
+          "title": "Token Exchange Dependency",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Token endpoint exchange attempts by endpoint host and result.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "id": 21,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (endpoint_host, result, error_kind, http_status_class) (rate(ext_authz_token_exchange_requests_total{job=\"$plugin_job\"}[$__rate_interval]))",
+              "legendFormat": "{{ "{{" }}endpoint_host{{ "}}" }} / {{ "{{" }}result{{ "}}" }} / {{ "{{" }}error_kind{{ "}}" }} / {{ "{{" }}http_status_class{{ "}}" }}"
+            }
+          ],
+          "title": "Token Exchange Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Token endpoint latency. The red threshold is TOKEN_ENDPOINT_REQUEST_TIMEOUT.",
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": {{ .Values.grafanaDashboard.tokenEndpointTimeoutSeconds }}
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, endpoint_host) (rate(ext_authz_token_exchange_latency_seconds_bucket{job=\"$plugin_job\"}[$__rate_interval])))",
+              "legendFormat": "p95 {{ "{{" }}endpoint_host{{ "}}" }}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, endpoint_host) (rate(ext_authz_token_exchange_latency_seconds_bucket{job=\"$plugin_job\"}[$__rate_interval])))",
+              "legendFormat": "p99 {{ "{{" }}endpoint_host{{ "}}" }}"
+            }
+          ],
+          "title": "Token Exchange Latency",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Token endpoint timeouts and incoming context cancellations.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 26
+          },
+          "id": 23,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (endpoint_host) (rate(ext_authz_token_exchange_timeouts_total{job=\"$plugin_job\"}[$__rate_interval]))",
+              "legendFormat": "timeouts {{ "{{" }}endpoint_host{{ "}}" }}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (endpoint_host) (rate(ext_authz_token_exchange_context_cancellations_total{job=\"$plugin_job\"}[$__rate_interval]))",
+              "legendFormat": "cancellations {{ "{{" }}endpoint_host{{ "}}" }}"
+            }
+          ],
+          "title": "Token Exchange Timeouts",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Current token exchange dependency concurrency.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 26
+          },
+          "id": 24,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (endpoint_host) (ext_authz_token_exchange_in_flight{job=\"$plugin_job\"})",
+              "legendFormat": "{{ "{{" }}endpoint_host{{ "}}" }}"
+            }
+          ],
+          "title": "Token Exchange In Flight",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 36
+          },
+          "id": 30,
+          "panels": [],
+          "title": "Gateway / Envoy",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Envoy ext-authz filter decisions at the gateway.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 37
+          },
+          "id": 31,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_http_ext_authz_ok{job=\"$gateway_job\"}[$__rate_interval]))",
+              "legendFormat": "ok"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_http_ext_authz_denied{job=\"$gateway_job\"}[$__rate_interval]))",
+              "legendFormat": "denied"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_http_ext_authz_error{job=\"$gateway_job\"}[$__rate_interval]))",
+              "legendFormat": "error"
+            }
+          ],
+          "title": "Envoy Ext AuthZ Decisions",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Envoy ext-authz decisions grouped by protected upstream cluster.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 37
+          },
+          "id": 32,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (cluster_name) (rate(envoy_cluster_ext_authz_ok{job=\"$gateway_job\"}[$__rate_interval]))",
+              "legendFormat": "ok {{ "{{" }}cluster_name{{ "}}" }}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (cluster_name) (rate(envoy_cluster_ext_authz_denied{job=\"$gateway_job\"}[$__rate_interval]))",
+              "legendFormat": "denied {{ "{{" }}cluster_name{{ "}}" }}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (cluster_name) (rate(envoy_cluster_ext_authz_error{job=\"$gateway_job\"}[$__rate_interval]))",
+              "legendFormat": "error {{ "{{" }}cluster_name{{ "}}" }}"
+            }
+          ],
+          "title": "Protected Upstream Decisions",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 47
+          },
+          "id": 40,
+          "panels": [],
+          "title": "Provider Backend Transport",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Requires grafanaDashboard.providerCluster. Request counters for Envoy's upstream connection to the ext-authz provider backend.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 48
+          },
+          "id": 41,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_cluster_upstream_rq_total{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval]))",
+              "legendFormat": "total"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_cluster_upstream_rq_completed{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval]))",
+              "legendFormat": "completed"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_cluster_upstream_rq_timeout{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval]))",
+              "legendFormat": "timeout"
+            }
+          ],
+          "title": "Provider Backend Requests",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Requires grafanaDashboard.providerCluster. Envoy upstream request duration for the ext-authz provider backend.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 48
+          },
+          "id": 42,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(envoy_cluster_upstream_rq_time_bucket{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval])))",
+              "legendFormat": "p95"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(envoy_cluster_upstream_rq_time_bucket{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval])))",
+              "legendFormat": "p99"
+            }
+          ],
+          "title": "Provider Backend Latency",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Requires grafanaDashboard.providerCluster. Envoy upstream connection health for the provider backend.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 58
+          },
+          "id": 43,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(envoy_cluster_upstream_cx_active{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"})",
+              "legendFormat": "active connections"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_cluster_upstream_cx_total{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval]))",
+              "legendFormat": "new connections"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum(rate(envoy_cluster_upstream_cx_connect_fail{job=\"$gateway_job\",cluster_name=\"$provider_cluster\"}[$__rate_interval]))",
+              "legendFormat": "connect failures"
+            }
+          ],
+          "title": "Provider Backend Connections",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 68
+          },
+          "id": 50,
+          "panels": [],
+          "title": "Istio Gateway Traffic",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Gateway request rate by destination service and response code.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 0,
+            "y": 69
+          },
+          "id": 51,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "sum by (destination_service, response_code) (rate(istio_requests_total{reporter=\"source\",source_workload=\"$gateway_workload\"}[$__rate_interval]))",
+              "legendFormat": "{{ "{{" }}destination_service{{ "}}" }} / {{ "{{" }}response_code{{ "}}" }}"
+            }
+          ],
+          "title": "Gateway Requests",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "Gateway request duration from Istio source telemetry.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 69
+          },
+          "id": 52,
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, destination_service) (rate(istio_request_duration_milliseconds_bucket{reporter=\"source\",source_workload=\"$gateway_workload\"}[$__rate_interval])))",
+              "legendFormat": "p95 {{ "{{" }}destination_service{{ "}}" }}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$datasource"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, destination_service) (rate(istio_request_duration_milliseconds_bucket{reporter=\"source\",source_workload=\"$gateway_workload\"}[$__rate_interval])))",
+              "legendFormat": "p99 {{ "{{" }}destination_service{{ "}}" }}"
+            }
+          ],
+          "title": "Gateway Request Latency",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": [
+        "ext-authz",
+        "token-exchange"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.datasourceUid | quote }},
+              "value": {{ .Values.grafanaDashboard.datasourceUid | quote }}
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Datasource",
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "",
+            "type": "datasource"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.pluginJob | quote }},
+              "value": {{ .Values.grafanaDashboard.pluginJob | quote }}
+            },
+            "hide": 0,
+            "label": "Plugin job",
+            "name": "plugin_job",
+            "query": {{ .Values.grafanaDashboard.pluginJob | quote }},
+            "type": "constant"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.gatewayJob | quote }},
+              "value": {{ .Values.grafanaDashboard.gatewayJob | quote }}
+            },
+            "hide": 0,
+            "label": "Gateway scrape job",
+            "name": "gateway_job",
+            "query": {{ .Values.grafanaDashboard.gatewayJob | quote }},
+            "type": "constant"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.gatewayWorkload | quote }},
+              "value": {{ .Values.grafanaDashboard.gatewayWorkload | quote }}
+            },
+            "hide": 0,
+            "label": "Gateway workload",
+            "name": "gateway_workload",
+            "query": {{ .Values.grafanaDashboard.gatewayWorkload | quote }},
+            "type": "constant"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.providerCluster | quote }},
+              "value": {{ .Values.grafanaDashboard.providerCluster | quote }}
+            },
+            "hide": 0,
+            "label": "Provider cluster",
+            "name": "provider_cluster",
+            "query": {{ .Values.grafanaDashboard.providerCluster | quote }},
+            "type": "constant"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.envoyTimeoutMs | quote }},
+              "value": {{ .Values.grafanaDashboard.envoyTimeoutMs | quote }}
+            },
+            "hide": 2,
+            "label": "Envoy timeout ms",
+            "name": "envoy_timeout_ms",
+            "query": {{ .Values.grafanaDashboard.envoyTimeoutMs | quote }},
+            "type": "constant"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": {{ .Values.grafanaDashboard.tokenEndpointTimeoutSeconds | quote }},
+              "value": {{ .Values.grafanaDashboard.tokenEndpointTimeoutSeconds | quote }}
+            },
+            "hide": 2,
+            "label": "Token endpoint timeout seconds",
+            "name": "token_endpoint_timeout_seconds",
+            "query": {{ .Values.grafanaDashboard.tokenEndpointTimeoutSeconds | quote }},
+            "type": "constant"
+          }
+        ]
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Ext AuthZ RED",
+      "uid": "ext-authz-token-exchange-red",
+      "version": 1,
+      "weekStart": ""
+    }
+{{- end }}

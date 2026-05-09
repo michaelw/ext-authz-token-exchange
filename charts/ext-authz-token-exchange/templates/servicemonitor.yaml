@@ -1,0 +1,24 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+{{- with .Values.serviceMonitor.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+  endpoints:
+    - path: {{ .Values.env.METRICS_PATH | default "/metrics" | quote }}
+      port: http-metrics
+      interval: {{ .Values.serviceMonitor.interval | quote }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout | quote }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace | quote }}
+  selector:
+    matchLabels:
+{{ include "ext-authz-token-exchange.selectorLabels" . | indent 6 }}
+{{- end }}

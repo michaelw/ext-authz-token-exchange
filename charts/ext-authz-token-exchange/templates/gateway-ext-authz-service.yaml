@@ -1,0 +1,20 @@
+{{- if and .Values.gatewayExtAuthzService.enabled (not .Values.gatewayExtAuthzService.serviceEntry.enabled) }}
+{{- $externalName := .Values.gatewayExtAuthzService.externalName | default (printf "%s.%s.svc.cluster.local" (include "ext-authz-token-exchange.serviceName" .) .Release.Namespace) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gatewayExtAuthzService.name | quote }}
+  namespace: {{ .Values.gatewayExtAuthzService.namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  type: {{ .Values.gatewayExtAuthzService.type | quote }}
+{{- if eq .Values.gatewayExtAuthzService.type "ExternalName" }}
+  externalName: {{ $externalName | quote }}
+{{- end }}
+  ports:
+    - name: grpc
+      port: {{ .Values.gatewayExtAuthzService.port }}
+      targetPort: {{ .Values.gatewayExtAuthzService.targetPort }}
+      appProtocol: {{ .Values.gatewayExtAuthzService.appProtocol | quote }}
+{{- end }}

@@ -52,6 +52,9 @@ type RuntimeConfig struct {
 	BearerRealm                        string
 	AllowUnauthenticatedOptions        bool
 	DefaultDenyUnmatched               bool
+	MetricsEnabled                     bool
+	MetricsPort                        string
+	MetricsPath                        string
 	TokenEndpointRequestTimeout        time.Duration
 	TokenEndpointDialTimeout           time.Duration
 	TokenEndpointTLSHandshakeTimeout   time.Duration
@@ -83,10 +86,13 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		BearerRealm:                        envDefault("TOKEN_EXCHANGE_BEARER_REALM", "ext-authz-token-exchange"),
 		AllowUnauthenticatedOptions:        envBool("TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS", false),
 		DefaultDenyUnmatched:               envBool("TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", false),
-		TokenEndpointRequestTimeout:        envDuration("TOKEN_ENDPOINT_REQUEST_TIMEOUT", 5*time.Second),
+		MetricsEnabled:                     envBool("METRICS_ENABLED", false),
+		MetricsPort:                        envDefault("METRICS_PORT", "3002"),
+		MetricsPath:                        envDefault("METRICS_PATH", "/metrics"),
+		TokenEndpointRequestTimeout:        envDuration("TOKEN_ENDPOINT_REQUEST_TIMEOUT", 750*time.Millisecond),
 		TokenEndpointDialTimeout:           envDuration("TOKEN_ENDPOINT_DIAL_TIMEOUT", 3*time.Second),
 		TokenEndpointTLSHandshakeTimeout:   envDuration("TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT", 3*time.Second),
-		TokenEndpointResponseHeaderTimeout: envDuration("TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT", 5*time.Second),
+		TokenEndpointResponseHeaderTimeout: envDuration("TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT", 500*time.Millisecond),
 		TokenEndpointIdleConnTimeout:       envDuration("TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT", 90*time.Second),
 		TokenEndpointMaxIdleConns:          envInt("TOKEN_ENDPOINT_MAX_IDLE_CONNS", 100),
 		TokenEndpointMaxIdleConnsPerHost:   envInt("TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST", 10),
@@ -129,6 +135,14 @@ func (c RuntimeConfig) Validate() error {
 	}
 	if c.RequireIssuedTokenType && c.ExpectedIssuedTokenType == "" {
 		problems = append(problems, "TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE is required when issued token type validation is enabled")
+	}
+	if c.MetricsEnabled {
+		if c.MetricsPort == "" {
+			problems = append(problems, "METRICS_PORT is required when metrics are enabled")
+		}
+		if c.MetricsPath == "" || !strings.HasPrefix(c.MetricsPath, "/") {
+			problems = append(problems, "METRICS_PATH must start with / when metrics are enabled")
+		}
 	}
 	if c.TokenEndpointRequestTimeout <= 0 {
 		problems = append(problems, "TOKEN_ENDPOINT_REQUEST_TIMEOUT must be positive")
