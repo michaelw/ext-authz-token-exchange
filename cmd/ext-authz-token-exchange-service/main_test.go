@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/server"
@@ -98,5 +99,25 @@ func TestGRPCStatsHandlerRecordsAuthzChecks(t *testing.T) {
 func TestSummarizeHealthResponseHandlesUnexpectedValues(t *testing.T) {
 	if got := summarizeHealthResponse("not a health response"); got != "unknown" {
 		t.Fatalf("unexpected health summary for wrong type: %s", got)
+	}
+}
+
+func TestServeMetricsStopsWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveMetrics(ctx, config.RuntimeConfig{
+			MetricsPort: "0",
+			MetricsPath: "/metrics",
+		})
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("metrics server did not stop after context cancellation")
 	}
 }

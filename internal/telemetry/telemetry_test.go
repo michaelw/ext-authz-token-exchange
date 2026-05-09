@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/baggage"
@@ -73,6 +74,35 @@ func TestInitLeavesTracingInertWithoutOTLPExporter(t *testing.T) {
 	if got := otel.GetMeterProvider(); got != previousMeterProvider {
 		t.Fatal("meter provider changed without OTLP exporter")
 	}
+}
+
+func TestInitConfiguresOTLPTraceAndMetricProviders(t *testing.T) {
+	t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
+	t.Setenv("OTEL_METRICS_EXPORTER", "otlp")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1")
+	t.Setenv("OTEL_SERVICE_NAME", "test-service")
+
+	previousProvider := otel.GetTracerProvider()
+	previousMeterProvider := otel.GetMeterProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	defer otel.SetTracerProvider(previousProvider)
+	defer otel.SetMeterProvider(previousMeterProvider)
+	defer otel.SetTextMapPropagator(previousPropagator)
+
+	shutdown, err := InitWithServiceName(context.Background(), "fallback-service")
+	if err != nil {
+		t.Fatalf("InitWithServiceName returned error: %v", err)
+	}
+	if got := otel.GetTracerProvider(); got == previousProvider {
+		t.Fatal("tracer provider did not change with OTLP traces enabled")
+	}
+	if got := otel.GetMeterProvider(); got == previousMeterProvider {
+		t.Fatal("meter provider did not change with OTLP metrics enabled")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = shutdown(ctx)
 }
 
 func TestTelemetryEnvHelpers(t *testing.T) {
