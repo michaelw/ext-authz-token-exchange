@@ -20,7 +20,7 @@
       ],
       "automerge": true,
       "automergeType": "pr",
-      "automergeStrategy": "merge-commit",
+      "automergeStrategy": "rebase",
       "platformAutomerge": true
     },
     {
@@ -33,7 +33,7 @@
       ],
       "automerge": true,
       "automergeType": "pr",
-      "automergeStrategy": "merge-commit",
+      "automergeStrategy": "rebase",
       "platformAutomerge": true
     },
     {
