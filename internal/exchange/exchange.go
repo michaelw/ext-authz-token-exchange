@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,13 +17,53 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
 	contentTypeForm = "application/x-www-form-urlencoded"
 	contentTypeJSON = "application/json"
+)
+
+const (
+	metricResultSuccess = "success"
+	metricResultFailure = "failure"
+	metricStatusNone    = "none"
+)
+
+var (
+	meter                                 = otel.Meter("github.com/michaelw/ext-authz-token-exchange/internal/exchange")
+	otelTokenEndpointRequests             = must(meter.Int64Counter("ext_authz_token_exchange_requests_total"))
+	otelTokenEndpointTimeouts             = must(meter.Int64Counter("ext_authz_token_exchange_timeouts_total"))
+	otelTokenEndpointContextCancellations = must(meter.Int64Counter("ext_authz_token_exchange_context_cancellations_total"))
+	otelTokenEndpointInFlight             = must(meter.Int64UpDownCounter("ext_authz_token_exchange_in_flight"))
+	otelTokenEndpointLatency              = must(meter.Float64Histogram("ext_authz_token_exchange_latency_seconds", metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5)))
+	tokenEndpointRequests                 = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "ext_authz_token_exchange_requests_total",
+		Help: "Total token endpoint exchange attempts by endpoint host, result, error kind, and HTTP status class.",
+	}, []string{"endpoint_host", "result", "error_kind", "http_status_class"})
+	tokenEndpointTimeouts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "ext_authz_token_exchange_timeouts_total",
+		Help: "Total token endpoint exchange attempts that failed because the token endpoint request timed out.",
+	}, []string{"endpoint_host"})
+	tokenEndpointContextCancellations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "ext_authz_token_exchange_context_cancellations_total",
+		Help: "Total token endpoint exchange attempts that failed because the incoming context was canceled.",
+	}, []string{"endpoint_host"})
+	tokenEndpointInFlight = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ext_authz_token_exchange_in_flight",
+		Help: "Token endpoint exchange requests currently in flight.",
+	}, []string{"endpoint_host"})
+	tokenEndpointLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "ext_authz_token_exchange_latency_seconds",
+		Help:    "Token endpoint exchange latency by endpoint host, result, error kind, and HTTP status class.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5},
+	}, []string{"endpoint_host", "result", "error_kind", "http_status_class"})
 )
 
 const (
@@ -110,7 +151,14 @@ func NewHTTPTransport(cfg config.RuntimeConfig) *http.Transport {
 
 // Exchange performs an RFC8693 token exchange request for entry.
 func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken string) (Result, *OAuthError) {
+	started := time.Now()
+	endpointHost := tokenEndpointHost(entry.TokenEndpoint)
+	otelTokenEndpointInFlight.Add(ctx, 1, metric.WithAttributes(attribute.String("endpoint_host", endpointHost)))
+	defer otelTokenEndpointInFlight.Add(ctx, -1, metric.WithAttributes(attribute.String("endpoint_host", endpointHost)))
+	tokenEndpointInFlight.WithLabelValues(endpointHost).Inc()
+	defer tokenEndpointInFlight.WithLabelValues(endpointHost).Dec()
 	if err := c.cfg.ValidateTokenEndpoint(entry.TokenEndpoint); err != nil {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "invalid_token_endpoint", metricStatusNone)
 		return Result{}, internalError("invalid token endpoint", diagInvalidTokenEndpoint)
 	}
 
@@ -137,6 +185,7 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, entry.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "create_request", metricStatusNone)
 		return Result{}, internalError("failed to create token exchange request", diagCreateExchangeRequest)
 	}
 	req.Header.Set("Content-Type", contentTypeForm)
@@ -150,34 +199,43 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		errorKind := exchangeRequestErrorKind(ctx, err)
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, errorKind, metricStatusNone)
 		return Result{}, internalError("token exchange request failed", diagExchangeRequestFailed)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "read_response", statusClass(resp.StatusCode))
 		return Result{}, internalError("failed to read token exchange response", diagReadExchangeResponseFailed)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "http_status", statusClass(resp.StatusCode))
 		return Result{}, c.mapErrorResponse(resp, body)
 	}
 
 	var success successResponse
 	if err := json.Unmarshal(body, &success); err != nil {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "malformed_success_json", statusClass(resp.StatusCode))
 		return Result{}, invalidTokenResponse(diagMalformedSuccessJSON)
 	}
 	// RFC8693 Section 2.2.1 requires access_token, issued_token_type, and token_type.
 	// https://www.rfc-editor.org/rfc/rfc8693#section-2.2.1
 	if success.AccessToken == "" {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "missing_access_token", statusClass(resp.StatusCode))
 		return Result{}, invalidTokenResponse(diagMissingAccessToken)
 	}
 	if !strings.EqualFold(success.TokenType, "Bearer") {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "non_bearer_token_type", statusClass(resp.StatusCode))
 		return Result{}, invalidTokenResponse(diagNonBearerTokenType)
 	}
 	if c.cfg.RequireIssuedTokenType && success.IssuedTokenType != c.cfg.ExpectedIssuedTokenType {
+		recordExchangeMetrics(started, endpointHost, metricResultFailure, "wrong_issued_token_type", statusClass(resp.StatusCode))
 		return Result{}, invalidTokenResponse(diagWrongIssuedTokenType)
 	}
+	recordExchangeMetrics(started, endpointHost, metricResultSuccess, "none", statusClass(resp.StatusCode))
 	return Result{AccessToken: success.AccessToken}, nil
 }
 
@@ -307,4 +365,64 @@ func intDefault(value, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func recordExchangeMetrics(started time.Time, endpointHost, result, errorKind, httpStatusClass string) {
+	attrs := metric.WithAttributes(
+		attribute.String("endpoint_host", endpointHost),
+		attribute.String("result", result),
+		attribute.String("error_kind", errorKind),
+		attribute.String("http_status_class", httpStatusClass),
+	)
+	otelTokenEndpointRequests.Add(context.Background(), 1, attrs)
+	tokenEndpointRequests.WithLabelValues(endpointHost, result, errorKind, httpStatusClass).Inc()
+	if errorKind == "timeout" {
+		otelTokenEndpointTimeouts.Add(context.Background(), 1, metric.WithAttributes(attribute.String("endpoint_host", endpointHost)))
+		tokenEndpointTimeouts.WithLabelValues(endpointHost).Inc()
+	}
+	if errorKind == "context_canceled" {
+		otelTokenEndpointContextCancellations.Add(context.Background(), 1, metric.WithAttributes(attribute.String("endpoint_host", endpointHost)))
+		tokenEndpointContextCancellations.WithLabelValues(endpointHost).Inc()
+	}
+	otelTokenEndpointLatency.Record(context.Background(), time.Since(started).Seconds(), attrs)
+	tokenEndpointLatency.WithLabelValues(endpointHost, result, errorKind, httpStatusClass).Observe(time.Since(started).Seconds())
+}
+
+func must[T any](instrument T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return instrument
+}
+
+func exchangeRequestErrorKind(ctx context.Context, err error) string {
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		return "context_canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	return "transport_error"
+}
+
+func statusClass(status int) string {
+	if status <= 0 {
+		return metricStatusNone
+	}
+	return fmt.Sprintf("%dxx", status/100)
+}
+
+func tokenEndpointHost(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return "invalid"
+	}
+	if host := u.Hostname(); host != "" {
+		return strings.ToLower(host)
+	}
+	return "invalid"
 }

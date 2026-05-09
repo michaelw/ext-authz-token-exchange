@@ -4,10 +4,12 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -21,6 +23,7 @@ import (
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"github.com/michaelw/ext-authz-token-exchange/internal/server"
 	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc/filters"
 )
@@ -55,6 +58,9 @@ func main() {
 			log.Printf("ConfigMap policy store stopped: %v", err)
 		}
 	}()
+	if cfg.MetricsEnabled {
+		go serveMetrics(ctx, cfg)
+	}
 
 	grpcPort := grpcPortFromEnv()
 
@@ -119,4 +125,25 @@ func grpcPortFromEnv() string {
 		return "3001"
 	}
 	return grpcPort
+}
+
+func serveMetrics(ctx context.Context, cfg config.RuntimeConfig) {
+	mux := http.NewServeMux()
+	mux.Handle(cfg.MetricsPath, promhttp.Handler())
+	server := &http.Server{
+		Addr:    ":" + cfg.MetricsPort,
+		Handler: mux,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("metrics server shutdown failed: %v", err)
+		}
+	}()
+	log.Printf("Starting Prometheus metrics server on :%s%s", cfg.MetricsPort, cfg.MetricsPath)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("metrics server failed: %v", err)
+	}
 }

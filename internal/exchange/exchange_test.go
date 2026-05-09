@@ -13,6 +13,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -343,6 +345,141 @@ var _ = Describe("Client", func() {
 		Expect(transport.MaxIdleConnsPerHost).To(Equal(6))
 		Expect(transport.TLSClientConfig.MinVersion).NotTo(BeZero())
 	})
+
+	It("times out slow token endpoint responses within the configured request timeout", func() {
+		cfg.TokenEndpointRequestTimeout = 20 * time.Millisecond
+		cfg.TokenEndpointResponseHeaderTimeout = time.Second
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(200 * time.Millisecond)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"access_token":      "late",
+				"token_type":        "Bearer",
+				"issued_token_type": config.DefaultIssuedTokenType,
+			})
+		}))
+		defer tokenEndpoint.Close()
+
+		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(context.Background(), policy.Entry{
+			TokenEndpoint: tokenEndpoint.URL,
+			Scope:         "read",
+		}, "subject")
+
+		Expect(oauthErr).NotTo(BeNil())
+		Expect(oauthErr.Message).To(Equal("token exchange request failed (TXE-1003)"))
+		Expect(metricWithLabels("ext_authz_token_exchange_timeouts_total", map[string]string{
+			"endpoint_host": "127.0.0.1",
+		})).To(BeNumerically(">=", 1))
+	})
+
+	It("honors an Envoy-equivalent request context deadline before the token endpoint answers", func() {
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(200 * time.Millisecond)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"access_token":      "late",
+				"token_type":        "Bearer",
+				"issued_token_type": config.DefaultIssuedTokenType,
+			})
+		}))
+		defer tokenEndpoint.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(ctx, policy.Entry{
+			TokenEndpoint: tokenEndpoint.URL,
+			Scope:         "read",
+		}, "subject")
+
+		Expect(oauthErr).NotTo(BeNil())
+		Expect(oauthErr.Message).To(Equal("token exchange request failed (TXE-1003)"))
+		Expect(metricWithLabels("ext_authz_token_exchange_timeouts_total", map[string]string{
+			"endpoint_host": "127.0.0.1",
+		})).To(BeNumerically(">=", 1))
+	})
+
+	It("cancels the outbound token endpoint request when the ext-authz context is canceled", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		roundTripperStarted := make(chan struct{})
+		requestCanceled := make(chan struct{})
+		done := make(chan *exchange.OAuthError, 1)
+		client := clientWithRoundTripper(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			close(roundTripperStarted)
+			<-req.Context().Done()
+			close(requestCanceled)
+			return nil, req.Context().Err()
+		}))
+		go func() {
+			_, oauthErr := exchange.NewClient(cfg, client).Exchange(ctx, policy.Entry{
+				TokenEndpoint: "http://issuer.example/token",
+				Scope:         "read",
+			}, "subject")
+			done <- oauthErr
+		}()
+
+		Eventually(roundTripperStarted).Should(BeClosed())
+		cancel()
+
+		Eventually(requestCanceled).Should(BeClosed())
+		Eventually(done).Should(Receive(Not(BeNil())))
+		Expect(metricWithLabels("ext_authz_token_exchange_context_cancellations_total", map[string]string{
+			"endpoint_host": "issuer.example",
+		})).To(BeNumerically(">=", 1))
+	})
+
+	It("records safe token endpoint metrics without token secrets or full URLs", func() {
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`issuer detail mentioning nothing sensitive`))
+		}))
+		defer tokenEndpoint.Close()
+
+		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
+			TokenEndpoint: tokenEndpoint.URL + "/oauth/token?tenant=secret",
+			Scope:         "read",
+		}, "subject-token-secret")
+
+		Expect(oauthErr).NotTo(BeNil())
+		Expect(metricWithLabels("ext_authz_token_exchange_requests_total", map[string]string{
+			"endpoint_host":     "127.0.0.1",
+			"result":            "failure",
+			"error_kind":        "http_status",
+			"http_status_class": "5xx",
+		})).To(BeNumerically(">=", 1))
+		Expect(metricLabelValues("ext_authz_token_exchange_requests_total")).NotTo(ContainElement(ContainSubstring("subject-token-secret")))
+		Expect(metricLabelValues("ext_authz_token_exchange_requests_total")).NotTo(ContainElement(ContainSubstring("/oauth/token")))
+		Expect(metricLabelValues("ext_authz_token_exchange_requests_total")).NotTo(ContainElement(ContainSubstring("tenant=secret")))
+	})
+
+	It("tracks token endpoint requests in flight", func() {
+		roundTripperStarted := make(chan struct{})
+		releaseRoundTripper := make(chan struct{})
+		client := clientWithRoundTripper(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			close(roundTripperStarted)
+			<-releaseRoundTripper
+			return responseWithBody(http.StatusOK, `{"access_token":"exchanged","token_type":"Bearer","issued_token_type":"`+config.DefaultIssuedTokenType+`"}`), nil
+		}))
+		done := make(chan *exchange.OAuthError, 1)
+
+		go func() {
+			_, oauthErr := exchange.NewClient(cfg, client).Exchange(context.Background(), policy.Entry{
+				TokenEndpoint: "http://issuer.example/token",
+				Scope:         "read",
+			}, "subject")
+			done <- oauthErr
+		}()
+
+		Eventually(roundTripperStarted).Should(BeClosed())
+		Expect(metricWithLabels("ext_authz_token_exchange_in_flight", map[string]string{
+			"endpoint_host": "issuer.example",
+		})).To(BeNumerically(">=", 1))
+
+		close(releaseRoundTripper)
+		Eventually(done).Should(Receive(BeNil()))
+		Eventually(func() float64 {
+			return metricWithLabels("ext_authz_token_exchange_in_flight", map[string]string{
+				"endpoint_host": "issuer.example",
+			})
+		}).Should(Equal(float64(0)))
+	})
 })
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -363,6 +500,14 @@ func responseWithReadError(status int) *http.Response {
 	}
 }
 
+func responseWithBody(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{},
+	}
+}
+
 type readErrorBody struct{}
 
 func (readErrorBody) Read([]byte) (int, error) {
@@ -371,4 +516,60 @@ func (readErrorBody) Read([]byte) (int, error) {
 
 func (readErrorBody) Close() error {
 	return nil
+}
+
+func metricWithLabels(name string, labels map[string]string) float64 {
+	for _, family := range metricFamilies(name) {
+		for _, metric := range family.GetMetric() {
+			if metricHasLabels(metric, labels) {
+				if metric.GetCounter() != nil {
+					return metric.GetCounter().GetValue()
+				}
+				if metric.GetHistogram() != nil {
+					return float64(metric.GetHistogram().GetSampleCount())
+				}
+				if metric.GetGauge() != nil {
+					return metric.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func metricLabelValues(name string) []string {
+	var values []string
+	for _, family := range metricFamilies(name) {
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				values = append(values, label.GetValue())
+			}
+		}
+	}
+	return values
+}
+
+func metricFamilies(name string) []*dto.MetricFamily {
+	families, err := prometheus.DefaultGatherer.Gather()
+	Expect(err).NotTo(HaveOccurred())
+	var matches []*dto.MetricFamily
+	for _, family := range families {
+		if family.GetName() == name {
+			matches = append(matches, family)
+		}
+	}
+	return matches
+}
+
+func metricHasLabels(metric *dto.Metric, labels map[string]string) bool {
+	actual := map[string]string{}
+	for _, label := range metric.GetLabel() {
+		actual[label.GetName()] = label.GetValue()
+	}
+	for name, value := range labels {
+		if actual[name] != value {
+			return false
+		}
+	}
+	return true
 }
