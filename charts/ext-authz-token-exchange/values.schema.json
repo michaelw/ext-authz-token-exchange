@@ -134,6 +134,9 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "namespace": {
           "type": "string",
           "minLength": 1
@@ -147,6 +150,168 @@
         },
         "workloadSelectorLabelsOverride": {
           "type": "object"
+        }
+      }
+    },
+    "authorizationPolicy": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workloadSelectorLabels": {
+          "type": "object"
+        },
+        "workloadSelectorLabelsOverride": {
+          "type": "object"
+        },
+        "rules": {
+          "type": "array"
+        }
+      }
+    },
+    "gatewayExtAuthzService": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "externalName": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "targetPort": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
+        },
+        "appProtocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serviceEntry": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "location": {
+              "type": "string",
+              "minLength": 1
+            },
+            "resolution": {
+              "type": "string",
+              "minLength": 1
+            },
+            "protocol": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scrapeTimeout": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "grafanaDashboard": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "datasourceUid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pluginJob": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gatewayJob": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gatewayWorkload": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerCluster": {
+          "type": "string"
+        },
+        "envoyTimeoutMs": {
+          "type": "number"
+        },
+        "tokenEndpointTimeoutSeconds": {
+          "type": "number"
         }
       }
     }

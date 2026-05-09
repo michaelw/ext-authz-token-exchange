@@ -1,3 +1,4 @@
+{{- if .Values.envoyFilter.enabled }}
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -34,3 +35,4 @@ spec:
               envoy_grpc:
                 cluster_name: outbound|3001||{{ include "ext-authz-token-exchange.serviceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
               timeout: {{ .Values.envoyFilter.timeout | quote }}
+{{- end }}

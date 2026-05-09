@@ -40,6 +40,18 @@ profiles:
   - name: local-test
     merge:
       deployments:
+        ext-authz-token-exchange:
+          helm:
+            values:
+              envoyFilter:
+                enabled: false
+              authorizationPolicy:
+                enabled: true
+              gatewayExtAuthzService:
+                enabled: true
+              grafanaDashboard:
+                enabled: true
+                providerCluster: outbound|3001||gateway-ext-authz.istio-ingress.svc.cluster.local
         ext-authz-token-exchange-e2e:
           namespace: ext-authz-token-exchange-e2e
           helm:
@@ -248,6 +260,7 @@ deployments:
         env:
           GRPC_LOG_HEALTH_CHECKS: "false"
           OTEL_TRACES_EXPORTER: otlp
+          OTEL_METRICS_EXPORTER: otlp
           OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
           OTEL_SERVICE_NAME: ext-authz-token-exchange
           OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local

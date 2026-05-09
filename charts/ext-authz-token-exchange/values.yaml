@@ -29,6 +29,8 @@ securityContext:
 ports:
   grpc-authz:
     containerPort: 3001
+  http-metrics:
+    containerPort: 3002
 
 livenessProbe:
   grpc:
@@ -59,6 +61,10 @@ service:
       port: 3001
       targetPort: grpc-authz
       appProtocol: grpc
+    http-metrics:
+      port: 3002
+      targetPort: http-metrics
+      appProtocol: http
 
 oauth:
   createSecret: false
@@ -72,6 +78,9 @@ oauth:
 
 env:
   GRPC_LOG_HEALTH_CHECKS: "true"
+  METRICS_ENABLED: "false"
+  METRICS_PATH: /metrics
+  METRICS_PORT: "3002"
   TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED: "false"
   # CONFIGMAP_LABEL_SELECTOR: ext-authz-token-exchange.magneticflux.net/enabled=true
   # CONFIGMAP_NAMESPACE_SELECTOR: ext-authz-token-exchange.magneticflux.net/policy=enabled
@@ -82,8 +91,11 @@ env:
   # TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT: 90s
   # TOKEN_ENDPOINT_MAX_IDLE_CONNS: "100"
   # TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST: "10"
-  # TOKEN_ENDPOINT_REQUEST_TIMEOUT: 5s
-  # TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT: 5s
+  # METRICS_ENABLED: "false"
+  # METRICS_PATH: /metrics
+  # METRICS_PORT: "3002"
+  # TOKEN_ENDPOINT_REQUEST_TIMEOUT: 750ms
+  # TOKEN_ENDPOINT_RESPONSE_HEADER_TIMEOUT: 500ms
   # TOKEN_ENDPOINT_TLS_HANDSHAKE_TIMEOUT: 3s
   # TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "false"
   # TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS: "false"
@@ -96,6 +108,7 @@ env:
   # TOKEN_EXCHANGE_REQUIRE_ISSUED_TOKEN_TYPE: "true"
   # TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
   # OTEL_TRACES_EXPORTER: otlp
+  # OTEL_METRICS_EXPORTER: otlp
   # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
   # OTEL_SERVICE_NAME: ext-authz-token-exchange
   # OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
@@ -106,8 +119,58 @@ rbac:
   serviceAccountName: ext-authz-token-exchange
 
 envoyFilter:
+  enabled: false
   namespace: istio-ingress
   workloadSelectorLabels:
     gateway.networking.k8s.io/gateway-name: gateway
   workloadSelectorLabelsOverride: {}
   timeout: 1s
+
+authorizationPolicy:
+  enabled: false
+  namespace: istio-ingress
+  providerName: gateway-ext-authz-grpc
+  workloadSelectorLabels:
+    gateway.networking.k8s.io/gateway-name: gateway
+  workloadSelectorLabelsOverride: {}
+  rules:
+    - {}
+
+gatewayExtAuthzService:
+  enabled: false
+  namespace: istio-ingress
+  name: gateway-ext-authz
+  # A Kubernetes Service is rendered only when serviceEntry.enabled=false.
+  type: ExternalName
+  # Defaults to the plugin Service FQDN when empty.
+  externalName: ""
+  port: 3001
+  targetPort: 3001
+  appProtocol: grpc
+  serviceEntry:
+    enabled: true
+    location: MESH_INTERNAL
+    resolution: DNS
+    protocol: GRPC
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+grafanaDashboard:
+  enabled: false
+  name: ext-authz-token-exchange-red-dashboard
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Ext AuthZ
+  datasourceUid: prometheus
+  pluginJob: ext-authz-token-exchange
+  gatewayJob: observability/istio-gateway-api-gateway
+  gatewayWorkload: gateway-istio
+  # Environment-specific Envoy cluster name for the ext-authz provider backend.
+  providerCluster: ""
+  envoyTimeoutMs: 1000
+  tokenEndpointTimeoutSeconds: 0.75

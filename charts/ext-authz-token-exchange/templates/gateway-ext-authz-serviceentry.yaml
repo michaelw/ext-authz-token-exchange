@@ -1,0 +1,24 @@
+{{- if and .Values.gatewayExtAuthzService.enabled .Values.gatewayExtAuthzService.serviceEntry.enabled }}
+{{- $host := printf "%s.%s.svc.cluster.local" .Values.gatewayExtAuthzService.name .Values.gatewayExtAuthzService.namespace }}
+{{- $externalName := .Values.gatewayExtAuthzService.externalName | default (printf "%s.%s.svc.cluster.local" (include "ext-authz-token-exchange.serviceName" .) .Release.Namespace) }}
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: {{ .Values.gatewayExtAuthzService.name | quote }}
+  namespace: {{ .Values.gatewayExtAuthzService.namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  hosts:
+    - {{ $host | quote }}
+  location: {{ .Values.gatewayExtAuthzService.serviceEntry.location | quote }}
+  resolution: {{ .Values.gatewayExtAuthzService.serviceEntry.resolution | quote }}
+  ports:
+    - number: {{ .Values.gatewayExtAuthzService.port }}
+      name: grpc
+      protocol: {{ .Values.gatewayExtAuthzService.serviceEntry.protocol | quote }}
+  endpoints:
+    - address: {{ $externalName | quote }}
+      ports:
+        grpc: {{ .Values.gatewayExtAuthzService.targetPort }}
+{{- end }}
