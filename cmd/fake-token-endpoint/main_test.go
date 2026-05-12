@@ -237,6 +237,86 @@ func TestFakeConfigRoutesByExactRequestInputs(t *testing.T) {
 	})
 }
 
+func TestLoadFakeConfigDefaultsAndNormalizesRoutes(t *testing.T) {
+	path := writeFakeConfig(t, `routes:
+  - name: "  green route  "
+    match:
+      path: " /token/green "
+      scope: " green "
+    response:
+      type: " success "
+`)
+
+	cfg, err := loadFakeConfig(path)
+	if err != nil {
+		t.Fatalf("loadFakeConfig: %v", err)
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("routes = %d, want 1", len(cfg.Routes))
+	}
+	route := cfg.Routes[0]
+	if route.Name != "green route" {
+		t.Fatalf("route name = %q, want green route", route.Name)
+	}
+	if route.Match.Path != "/token/green" || route.Match.Scope != "green" {
+		t.Fatalf("route match = %#v, want trimmed path and scope", route.Match)
+	}
+	if route.scenario() != "green route" {
+		t.Fatalf("scenario = %q, want route name fallback", route.scenario())
+	}
+	if cfg.DefaultResponse.Type != responseOAuthError ||
+		cfg.DefaultResponse.Status != http.StatusBadRequest ||
+		cfg.DefaultResponse.Error != "invalid_request" {
+		t.Fatalf("default response = %#v, want configured unknown scenario OAuth error", cfg.DefaultResponse)
+	}
+}
+
+func TestFakeConfigRouteOrderFirstMatchWins(t *testing.T) {
+	cfg := fakeConfig{
+		Routes: []fakeRoute{
+			{
+				Name:  "first-red-audience",
+				Match: fakeMatch{Audience: "httpbin-red"},
+				Response: fakeResponse{
+					Type:             responseOAuthError,
+					Status:           http.StatusBadRequest,
+					Error:            "invalid_target",
+					ErrorDescription: "first route wins",
+				},
+			},
+			{
+				Name:     "second-red-audience",
+				Match:    fakeMatch{Audience: "httpbin-red"},
+				Response: fakeResponse{Type: responseSuccess, Scenario: "red"},
+			},
+		},
+		DefaultResponse: defaultUnknownResponse(),
+	}
+	if err := (&cfg).validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+	handler := tokenHandler("e2e-client", "e2e-secret", cfg)
+	form := baseTokenForm()
+	form.Add("audience", "httpbin-red")
+	req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", contentTypeFormEncoded)
+	req.SetBasicAuth("e2e-client", "e2e-secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "invalid_target" || body["error_description"] != "first route wins" {
+		t.Fatalf("body = %#v, want first route OAuth error", body)
+	}
+}
+
 func TestLoadFakeConfigValidatesRoutes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -279,6 +359,55 @@ func TestLoadFakeConfigValidatesRoutes(t *testing.T) {
       type: strange
 `,
 			want: `unknown type "strange"`,
+		},
+		{
+			name: "invalid response status",
+			body: `routes:
+  - name: invalid-status
+    match:
+      path: /token/invalid-status
+    response:
+      type: oauth_error
+      status: 99
+      error: invalid_request
+`,
+			want: `response status must be between 100 and 599`,
+		},
+		{
+			name: "negative delay",
+			body: `routes:
+  - name: negative-delay
+    match:
+      path: /token/negative-delay
+    response:
+      type: delay
+      delayMilliseconds: -1
+`,
+			want: `response delayMilliseconds must not be negative`,
+		},
+		{
+			name: "oauth error requires code",
+			body: `routes:
+  - name: missing-oauth-error
+    match:
+      path: /token/missing-oauth-error
+    response:
+      type: oauth_error
+      status: 400
+`,
+			want: `response requires error`,
+		},
+		{
+			name: "json error requires code",
+			body: `routes:
+  - name: missing-json-error
+    match:
+      path: /token/missing-json-error
+    response:
+      type: json_error
+      status: 500
+`,
+			want: `response requires error`,
 		},
 	}
 
