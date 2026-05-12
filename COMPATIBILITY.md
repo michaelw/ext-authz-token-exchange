@@ -13,8 +13,9 @@ For the current operator-facing configuration and behavior reference, see
   upstream URIs where the exchanged token will be used.
 - `exchange.audiences` remains available for authorization-server-specific
   logical audience names.
-- App-owned ConfigMaps may omit `exchange.tokenEndpoint` only when the plugin
-  deployment configures `TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT`.
+- App-owned ConfigMaps now use `exchange.issuerRef`; token endpoints are owned
+  by operator-defined issuer profiles so app-owned policy cannot introduce
+  arbitrary token endpoint URLs.
 
 ## OAuth Client Authentication
 

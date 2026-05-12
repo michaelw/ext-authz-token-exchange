@@ -117,6 +117,60 @@
         }
       }
     },
+    "issuerProfiles": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "configMapName": {
+          "type": "string"
+        },
+        "mountPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "tokenEndpoint"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tokenEndpoint": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bearerRealm": {
+                "type": "string"
+              },
+              "tokenEndpointAuthMethod": {
+                "type": "string",
+                "enum": ["client_secret_basic", "client_secret_post"]
+              },
+              "clientID": {
+                "type": "string"
+              },
+              "clientSecret": {
+                "type": "string"
+              },
+              "clientIDSecretRef": {
+                "$ref": "#/$defs/secretKeyRef"
+              },
+              "clientSecretSecretRef": {
+                "$ref": "#/$defs/secretKeyRef"
+              }
+            }
+          }
+        }
+      }
+    },
     "rbac": {
       "type": "object",
       "additionalProperties": true,
@@ -312,6 +366,26 @@
         },
         "tokenEndpointTimeoutSeconds": {
           "type": "number"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "secretKeyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

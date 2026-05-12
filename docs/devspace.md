@@ -62,7 +62,9 @@ plugin chart as release `ext-authz-token-exchange` in namespace
 `ext-authz-token-exchange`, and the demo/e2e chart as release
 `ext-authz-token-exchange-e2e` in namespace `ext-authz-token-exchange-e2e`.
 The demo/e2e chart owns the fake token endpoint, color team namespaces, and
-app-owned policy ConfigMaps.
+app-owned policy ConfigMaps. The fake token endpoint response behavior is
+configured by `fakeTokenEndpoint.routes` in the e2e chart values; the plugin
+still uses the single `fake-issuer` issuer profile endpoint.
 
 Profiles are composable:
 
@@ -75,9 +77,6 @@ devspace deploy -p with-infra
 
 # plugin plus demo/e2e resources, assumes infrastructure exists
 devspace deploy -p local-test
-
-# switch the local demo/e2e resources back to the fake issuer
-devspace deploy -p local-test -p with-fake-issuer
 
 # plugin plus demo/e2e resources and required infrastructure from scratch
 devspace deploy -p with-infra -p local-test
@@ -95,12 +94,9 @@ After deployment, run the e2e assertions against the already deployed releases:
 devspace run test-e2e
 ```
 
-`devspace run test-e2e` inspects the deployed plugin token endpoint and runs the
-matching specs: fake-token scenarios for the default `local-test` stack, or
-Keycloak-gated scenarios for the `with-keycloak` stack. The active issuer profile
-also self-holds for later DevSpace commands: use
-`devspace deploy -p local-test -p with-keycloak` to switch to Keycloak, and
-`devspace deploy -p local-test -p with-fake-issuer` to switch back to fake.
+`devspace run test-e2e` runs the fake baseline for the default `local-test`
+stack. Keycloak-gated specs skip when Keycloak is unavailable and execute when
+the `with-keycloak` profile is deployed.
 
 For manual Keycloak testing, start the dashboard. Each scenario declares its
 input token shape in the scenario YAML, and the token tab's `Fetch` button
@@ -114,14 +110,14 @@ Use the dashboard for Keycloak scenarios that declare generated token prefill
 types. The command-line demo client can still list the configured scenarios:
 
 ```bash
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
+go run ./cmd/demo-scenario --config test/e2e/demo-scenarios.yaml list
 ```
 
-The dashboard also detects the deployed plugin token endpoint. It selects the
-fake or Keycloak scenario file automatically and shows the selected issuer in
-the header and logs panel. The token tab decodes JWT-shaped input tokens and
-uses the scenario's `request.token.prefill` plus local Keycloak profile defaults
-for its `Fetch` action. Those defaults can be adjusted with
+The dashboard shows every configured scenario from the unified catalog.
+Scenarios that require `local-keycloak` are marked `Skipped` until the
+`with-keycloak` profile is deployed. The token tab decodes JWT-shaped input
+tokens and uses the scenario's `request.token.prefill` plus local Keycloak
+profile defaults for its `Fetch` action. Those defaults can be adjusted with
 `DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.

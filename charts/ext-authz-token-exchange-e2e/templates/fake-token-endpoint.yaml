@@ -1,3 +1,22 @@
+{{- if .Values.fakeTokenEndpoint.routes }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ext-authz-token-exchange-e2e.fakeTokenEndpointConfigMapName" . | quote }}
+  namespace: {{ .Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 4 }}
+    app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
+data:
+  config.yaml: |
+    routes:
+{{ toYaml .Values.fakeTokenEndpoint.routes | indent 6 }}
+{{- with .Values.fakeTokenEndpoint.defaultResponse }}
+    defaultResponse:
+{{ toYaml . | indent 6 }}
+{{- end }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +32,8 @@ spec:
       app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
   template:
     metadata:
+      annotations:
+        reloader.stakater.com/auto: "true"
       labels:
 {{ include "ext-authz-token-exchange-e2e.labels" . | indent 8 }}
         app.kubernetes.io/name: {{ .Values.fakeTokenEndpoint.name | quote }}
@@ -24,12 +45,24 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.fakeTokenEndpoint.port }}
-{{- with .Values.fakeTokenEndpoint.env }}
+{{- if or .Values.fakeTokenEndpoint.routes .Values.fakeTokenEndpoint.env }}
           env:
+{{- if .Values.fakeTokenEndpoint.routes }}
+            - name: "FAKE_TOKEN_ENDPOINT_CONFIG"
+              value: "/etc/fake-token-endpoint/config.yaml"
+{{- end }}
+{{- with .Values.fakeTokenEndpoint.env }}
 {{- range $name, $value := . }}
             - name: {{ $name | quote }}
               value: {{ $value | quote }}
 {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.fakeTokenEndpoint.routes }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/fake-token-endpoint
+              readOnly: true
 {{- end }}
           readinessProbe:
             httpGet:
@@ -37,6 +70,12 @@ spec:
               port: http
           resources:
 {{ toYaml .Values.fakeTokenEndpoint.resources | indent 12 }}
+{{- if .Values.fakeTokenEndpoint.routes }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "ext-authz-token-exchange-e2e.fakeTokenEndpointConfigMapName" . | quote }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

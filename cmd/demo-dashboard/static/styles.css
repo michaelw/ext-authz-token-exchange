@@ -207,6 +207,12 @@ h3 {
   border-color: var(--running-border);
 }
 
+.result-pill.skip {
+  color: var(--muted);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
 .shell {
   min-height: calc(100vh - 72px);
   display: grid;
@@ -360,6 +366,12 @@ h3 {
   color: var(--red);
   background: var(--fail-soft);
   border-color: var(--fail-border);
+}
+
+.scenario-badge.skip {
+  color: var(--muted);
+  background: var(--surface-2);
+  border-color: var(--line);
 }
 
 .scenario-summary {

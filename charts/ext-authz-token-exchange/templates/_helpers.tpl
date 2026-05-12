@@ -56,7 +56,14 @@ Name of the Kubernetes Service rendered by common.itsumi.
 {{- end }}
 
 {{/*
-Name of the OAuth client credential Secret consumed by the plugin.
+Name of the issuer profile ConfigMap consumed by the plugin.
+*/}}
+{{- define "ext-authz-token-exchange.issuerProfilesConfigMapName" -}}
+{{- .Values.issuerProfiles.configMapName | default (printf "%s-issuer-profiles" (include "ext-authz-token-exchange.fullname" .)) -}}
+{{- end }}
+
+{{/*
+Name of the optional OAuth client credential Secret rendered by the chart.
 */}}
 {{- define "ext-authz-token-exchange.oauthSecretName" -}}
 {{- if .Values.oauth.createSecret -}}
@@ -67,13 +74,12 @@ Name of the OAuth client credential Secret consumed by the plugin.
 {{- end }}
 
 {{/*
-Runtime environment rendered from operator env plus chart-owned OAuth refs.
+Runtime environment rendered from operator env plus chart-owned issuer profile wiring.
 */}}
 {{- define "ext-authz-token-exchange.env" -}}
-{{- $secretName := include "ext-authz-token-exchange.oauthSecretName" . -}}
 {{- $env := dict
-  "OAUTH_CLIENT_ID" (dict "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" .Values.oauth.existingSecret.clientIDKey)))
-  "OAUTH_CLIENT_SECRET" (dict "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" .Values.oauth.existingSecret.clientSecretKey)))
+  "POD_NAMESPACE" (dict "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.namespace")))
+  "TOKEN_EXCHANGE_ISSUER_PROFILES_FILE" (printf "%s/%s" (.Values.issuerProfiles.mountPath | default "/etc/ext-authz-token-exchange") (.Values.issuerProfiles.fileName | default "issuers.yaml"))
 }}
 {{- with .Values.env }}
 {{- $env = mergeOverwrite $env . }}

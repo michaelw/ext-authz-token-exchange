@@ -26,6 +26,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc/filters"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const healthCheckMethod = "/grpc.health.v1.Health/Check"
@@ -37,6 +39,16 @@ func main() {
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		log.Fatalf("invalid configuration: %v", err)
+	}
+	if cfg.NeedsIssuerSecretResolution() {
+		client, err := inClusterKubernetesClient()
+		if err != nil {
+			log.Fatalf("failed to create Kubernetes client for issuer profile Secret resolution: %v", err)
+		}
+		cfg, err = config.ResolveIssuerProfileSecrets(ctx, client, podNamespaceFromEnv(), cfg)
+		if err != nil {
+			log.Fatalf("invalid issuer profile Secret configuration: %v", err)
+		}
 	}
 
 	shutdownTelemetry, err := telemetry.Init(ctx)
@@ -89,6 +101,18 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)
 	}
+}
+
+func inClusterKubernetesClient() (kubernetes.Interface, error) {
+	restConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(restConfig)
+}
+
+func podNamespaceFromEnv() string {
+	return strings.TrimSpace(os.Getenv("POD_NAMESPACE"))
 }
 
 func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {

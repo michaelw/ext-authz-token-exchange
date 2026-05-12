@@ -20,10 +20,17 @@ func testRuntimeConfig() config.RuntimeConfig {
 		SubjectTokenType:        config.DefaultSubjectTokenType,
 		LabelSelector:           config.DefaultConfigMapLabelSelector,
 		NamespaceSelector:       config.DefaultConfigMapNamespaceSelector,
-		DefaultTokenEndpoint:    "http://issuer.example/token",
 		AllowHTTPTokenEndpoint:  true,
 		RequireIssuedTokenType:  true,
 		ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+		IssuerProfiles: map[string]config.IssuerProfile{
+			"primary": {
+				Name:          "primary",
+				TokenEndpoint: "http://issuer.example/token",
+				ClientID:      "client",
+				ClientSecret:  "secret",
+			},
+		},
 	}
 }
 
@@ -42,6 +49,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `
 	store.rebuildLocked()
@@ -78,6 +86,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 		},

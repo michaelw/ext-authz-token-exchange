@@ -148,7 +148,7 @@ function renderScenarioList() {
   for (const scenario of state.scenarios) {
     const result = state.results.get(scenario.name);
     const selected = scenario.name === state.selected?.name;
-    const status = scenarioRunStatus(result);
+    const status = scenarioRunStatus(scenario, result);
     const button = document.createElement("button");
     button.className = [
       "scenario",
@@ -175,7 +175,10 @@ function renderScenarioList() {
   }
 }
 
-function scenarioRunStatus(result) {
+function scenarioRunStatus(scenario, result) {
+  if (result?.skipped || scenario?.skipped || scenario?.available === false) {
+    return { label: "Skipped", className: "skip" };
+  }
   if (result?.passed === true) {
     return { label: "Pass", className: "pass" };
   }
@@ -225,6 +228,9 @@ function normalizeBearerInput(value) {
 }
 
 function shouldPrefillScenarioToken(scenario) {
+  if (scenario?.skipped || scenario?.available === false) {
+    return false;
+  }
   if (state.tokenOverrides.has(scenario.name) || normalizeBearerInput(tokenForScenario(scenario))) {
     return false;
   }
@@ -289,6 +295,13 @@ function renderSelected() {
   loadPolicy(scenario);
 
   if (!result) {
+    if (selected.skipped || selected.available === false) {
+      setPill("SKIPPED", "skip");
+      clearObserved();
+      $("response-preview").textContent = selected.skipReason || "Scenario unavailable.";
+      renderFlow(scenario, { skipped: true });
+      return;
+    }
     setPill("Idle", "");
     clearObserved();
     renderFlow(scenario, null);
@@ -296,6 +309,13 @@ function renderSelected() {
   }
 
   const observed = result.observed || {};
+  if (result.skipped) {
+    setPill("SKIPPED", "skip");
+    clearObserved();
+    $("response-preview").textContent = result.skipReason || "Scenario unavailable.";
+    renderFlow(scenario, result);
+    return;
+  }
   setPill(result.passed ? "PASS" : "FAIL", result.passed ? "pass" : "fail");
   $("observed-status").textContent = observed.status || "-";
   setTokenDisplay($("observed-auth"), observed.upstreamAuthorization);
@@ -342,6 +362,18 @@ async function runScenario(name) {
     return;
   }
   selectScenario(name);
+  if (selected.skipped || selected.available === false) {
+    state.results.set(name, {
+      scenario: effectiveScenario(selected),
+      passed: true,
+      skipped: true,
+      skipReason: selected.skipReason || "scenario unavailable",
+      observed: {},
+    });
+    renderScenarioList();
+    renderSelected();
+    return;
+  }
   setPill("Running", "running");
   renderFlow(effectiveScenario(selected), { running: true });
   try {
@@ -412,6 +444,12 @@ function renderFlow(scenario, result) {
   for (const step of steps) {
     const node = document.querySelector(`[data-step="${step}"]`);
     node.classList.remove("active", "stop", "skip");
+  }
+  if (result?.skipped || scenario?.skipped || scenario?.available === false) {
+    for (const step of steps) {
+      document.querySelector(`[data-step="${step}"]`).classList.add("skip");
+    }
+    return;
   }
 
   const status = result?.observed?.status || scenario.expect?.status;

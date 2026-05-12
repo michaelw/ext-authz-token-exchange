@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ext-authz-token-exchange.issuerProfilesConfigMapName" . | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+data:
+  {{ .Values.issuerProfiles.fileName | default "issuers.yaml" }}: |
+    issuers:
+{{- range $profile := .Values.issuerProfiles.profiles }}
+      - name: {{ $profile.name | quote }}
+        tokenEndpoint: {{ $profile.tokenEndpoint | quote }}
+{{- with $profile.bearerRealm }}
+        bearerRealm: {{ . | quote }}
+{{- end }}
+{{- with $profile.tokenEndpointAuthMethod }}
+        tokenEndpointAuthMethod: {{ . | quote }}
+{{- end }}
+{{- with $profile.clientID }}
+        clientID: {{ . | quote }}
+{{- end }}
+{{- with $profile.clientSecret }}
+        clientSecret: {{ . | quote }}
+{{- end }}
+{{- with $profile.clientIDSecretRef }}
+        clientIDSecretRef:
+{{ toYaml . | indent 10 }}
+{{- end }}
+{{- with $profile.clientSecretSecretRef }}
+        clientSecretSecretRef:
+{{ toYaml . | indent 10 }}
+{{- end }}
+{{- end }}

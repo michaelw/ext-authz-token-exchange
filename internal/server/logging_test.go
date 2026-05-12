@@ -397,9 +397,9 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `}, config.RuntimeConfig{
 		ClientID:                "client",
 		ClientSecret:            "secret",
@@ -410,6 +410,14 @@ entries:
 		AllowHTTPTokenEndpoint:  true,
 		RequireIssuedTokenType:  true,
 		ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+		IssuerProfiles: map[string]config.IssuerProfile{
+			"primary": {
+				Name:          "primary",
+				TokenEndpoint: "http://issuer.example/token",
+				ClientID:      "client",
+				ClientSecret:  "secret",
+			},
+		},
 	})
 }
 
