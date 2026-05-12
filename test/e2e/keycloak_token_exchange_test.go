@@ -22,8 +22,8 @@ import (
 
 var _ = Describe("keycloak token exchange", Ordered, func() {
 	BeforeEach(func() {
-		if env.issuer != keycloakIssuer {
-			Skip("Keycloak scenarios run only when E2E_ISSUER=keycloak")
+		if !env.keycloakAvailable {
+			Skip("Keycloak scenarios run only when local-keycloak is deployed")
 		}
 	})
 

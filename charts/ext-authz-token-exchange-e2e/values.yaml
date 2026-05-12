@@ -20,6 +20,77 @@ fakeTokenEndpoint:
   imagePullPolicy: IfNotPresent
   port: 8080
   env: {}
+  routes:
+    - name: invalid-target
+      match:
+        resource: https://httpbin.int.kube/anything/error-invalid-target
+      response:
+        type: oauth_error
+        status: 400
+        error: invalid_target
+        errorDescription: resource or audience is invalid
+    - name: invalid-grant
+      match:
+        resource: https://httpbin.int.kube/anything/error-invalid-grant
+      response:
+        type: oauth_error
+        status: 400
+        error: invalid_grant
+        errorDescription: subject token is invalid
+    - name: expired-subject-token
+      match:
+        resource: https://httpbin.int.kube/anything/error-expired-subject-token
+      response:
+        type: oauth_error
+        status: 400
+        error: invalid_grant
+        errorDescription: subject_token_expired
+    - name: unauthorized
+      match:
+        resource: https://httpbin.int.kube/anything/error-unauthorized
+      response:
+        type: oauth_error
+        status: 401
+        error: invalid_client
+        errorDescription: client rejected
+        wwwAuthenticate: Bearer realm="issuer", error="invalid_token"
+    - name: forbidden
+      match:
+        resource: https://httpbin.int.kube/anything/error-forbidden
+      response:
+        type: oauth_error
+        status: 403
+        error: invalid_target
+        errorDescription: target rejected
+    - name: malformed
+      match:
+        resource: https://httpbin.int.kube/anything/error-malformed
+      response:
+        type: malformed
+        scenario: malformed
+    - name: yellow-success
+      match:
+        audience: httpbin-yellow
+      response:
+        type: success
+        scenario: yellow
+    - name: red-success
+      match:
+        audience: httpbin-red
+      response:
+        type: success
+        scenario: red
+    - name: blue-success
+      match:
+        audience: httpbin-blue
+      response:
+        type: success
+        scenario: blue
+  defaultResponse:
+    type: oauth_error
+    status: 400
+    error: invalid_request
+    errorDescription: unknown fake token scenario
   resources:
     requests:
       cpu: 10m
@@ -33,27 +104,21 @@ teams:
       - name: error-invalid-target
         scope: errors
         pathPrefix: /anything/error-invalid-target
-        tokenPath: /token/invalid-target
       - name: error-invalid-grant
         scope: invalid-grant
         pathPrefix: /anything/error-invalid-grant
-        tokenPath: /token/invalid-grant
       - name: error-expired-subject-token
         scope: expired-subject-token
         pathPrefix: /anything/error-expired-subject-token
-        tokenPath: /token/expired-subject-token
       - name: error-unauthorized
         scope: unauthorized
         pathPrefix: /anything/error-unauthorized
-        tokenPath: /token/unauthorized
       - name: error-forbidden
         scope: forbidden
         pathPrefix: /anything/error-forbidden
-        tokenPath: /token/forbidden
       - name: error-malformed
         scope: malformed
         pathPrefix: /anything/error-malformed
-        tokenPath: /token/malformed
       - name: denied
         action: deny
         pathPrefix: /anything/denied

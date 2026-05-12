@@ -1,12 +1,16 @@
 package config_test
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 )
@@ -17,10 +21,8 @@ func TestConfig(t *testing.T) {
 }
 
 var _ = Describe("RuntimeConfig", func() {
-	It("validates required secrets and defaults", func() {
+	It("validates issuer profiles and defaults", func() {
 		cfg := config.RuntimeConfig{
-			ClientID:                           "client",
-			ClientSecret:                       "secret",
 			TokenEndpointAuthMethod:            config.AuthMethodClientSecretBasic,
 			GrantType:                          config.DefaultGrantType,
 			SubjectTokenType:                   config.DefaultSubjectTokenType,
@@ -36,6 +38,15 @@ var _ = Describe("RuntimeConfig", func() {
 			TokenEndpointTLSHandshakeTimeout:   time.Second,
 			TokenEndpointResponseHeaderTimeout: time.Second,
 			TokenEndpointIdleConnTimeout:       time.Second,
+			AllowHTTPTokenEndpoint:             true,
+			IssuerProfiles: map[string]config.IssuerProfile{
+				"primary": {
+					Name:          "primary",
+					TokenEndpoint: "http://issuer.example/token",
+					ClientID:      "client",
+					ClientSecret:  "secret",
+				},
+			},
 		}
 
 		Expect(cfg.Validate()).To(Succeed())
@@ -43,14 +54,11 @@ var _ = Describe("RuntimeConfig", func() {
 
 	It("rejects HTTP token endpoints unless explicitly enabled", func() {
 		cfg := config.RuntimeConfig{
-			ClientID:                           "client",
-			ClientSecret:                       "secret",
 			TokenEndpointAuthMethod:            config.AuthMethodClientSecretBasic,
 			GrantType:                          config.DefaultGrantType,
 			SubjectTokenType:                   config.DefaultSubjectTokenType,
 			LabelSelector:                      config.DefaultConfigMapLabelSelector,
 			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
-			DefaultTokenEndpoint:               "http://issuer.example/token",
 			RequireIssuedTokenType:             true,
 			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
 			TokenEndpointRequestTimeout:        time.Second,
@@ -58,6 +66,14 @@ var _ = Describe("RuntimeConfig", func() {
 			TokenEndpointTLSHandshakeTimeout:   time.Second,
 			TokenEndpointResponseHeaderTimeout: time.Second,
 			TokenEndpointIdleConnTimeout:       time.Second,
+			IssuerProfiles: map[string]config.IssuerProfile{
+				"primary": {
+					Name:          "primary",
+					TokenEndpoint: "http://issuer.example/token",
+					ClientID:      "client",
+					ClientSecret:  "secret",
+				},
+			},
 		}
 
 		Expect(cfg.Validate()).To(MatchError(ContainSubstring("must use https")))
@@ -65,14 +81,109 @@ var _ = Describe("RuntimeConfig", func() {
 		Expect(cfg.Validate()).To(Succeed())
 	})
 
-	It("enforces token endpoint allowlists", func() {
-		cfg := config.RuntimeConfig{
-			AllowHTTPTokenEndpoint: true,
-			TokenEndpointAllowlist: []string{"issuer.example"},
-		}
+	It("loads issuer profiles from the configured file", func() {
+		file, err := os.CreateTemp("", "issuer-profiles-*.yaml")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(file.Name())
+		_, err = file.WriteString(`
+issuers:
+  - name: primary
+    tokenEndpoint: http://issuer.example/token
+    bearerRealm: issuer
+    tokenEndpointAuthMethod: client_secret_post
+    clientID: client
+    clientSecret: secret
+`)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(file.Close()).To(Succeed())
 
-		Expect(cfg.ValidateTokenEndpoint("http://issuer.example/token")).To(Succeed())
-		Expect(cfg.ValidateTokenEndpoint("http://other.example/token")).To(MatchError(ContainSubstring("not in TOKEN_ENDPOINT_ALLOWLIST")))
+		setenv("TOKEN_EXCHANGE_ISSUER_PROFILES_FILE", file.Name())
+		setenv("TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT", "true")
+
+		cfg, err := config.LoadFromEnv()
+
+		Expect(err).NotTo(HaveOccurred())
+		profile, ok := cfg.IssuerProfile("primary")
+		Expect(ok).To(BeTrue())
+		Expect(profile.TokenEndpoint).To(Equal("http://issuer.example/token"))
+		Expect(profile.BearerRealm).To(Equal("issuer"))
+		Expect(profile.TokenEndpointAuthMethod).To(Equal(config.AuthMethodClientSecretPost))
+	})
+
+	It("resolves issuer profile credential Secret refs", func() {
+		cfg := config.RuntimeConfig{
+			TokenEndpointAuthMethod:            config.AuthMethodClientSecretBasic,
+			GrantType:                          config.DefaultGrantType,
+			SubjectTokenType:                   config.DefaultSubjectTokenType,
+			LabelSelector:                      config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
+			AllowHTTPTokenEndpoint:             true,
+			RequireIssuedTokenType:             true,
+			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
+			TokenEndpointRequestTimeout:        time.Second,
+			TokenEndpointDialTimeout:           time.Second,
+			TokenEndpointTLSHandshakeTimeout:   time.Second,
+			TokenEndpointResponseHeaderTimeout: time.Second,
+			TokenEndpointIdleConnTimeout:       time.Second,
+			IssuerProfiles: map[string]config.IssuerProfile{
+				"fake-issuer": {
+					Name:                  "fake-issuer",
+					TokenEndpoint:         "http://issuer.example/token",
+					ClientIDSecretRef:     &config.SecretKeyRef{Name: "issuer-oauth", Key: "client_id"},
+					ClientSecretSecretRef: &config.SecretKeyRef{Name: "issuer-oauth", Key: "client_secret"},
+				},
+			},
+		}
+		client := fake.NewSimpleClientset(&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "issuer-oauth", Namespace: "ext-authz-token-exchange"},
+			Data: map[string][]byte{
+				"client_id":     []byte("client"),
+				"client_secret": []byte("secret"),
+			},
+		})
+
+		resolved, err := config.ResolveIssuerProfileSecrets(context.Background(), client, "ext-authz-token-exchange", cfg)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resolved.NeedsIssuerSecretResolution()).To(BeTrue())
+		profile, ok := resolved.IssuerProfile("fake-issuer")
+		Expect(ok).To(BeTrue())
+		Expect(profile.ClientID).To(Equal("client"))
+		Expect(profile.ClientSecret).To(Equal("secret"))
+	})
+
+	It("fails issuer profile Secret resolution when a referenced key is missing", func() {
+		cfg := config.RuntimeConfig{
+			TokenEndpointAuthMethod:            config.AuthMethodClientSecretBasic,
+			GrantType:                          config.DefaultGrantType,
+			SubjectTokenType:                   config.DefaultSubjectTokenType,
+			LabelSelector:                      config.DefaultConfigMapLabelSelector,
+			NamespaceSelector:                  config.DefaultConfigMapNamespaceSelector,
+			AllowHTTPTokenEndpoint:             true,
+			RequireIssuedTokenType:             true,
+			ExpectedIssuedTokenType:            config.DefaultIssuedTokenType,
+			TokenEndpointRequestTimeout:        time.Second,
+			TokenEndpointDialTimeout:           time.Second,
+			TokenEndpointTLSHandshakeTimeout:   time.Second,
+			TokenEndpointResponseHeaderTimeout: time.Second,
+			TokenEndpointIdleConnTimeout:       time.Second,
+			IssuerProfiles: map[string]config.IssuerProfile{
+				"fake-issuer": {
+					Name:                  "fake-issuer",
+					TokenEndpoint:         "http://issuer.example/token",
+					ClientIDSecretRef:     &config.SecretKeyRef{Name: "issuer-oauth", Key: "client_id"},
+					ClientSecretSecretRef: &config.SecretKeyRef{Name: "issuer-oauth", Key: "client_secret"},
+				},
+			},
+		}
+		client := fake.NewSimpleClientset(&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "issuer-oauth", Namespace: "ext-authz-token-exchange"},
+			Data:       map[string][]byte{"client_id": []byte("client")},
+		})
+
+		_, err := config.ResolveIssuerProfileSecrets(context.Background(), client, "ext-authz-token-exchange", cfg)
+
+		Expect(err).To(MatchError(ContainSubstring(`missing key "client_secret"`)))
 	})
 
 	It("loads the default namespace selector from the environment", func() {

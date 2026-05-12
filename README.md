@@ -86,8 +86,8 @@ Individual routes can also be rejected with `action: deny` policy entries,
 while `action: exchange` keeps the normal token exchange behavior.
 
 For the full configuration reference and behavior details, including all policy
-fields, token endpoint allowlists, namespace and ConfigMap discovery labels,
-and RBAC requirements, see the [Configuration Reference](docs/configuration.md).
+fields, named issuer profiles, namespace and ConfigMap discovery labels, and
+RBAC requirements, see the [Configuration Reference](docs/configuration.md).
 Policy entries are split into `match`, `action`, and action-specific
 configuration:
 
@@ -100,12 +100,12 @@ entries:
       methods: ["GET", "POST"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
       resources:
         - https://api.example.com/orders
       audiences:
         - orders-api
-      tokenEndpoint: https://issuer.example.com/oauth/token
 
   - match:
       host: api.example.com

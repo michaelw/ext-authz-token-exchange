@@ -78,6 +78,15 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/fakeTokenRoute"
+          }
+        },
+        "defaultResponse": {
+          "$ref": "#/definitions/fakeTokenResponse"
         }
       }
     },
@@ -99,10 +108,7 @@
               "type": "string",
               "minLength": 1
             },
-            "tokenPath": {
-              "type": "string"
-            },
-            "tokenEndpoint": {
+            "issuerRef": {
               "type": "string",
               "minLength": 1
             },
@@ -141,10 +147,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "tokenPath": {
-                  "type": "string"
-                },
-                "tokenEndpoint": {
+                "issuerRef": {
                   "type": "string",
                   "minLength": 1
                 },
@@ -172,6 +175,84 @@
               }
             }
           }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "fakeTokenRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "match", "response"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "scope": {
+              "type": "string",
+              "minLength": 1
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "response": {
+          "$ref": "#/definitions/fakeTokenResponse"
+        }
+      }
+    },
+    "fakeTokenResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "success",
+            "oauth_error",
+            "json_error",
+            "malformed",
+            "missing_access_token",
+            "wrong_token_type",
+            "wrong_issued_token_type",
+            "delay"
+          ]
+        },
+        "scenario": {
+          "type": "string"
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "error": {
+          "type": "string"
+        },
+        "errorDescription": {
+          "type": "string"
+        },
+        "wwwAuthenticate": {
+          "type": "string"
+        },
+        "delayMilliseconds": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

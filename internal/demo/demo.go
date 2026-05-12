@@ -73,8 +73,14 @@ type Scenario struct {
 	Request     Request     `json:"request"`
 	Policy      string      `json:"policy"`
 	Exchange    string      `json:"exchange"`
+	Requires    Requires    `json:"requires"`
 	Behavior    Behavior    `json:"behavior"`
 	Expect      Expectation `json:"expect"`
+}
+
+// Requires describes optional runtime dependencies for a scenario.
+type Requires struct {
+	Issuer string `json:"issuer,omitempty"`
 }
 
 // Behavior describes the issuer or plugin behavior a scenario demonstrates.
@@ -128,6 +134,8 @@ type Result struct {
 	RequestURL string    `json:"requestURL"`
 	Curl       string    `json:"curl"`
 	Passed     bool      `json:"passed"`
+	Skipped    bool      `json:"skipped,omitempty"`
+	SkipReason string    `json:"skipReason,omitempty"`
 	Failures   []Failure `json:"failures,omitempty"`
 }
 
@@ -218,6 +226,11 @@ func (cfg Config) Validate() error {
 		}
 		if err := sc.Request.Token.Validate(sc.Name); err != nil {
 			return err
+		}
+		switch sc.Requires.Issuer {
+		case "", "fake-issuer", "local-keycloak":
+		default:
+			return fmt.Errorf("scenario %q requires unsupported issuer %q", sc.Name, sc.Requires.Issuer)
 		}
 	}
 	return nil

@@ -25,12 +25,6 @@ vars:
     value: "dev-${DEVSPACE_USER}-${DEVSPACE_TIMESTAMP}"
   PROD_TAG:
     value: "latest" # XXX versioning scheme for production images
-  ISSUER_PROFILE:
-    source: command
-    command: ./scripts/devspace-detect-issuer.sh ${DEVSPACE_PROFILE}
-    default: fake
-    alwaysResolve: true
-
 profiles:
   - name: with-infra
     merge:
@@ -52,6 +46,32 @@ profiles:
               grafanaDashboard:
                 enabled: true
                 providerCluster: outbound|3001||gateway-ext-authz.istio-ingress.svc.cluster.local
+              env:
+                TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
+                TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
+                # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
+                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+              oauth:
+                createSecret: true
+                secretName: ext-authz-token-exchange-fake-issuer-oauth
+                clientID: e2e-client
+                clientSecret: e2e-secret
+                existingSecret:
+                  name: ext-authz-token-exchange-fake-issuer-oauth
+                  clientIDKey: client_id
+                  clientSecretKey: client_secret
+              issuerProfiles:
+                profiles:
+                  - name: fake-issuer
+                    tokenEndpoint: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
+                    bearerRealm: ext-authz-token-exchange-e2e
+                    tokenEndpointAuthMethod: client_secret_basic
+                    clientIDSecretRef:
+                      name: ext-authz-token-exchange-fake-issuer-oauth
+                      key: client_id
+                    clientSecretSecretRef:
+                      name: ext-authz-token-exchange-fake-issuer-oauth
+                      key: client_secret
         ext-authz-token-exchange-e2e:
           namespace: ext-authz-token-exchange-e2e
           helm:
@@ -83,34 +103,7 @@ profiles:
             kubectl label namespace "$ns" ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
           done
           create_deployments --all
-  - name: with-fake-issuer
-    activation:
-      - vars:
-          ISSUER_PROFILE: fake
-    merge:
-      deployments:
-        ext-authz-token-exchange:
-          helm:
-            values:
-              env:
-                TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
-                TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
-                TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
-                # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
-                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
-              oauth:
-                createSecret: true
-                secretName: ext-authz-token-exchange-oauth
-                clientID: e2e-client
-                clientSecret: e2e-secret
-                existingSecret:
-                  name: ext-authz-token-exchange-oauth
-                  clientIDKey: client_id
-                  clientSecretKey: client_secret
   - name: with-keycloak
-    activation:
-      - vars:
-          ISSUER_PROFILE: keycloak
     merge:
       deployments:
         ext-authz-token-exchange:
@@ -119,14 +112,29 @@ profiles:
               env:
                 TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
                 TOKEN_EXCHANGE_BEARER_REALM: token-exchange-e2e
-                TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
                 TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
-              oauth:
-                createSecret: false
-                existingSecret:
-                  name: ext-authz-token-exchange-keycloak-oauth
-                  clientIDKey: client_id
-                  clientSecretKey: client_secret
+              issuerProfiles:
+                profiles:
+                  - name: fake-issuer
+                    tokenEndpoint: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
+                    bearerRealm: ext-authz-token-exchange-e2e
+                    tokenEndpointAuthMethod: client_secret_basic
+                    clientIDSecretRef:
+                      name: ext-authz-token-exchange-fake-issuer-oauth
+                      key: client_id
+                    clientSecretSecretRef:
+                      name: ext-authz-token-exchange-fake-issuer-oauth
+                      key: client_secret
+                  - name: local-keycloak
+                    tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                    bearerRealm: token-exchange-e2e
+                    tokenEndpointAuthMethod: client_secret_basic
+                    clientIDSecretRef:
+                      name: ext-authz-token-exchange-keycloak-oauth
+                      key: client_id
+                    clientSecretSecretRef:
+                      name: ext-authz-token-exchange-keycloak-oauth
+                      key: client_secret
         ext-authz-token-exchange-e2e:
           namespace: ext-authz-token-exchange-e2e
           helm:
@@ -140,18 +148,20 @@ profiles:
               fakeTokenEndpoint:
                 image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint
               teams:
+                - color: blue
                 - color: yellow
-                  scope: profile
-                  pathPrefix: /anything/keycloak-audience
-                  tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
-                  resources: []
-                  audiences:
-                    - tx-audience-client
                   scenarios:
+                    - name: keycloak-audience
+                      scope: profile
+                      pathPrefix: /anything/keycloak-audience
+                      issuerRef: local-keycloak
+                      resources: []
+                      audiences:
+                        - tx-audience-client
                     - name: keycloak-resource
                       scope: profile
                       pathPrefix: /anything/keycloak-resource
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources:
                         - https://httpbin.int.kube/anything/keycloak-resource
                       audiences:
@@ -159,45 +169,69 @@ profiles:
                     - name: keycloak-expired-subject-token
                       scope: profile
                       pathPrefix: /anything/keycloak-expired-subject-token
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources: []
                       audiences:
                         - tx-audience-client
                     - name: keycloak-unsigned-subject-token
                       scope: profile
                       pathPrefix: /anything/keycloak-unsigned-subject-token
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources: []
                       audiences:
                         - tx-audience-client
                     - name: keycloak-truncated-signature
                       scope: profile
                       pathPrefix: /anything/keycloak-truncated-signature
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources: []
                       audiences:
                         - tx-audience-client
                     - name: keycloak-untrusted-issuer
                       scope: profile
                       pathPrefix: /anything/keycloak-untrusted-issuer
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources: []
                       audiences:
                         - tx-audience-client
                     - name: keycloak-invalid-audience
                       scope: profile
                       pathPrefix: /anything/keycloak-invalid-audience
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources: []
                       audiences:
                         - tx-missing-audience-client
                     - name: keycloak-invalid-scope
                       scope: tx-missing-scope
                       pathPrefix: /anything/keycloak-invalid-scope
-                      tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                      issuerRef: local-keycloak
                       resources: []
                       audiences:
                         - tx-audience-client
+                - color: red
+                  scenarios:
+                    - name: error-invalid-target
+                      scope: errors
+                      pathPrefix: /anything/error-invalid-target
+                    - name: error-invalid-grant
+                      scope: invalid-grant
+                      pathPrefix: /anything/error-invalid-grant
+                    - name: error-expired-subject-token
+                      scope: expired-subject-token
+                      pathPrefix: /anything/error-expired-subject-token
+                    - name: error-unauthorized
+                      scope: unauthorized
+                      pathPrefix: /anything/error-unauthorized
+                    - name: error-forbidden
+                      scope: forbidden
+                      pathPrefix: /anything/error-forbidden
+                    - name: error-malformed
+                      scope: malformed
+                      pathPrefix: /anything/error-malformed
+                    - name: denied
+                      action: deny
+                      pathPrefix: /anything/denied
+                      methods: ["*"]
         keycloak:
           namespace: ext-authz-token-exchange-e2e
           helm:
@@ -483,18 +517,12 @@ commands:
       devspace run test-e2e $@
 
   test-e2e:
-    description: "Run Kubernetes e2e tests against the detected local-test issuer"
+    description: "Run Kubernetes e2e tests against the local-test stack"
     section: build
     command: |
       echo "I: target=test-e2e"
-      issuer="${E2E_ISSUER:-}"
-      if [ -z "$issuer" ]; then
-        issuer="$(./scripts/devspace-detect-issuer.sh)"
-      fi
-      echo "I: issuer=$issuer"
       E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.int.kube}" \
       E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
-      E2E_ISSUER="$issuer" \
       go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
 
   stress-e2e:

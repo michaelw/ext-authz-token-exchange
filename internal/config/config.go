@@ -3,6 +3,8 @@
 package config
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,7 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -37,12 +42,10 @@ type RuntimeConfig struct {
 	ClientID                           string
 	ClientSecret                       string
 	TokenEndpointAuthMethod            string
-	DefaultTokenEndpoint               string
 	GrantType                          string
 	SubjectTokenType                   string
 	LabelSelector                      string
 	NamespaceSelector                  string
-	TokenEndpointAllowlist             []string
 	AllowHTTPTokenEndpoint             bool
 	ErrorPassthrough                   bool
 	InsecureLogTokens                  bool
@@ -62,6 +65,26 @@ type RuntimeConfig struct {
 	TokenEndpointIdleConnTimeout       time.Duration
 	TokenEndpointMaxIdleConns          int
 	TokenEndpointMaxIdleConnsPerHost   int
+	IssuerProfiles                     map[string]IssuerProfile
+}
+
+// IssuerProfile contains operator-owned token endpoint settings selected by policy.
+type IssuerProfile struct {
+	Name                    string        `yaml:"name" json:"name"`
+	TokenEndpoint           string        `yaml:"tokenEndpoint" json:"tokenEndpoint"`
+	BearerRealm             string        `yaml:"bearerRealm" json:"bearerRealm"`
+	TokenEndpointAuthMethod string        `yaml:"tokenEndpointAuthMethod" json:"tokenEndpointAuthMethod"`
+	ClientID                string        `yaml:"clientID" json:"clientID"`
+	ClientSecret            string        `yaml:"clientSecret" json:"clientSecret"`
+	ClientIDSecretRef       *SecretKeyRef `yaml:"clientIDSecretRef" json:"clientIDSecretRef,omitempty"`
+	ClientSecretSecretRef   *SecretKeyRef `yaml:"clientSecretSecretRef" json:"clientSecretSecretRef,omitempty"`
+}
+
+// SecretKeyRef identifies a Kubernetes Secret key containing issuer credentials.
+type SecretKeyRef struct {
+	Name      string `yaml:"name" json:"name"`
+	Namespace string `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+	Key       string `yaml:"key" json:"key"`
 }
 
 // LoadFromEnv loads RuntimeConfig from environment variables and validates
@@ -71,12 +94,10 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		ClientID:                           strings.TrimSpace(os.Getenv("OAUTH_CLIENT_ID")),
 		ClientSecret:                       os.Getenv("OAUTH_CLIENT_SECRET"),
 		TokenEndpointAuthMethod:            envDefault("TOKEN_ENDPOINT_AUTH_METHOD", AuthMethodClientSecretBasic),
-		DefaultTokenEndpoint:               strings.TrimSpace(os.Getenv("TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT")),
 		GrantType:                          envDefault("TOKEN_EXCHANGE_GRANT_TYPE", DefaultGrantType),
 		SubjectTokenType:                   envDefault("TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE", DefaultSubjectTokenType),
 		LabelSelector:                      envDefault("CONFIGMAP_LABEL_SELECTOR", DefaultConfigMapLabelSelector),
 		NamespaceSelector:                  envDefault("CONFIGMAP_NAMESPACE_SELECTOR", DefaultConfigMapNamespaceSelector),
-		TokenEndpointAllowlist:             splitCSV(os.Getenv("TOKEN_ENDPOINT_ALLOWLIST")),
 		AllowHTTPTokenEndpoint:             envBool("TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT", false),
 		ErrorPassthrough:                   envBool("TOKEN_EXCHANGE_ERROR_PASSTHROUGH", false),
 		InsecureLogTokens:                  envBool("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS", false),
@@ -97,18 +118,19 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		TokenEndpointMaxIdleConns:          envInt("TOKEN_ENDPOINT_MAX_IDLE_CONNS", 100),
 		TokenEndpointMaxIdleConnsPerHost:   envInt("TOKEN_ENDPOINT_MAX_IDLE_CONNS_PER_HOST", 10),
 	}
+	if path := strings.TrimSpace(os.Getenv("TOKEN_EXCHANGE_ISSUER_PROFILES_FILE")); path != "" {
+		profiles, err := LoadIssuerProfilesFile(path)
+		if err != nil {
+			return RuntimeConfig{}, err
+		}
+		cfg.IssuerProfiles = profiles
+	}
 	return cfg, cfg.Validate()
 }
 
 // Validate checks for missing secrets and unsupported protocol options.
 func (c RuntimeConfig) Validate() error {
 	var problems []string
-	if c.ClientID == "" {
-		problems = append(problems, "OAUTH_CLIENT_ID is required")
-	}
-	if c.ClientSecret == "" {
-		problems = append(problems, "OAUTH_CLIENT_SECRET is required")
-	}
 	switch c.TokenEndpointAuthMethod {
 	case AuthMethodClientSecretBasic, AuthMethodClientSecretPost:
 	default:
@@ -122,9 +144,9 @@ func (c RuntimeConfig) Validate() error {
 	} else if _, err := labels.Parse(c.NamespaceSelector); err != nil {
 		problems = append(problems, fmt.Sprintf("CONFIGMAP_NAMESPACE_SELECTOR is invalid: %v", err))
 	}
-	if c.DefaultTokenEndpoint != "" {
-		if err := c.ValidateTokenEndpoint(c.DefaultTokenEndpoint); err != nil {
-			problems = append(problems, fmt.Sprintf("TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: %v", err))
+	for name, profile := range c.IssuerProfiles {
+		if err := c.validateIssuerProfile(name, profile); err != nil {
+			problems = append(problems, err.Error())
 		}
 	}
 	if c.GrantType == "" {
@@ -171,6 +193,166 @@ func (c RuntimeConfig) Validate() error {
 	return nil
 }
 
+// IssuerProfile returns the configured profile referenced by policy.
+func (c RuntimeConfig) IssuerProfile(name string) (IssuerProfile, bool) {
+	profile, ok := c.IssuerProfiles[strings.TrimSpace(name)]
+	return profile, ok
+}
+
+// NeedsIssuerSecretResolution reports whether any issuer profile references Kubernetes Secrets.
+func (c RuntimeConfig) NeedsIssuerSecretResolution() bool {
+	for _, profile := range c.IssuerProfiles {
+		if profile.ClientIDSecretRef != nil || profile.ClientSecretSecretRef != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (c RuntimeConfig) validateIssuerProfile(mapName string, profile IssuerProfile) error {
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		name = strings.TrimSpace(mapName)
+	}
+	if name == "" {
+		return fmt.Errorf("issuer profile name is required")
+	}
+	if mapName != "" && name != mapName {
+		return fmt.Errorf("issuer profile %q name must match map key %q", name, mapName)
+	}
+	if strings.TrimSpace(profile.TokenEndpoint) == "" {
+		return fmt.Errorf("issuer profile %q tokenEndpoint is required", name)
+	}
+	if err := c.ValidateTokenEndpoint(profile.TokenEndpoint); err != nil {
+		return fmt.Errorf("issuer profile %q tokenEndpoint: %v", name, err)
+	}
+	authMethod := strings.TrimSpace(profile.TokenEndpointAuthMethod)
+	if authMethod == "" {
+		authMethod = c.TokenEndpointAuthMethod
+	}
+	switch authMethod {
+	case AuthMethodClientSecretBasic, AuthMethodClientSecretPost:
+	default:
+		return fmt.Errorf("issuer profile %q tokenEndpointAuthMethod must be %q or %q", name, AuthMethodClientSecretBasic, AuthMethodClientSecretPost)
+	}
+	if strings.TrimSpace(profile.ClientID) == "" && profile.ClientIDSecretRef == nil {
+		return fmt.Errorf("issuer profile %q clientID is required", name)
+	}
+	if profile.ClientIDSecretRef != nil {
+		if err := validateSecretKeyRef(name, "clientIDSecretRef", *profile.ClientIDSecretRef); err != nil {
+			return err
+		}
+	}
+	if profile.ClientSecret == "" && profile.ClientSecretSecretRef == nil {
+		return fmt.Errorf("issuer profile %q clientSecret is required", name)
+	}
+	if profile.ClientSecretSecretRef != nil {
+		if err := validateSecretKeyRef(name, "clientSecretSecretRef", *profile.ClientSecretSecretRef); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSecretKeyRef(profileName, field string, ref SecretKeyRef) error {
+	if strings.TrimSpace(ref.Name) == "" {
+		return fmt.Errorf("issuer profile %q %s.name is required", profileName, field)
+	}
+	if strings.TrimSpace(ref.Key) == "" {
+		return fmt.Errorf("issuer profile %q %s.key is required", profileName, field)
+	}
+	return nil
+}
+
+// ResolveIssuerProfileSecrets resolves any Kubernetes Secret refs in issuer profiles.
+func ResolveIssuerProfileSecrets(ctx context.Context, client kubernetes.Interface, defaultNamespace string, cfg RuntimeConfig) (RuntimeConfig, error) {
+	if len(cfg.IssuerProfiles) == 0 {
+		return cfg, nil
+	}
+	resolved := make(map[string]IssuerProfile, len(cfg.IssuerProfiles))
+	secretCache := map[string]map[string][]byte{}
+	for name, profile := range cfg.IssuerProfiles {
+		var err error
+		if profile.ClientIDSecretRef != nil {
+			profile.ClientID, err = resolveSecretValue(ctx, client, defaultNamespace, secretCache, *profile.ClientIDSecretRef)
+			if err != nil {
+				return RuntimeConfig{}, fmt.Errorf("issuer profile %q clientIDSecretRef: %w", name, err)
+			}
+		}
+		if profile.ClientSecretSecretRef != nil {
+			profile.ClientSecret, err = resolveSecretValue(ctx, client, defaultNamespace, secretCache, *profile.ClientSecretSecretRef)
+			if err != nil {
+				return RuntimeConfig{}, fmt.Errorf("issuer profile %q clientSecretSecretRef: %w", name, err)
+			}
+		}
+		resolved[name] = profile
+	}
+	cfg.IssuerProfiles = resolved
+	if err := cfg.Validate(); err != nil {
+		return RuntimeConfig{}, err
+	}
+	return cfg, nil
+}
+
+func resolveSecretValue(ctx context.Context, client kubernetes.Interface, defaultNamespace string, cache map[string]map[string][]byte, ref SecretKeyRef) (string, error) {
+	namespace := strings.TrimSpace(ref.Namespace)
+	if namespace == "" {
+		namespace = strings.TrimSpace(defaultNamespace)
+	}
+	if namespace == "" {
+		return "", fmt.Errorf("namespace is required")
+	}
+	name := strings.TrimSpace(ref.Name)
+	key := strings.TrimSpace(ref.Key)
+	cacheKey := namespace + "/" + name
+	data, ok := cache[cacheKey]
+	if !ok {
+		secret, err := client.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return "", err
+		}
+		data = secret.Data
+		cache[cacheKey] = data
+	}
+	value, ok := data[key]
+	if !ok {
+		return "", fmt.Errorf("Secret %s missing key %q", cacheKey, key)
+	}
+	if len(value) == 0 {
+		return "", fmt.Errorf("Secret %s key %q is empty", cacheKey, key)
+	}
+	return string(value), nil
+}
+
+// LoadIssuerProfilesFile loads named issuer profiles from a YAML or JSON file.
+func LoadIssuerProfilesFile(path string) (map[string]IssuerProfile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Issuers []IssuerProfile `yaml:"issuers" json:"issuers"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&doc); err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]IssuerProfile, len(doc.Issuers))
+	for _, profile := range doc.Issuers {
+		name := strings.TrimSpace(profile.Name)
+		if name == "" {
+			return nil, fmt.Errorf("issuer profile name is required")
+		}
+		if _, exists := profiles[name]; exists {
+			return nil, fmt.Errorf("issuer profile %q is duplicated", name)
+		}
+		profile.Name = name
+		profiles[name] = profile
+	}
+	return profiles, nil
+}
+
 // ValidateTokenEndpoint validates endpoint syntax and deployment guardrails.
 func (c RuntimeConfig) ValidateTokenEndpoint(endpoint string) error {
 	u, err := url.Parse(endpoint)
@@ -182,9 +364,6 @@ func (c RuntimeConfig) ValidateTokenEndpoint(endpoint string) error {
 	}
 	if u.Scheme != "https" && !(c.AllowHTTPTokenEndpoint && u.Scheme == "http") {
 		return fmt.Errorf("must use https")
-	}
-	if len(c.TokenEndpointAllowlist) > 0 && !hostAllowed(u.Hostname(), c.TokenEndpointAllowlist) {
-		return fmt.Errorf("host %q is not in TOKEN_ENDPOINT_ALLOWLIST", u.Hostname())
 	}
 	return nil
 }
@@ -226,27 +405,4 @@ func envInt(name string, fallback int) int {
 		return -1
 	}
 	return parsed
-}
-
-func splitCSV(value string) []string {
-	var out []string
-	for _, item := range strings.Split(value, ",") {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func hostAllowed(host string, allowlist []string) bool {
-	for _, allowed := range allowlist {
-		if strings.EqualFold(host, allowed) {
-			return true
-		}
-		if strings.HasPrefix(allowed, ".") && strings.HasSuffix(host, allowed) {
-			return true
-		}
-	}
-	return false
 }

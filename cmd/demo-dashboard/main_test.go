@@ -112,51 +112,158 @@ func TestDeploymentStatus(t *testing.T) {
 	}
 }
 
-func TestSelectIssuerDetectsKeycloakDeployment(t *testing.T) {
-	withKubectl(t, `printf 'http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token'`)
+func TestConfiguredIssuersUseUnifiedScenarioCatalog(t *testing.T) {
 	t.Setenv("DEMO_SCENARIO_CONFIG", "")
 
-	opts := selectIssuer(context.Background(), demoOptions())
+	opts := configuredIssuers()
 
-	if opts.Name != "keycloak" {
-		t.Fatalf("Name = %q, want keycloak", opts.Name)
-	}
-	if opts.ScenarioConfig != keycloakConfigPath {
-		t.Fatalf("ScenarioConfig = %q, want %q", opts.ScenarioConfig, keycloakConfigPath)
-	}
-	if got := opts.apply(demoOptions()).ConfigPath; got != keycloakConfigPath {
-		t.Fatalf("applied ConfigPath = %q, want %q", got, keycloakConfigPath)
-	}
-}
-
-func TestSelectIssuerDetectsFakeDeployment(t *testing.T) {
-	withKubectl(t, `printf 'http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success'`)
-	t.Setenv("DEMO_SCENARIO_CONFIG", "")
-
-	opts := selectIssuer(context.Background(), demoOptions())
-
-	if opts.Name != "fake" {
-		t.Fatalf("Name = %q, want fake", opts.Name)
+	if opts.Name != "configured" {
+		t.Fatalf("Name = %q, want configured", opts.Name)
 	}
 	if got := opts.apply(demoOptions()).ConfigPath; got != "test/e2e/demo-scenarios.yaml" {
-		t.Fatalf("applied ConfigPath = %q, want default fake scenario config", got)
+		t.Fatalf("applied ConfigPath = %q, want unified scenario config", got)
 	}
 }
 
-func TestSelectIssuerKeepsExplicitScenarioConfig(t *testing.T) {
-	withKubectl(t, `printf 'http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token'`)
+func TestConfiguredIssuersKeepExplicitScenarioConfig(t *testing.T) {
 	t.Setenv("DEMO_SCENARIO_CONFIG", "custom.yaml")
 	opts := demoOptions()
 	opts.ConfigPath = "custom.yaml"
 
-	selection := selectIssuer(context.Background(), opts)
+	selection := configuredIssuers()
 	applied := selection.apply(opts)
 
-	if selection.Name != "fake" {
-		t.Fatalf("Name = %q, want fake fallback for custom config", selection.Name)
-	}
 	if applied.ConfigPath != "custom.yaml" {
 		t.Fatalf("ConfigPath = %q, want explicit custom.yaml", applied.ConfigPath)
+	}
+}
+
+func TestUnavailableRequiredIssuerSkipsScenario(t *testing.T) {
+	sc := demo.Scenario{Name: "keycloak-audience", Requires: demo.Requires{Issuer: "local-keycloak"}}
+
+	reason := unavailableScenarioReason(sc, map[string]bool{"fake-issuer": true})
+
+	if reason != "requires issuer local-keycloak" {
+		t.Fatalf("reason = %q, want local-keycloak skip", reason)
+	}
+	result := skippedResult(demo.Options{BaseURL: "https://demo.example.test"}, sc.WithDefaults(), reason)
+	if !result.Passed || !result.Skipped || result.SkipReason != reason {
+		t.Fatalf("skipped result = %+v, want passed skipped result", result)
+	}
+}
+
+func TestScenariosAPIIncludesSkippedUnavailableScenarios(t *testing.T) {
+	withKubectl(t, `if [ "$2" = "configmap" ]; then printf 'issuers:\n  - name: "fake-issuer"\n'; exit 0; fi; if [ "$5" = "fake-token-endpoint" ]; then printf '1/1'; exit 0; fi; echo 'deployment not found' >&2; exit 1`)
+	opts := demoOptions()
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: fake-baseline
+    request:
+      path: /anything/yellow
+      token:
+        prefill: literal
+        value: incoming-yellow
+    behavior:
+      summary: Fake issuer baseline.
+      detail: Available when the fake issuer is deployed.
+  - name: keycloak-audience
+    requires:
+      issuer: local-keycloak
+    request:
+      path: /anything/keycloak-audience
+      token:
+        prefill: keycloak-subject
+    behavior:
+      summary: Keycloak audience exchange.
+      detail: Requires the local Keycloak issuer profile.
+`)
+	s := &server{opts: opts, issuer: configuredIssuers()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
+
+	s.scenarios(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Scenarios []scenarioView `json:"scenarios"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.Scenarios) != 2 {
+		t.Fatalf("scenario count = %d, want 2", len(got.Scenarios))
+	}
+	if !got.Scenarios[0].Available || got.Scenarios[0].Skipped {
+		t.Fatalf("fake scenario availability = %+v, want available", got.Scenarios[0])
+	}
+	if got.Scenarios[1].Available || !got.Scenarios[1].Skipped || got.Scenarios[1].SkipReason != "requires issuer local-keycloak" {
+		t.Fatalf("keycloak scenario availability = %+v, want skipped local-keycloak", got.Scenarios[1])
+	}
+}
+
+func TestRunAllRecordsSkippedUnavailableScenarios(t *testing.T) {
+	withKubectl(t, `if [ "$2" = "configmap" ]; then printf 'issuers:\n  - name: "fake-issuer"\n'; exit 0; fi; if [ "$5" = "fake-token-endpoint" ]; then printf '1/1'; exit 0; fi; echo 'deployment not found' >&2; exit 1`)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"headers": map[string][]string{
+				"Authorization": {r.Header.Get("Authorization")},
+			},
+		})
+	}))
+	defer upstream.Close()
+	opts := demoOptions()
+	opts.BaseURL = upstream.URL
+	opts.ConfigPath = writeScenarioConfig(t, `version: v1
+scenarios:
+  - name: fake-baseline
+    request:
+      path: /anything/yellow
+      token:
+        prefill: literal
+        value: incoming-yellow
+    behavior:
+      summary: Fake issuer baseline.
+      detail: Available when the fake issuer is deployed.
+    expect:
+      status: 200
+      upstreamAuthorization: Bearer incoming-yellow
+  - name: keycloak-audience
+    requires:
+      issuer: local-keycloak
+    request:
+      path: /anything/keycloak-audience
+      token:
+        prefill: keycloak-subject
+    behavior:
+      summary: Keycloak audience exchange.
+      detail: Requires the local Keycloak issuer profile.
+`)
+	s := &server{opts: opts, issuer: configuredIssuers()}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/run-all", nil)
+
+	s.runAll(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Failed  int           `json:"failed"`
+		Results []demo.Result `json:"results"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Failed != 0 || len(got.Results) != 2 {
+		t.Fatalf("run-all = %+v, want 2 results and no failures", got)
+	}
+	if !got.Results[0].Passed || got.Results[0].Skipped {
+		t.Fatalf("fake result = %+v, want executed pass", got.Results[0])
+	}
+	if !got.Results[1].Passed || !got.Results[1].Skipped || got.Results[1].SkipReason != "requires issuer local-keycloak" {
+		t.Fatalf("keycloak result = %+v, want skipped pass", got.Results[1])
 	}
 }
 
@@ -303,6 +410,7 @@ func TestVerifyTokenEndpoint(t *testing.T) {
 }
 
 func TestScenarioTokenFetchesKeycloakSubjectToken(t *testing.T) {
+	withKeycloakIssuerKubectl(t)
 	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/realms/token-exchange-e2e/protocol/openid-connect/token" {
 			t.Fatalf("Path = %q, want token endpoint", r.URL.Path)
@@ -368,6 +476,7 @@ scenarios:
 }
 
 func TestScenarioTokenUsesExplicitKeycloakPrefill(t *testing.T) {
+	withKeycloakIssuerKubectl(t)
 	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/realms/token-exchange-e2e/protocol/openid-connect/token" {
 			t.Fatalf("Path = %q, want token endpoint", r.URL.Path)
@@ -417,6 +526,7 @@ scenarios:
 }
 
 func TestScenarioTokenUsesExplicitInvalidTokenPrefills(t *testing.T) {
+	withKeycloakIssuerKubectl(t)
 	tests := []struct {
 		name    string
 		prefill string
@@ -445,6 +555,7 @@ func TestScenarioTokenUsesExplicitInvalidTokenPrefills(t *testing.T) {
 }
 
 func TestScenarioTokenUsesExplicitTruncatedSignaturePrefill(t *testing.T) {
+	withKeycloakIssuerKubectl(t)
 	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"access_token": "header.payload.signature",
@@ -665,6 +776,11 @@ func withKubectl(t *testing.T, script string) {
 		t.Fatalf("write fake kubectl: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func withKeycloakIssuerKubectl(t *testing.T) {
+	t.Helper()
+	withKubectl(t, `if [ "$2" = "configmap" ]; then printf 'issuers:\n  - name: "fake-issuer"\n  - name: "local-keycloak"\n'; exit 0; fi; if [ "$5" = "keycloak" ] || [ "$5" = "fake-token-endpoint" ]; then printf '1/1'; exit 0; fi; echo 'deployment not found' >&2; exit 1`)
 }
 
 func writeScenarioConfig(t *testing.T, body string) string {

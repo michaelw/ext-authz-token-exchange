@@ -96,9 +96,9 @@
             "minLength": 1
           }
         },
-        "tokenEndpoint": {
+        "issuerRef": {
           "type": "string",
-          "format": "uri"
+          "minLength": 1
         }
       }
     },
@@ -108,6 +108,7 @@
           "$ref": "#/$defs/exchangeFields"
         }
       ],
+      "required": ["issuerRef"],
       "anyOf": [
         {
           "required": ["scope"],
