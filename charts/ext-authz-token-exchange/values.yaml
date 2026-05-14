@@ -76,6 +76,12 @@ oauth:
     clientIDKey: client_id
     clientSecretKey: client_secret
 
+issuerProfiles:
+  configMapName: ""
+  mountPath: /etc/ext-authz-token-exchange
+  fileName: issuers.yaml
+  profiles: []
+
 env:
   GRPC_LOG_HEALTH_CHECKS: "true"
   METRICS_ENABLED: "false"
@@ -85,7 +91,6 @@ env:
   # CONFIGMAP_LABEL_SELECTOR: ext-authz-token-exchange.magneticflux.net/enabled=true
   # CONFIGMAP_NAMESPACE_SELECTOR: ext-authz-token-exchange.magneticflux.net/policy=enabled
   # GRPC_PORT: "3001"
-  # TOKEN_ENDPOINT_ALLOWLIST: ""
   # TOKEN_ENDPOINT_AUTH_METHOD: client_secret_basic
   # TOKEN_ENDPOINT_DIAL_TIMEOUT: 3s
   # TOKEN_ENDPOINT_IDLE_CONN_TIMEOUT: 90s
@@ -100,7 +105,7 @@ env:
   # TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "false"
   # TOKEN_EXCHANGE_ALLOW_UNAUTHENTICATED_OPTIONS: "false"
   # TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange
-  # TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: ""
+  # TOKEN_EXCHANGE_ISSUER_PROFILES_FILE: /etc/ext-authz-token-exchange/issuers.yaml
   # TOKEN_EXCHANGE_ERROR_PASSTHROUGH: "false"
   # TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
   # TOKEN_EXCHANGE_GRANT_TYPE: urn:ietf:params:oauth:grant-type:token-exchange

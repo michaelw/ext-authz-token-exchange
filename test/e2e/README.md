@@ -28,14 +28,6 @@ devspace deploy -p local-test
 devspace run test-e2e
 ```
 
-To explicitly switch a previously deployed Keycloak stack back to the fake
-issuer, run:
-
-```sh
-devspace deploy -p local-test -p with-fake-issuer
-devspace run test-e2e
-```
-
 To deploy the same local demo stack with a Keycloak RFC 8693 issuer, add
 the opt-in Keycloak profile:
 
@@ -63,11 +55,9 @@ values.
 from the Go test cache. Pass Ginkgo flags directly, for example
 `devspace run test-e2e -v`.
 
-`devspace run test-e2e` detects the deployed plugin token endpoint and runs the
-matching issuer specs. The deployed issuer profile also self-holds for later
-DevSpace commands. Use `devspace deploy -p local-test -p with-keycloak` to
-switch to Keycloak, and `devspace deploy -p local-test -p with-fake-issuer` to
-switch back to fake. In the Keycloak mode, the specs fetch a subject token from
+`devspace run test-e2e` always runs the fake baseline. Keycloak specs skip when
+Keycloak is unavailable and execute when the `with-keycloak` profile is
+deployed. In the Keycloak mode, the specs fetch a subject token from
 `tx-subject-client`, exchange it through the plugin as `tx-exchanger-client`,
 and verify that the upstream bearer token is signed by Keycloak for
 `tx-audience-client`.
@@ -298,7 +288,6 @@ Useful overrides:
 - `E2E_SKIP_CLEANUP=true`: Keep test namespaces for inspection.
 - `E2E_SKIP_INSTALL=true`: Test an already deployed local-test chart release.
 - `E2E_INSECURE_SKIP_VERIFY=false`: Enforce TLS verification for the gateway URL.
-- `E2E_ISSUER=keycloak`: Run the Keycloak-gated e2e specs instead of the fake issuer specs.
 - `E2E_KEYCLOAK_BASE_URL`: External Keycloak base URL. Defaults to `https://keycloak.int.kube`.
 - `E2E_KEYCLOAK_ISSUER`: Expected issuer claim for exchanged tokens. Defaults to `https://keycloak.int.kube/realms/token-exchange-e2e`.
 
@@ -317,12 +306,14 @@ Use the dashboard for Keycloak scenarios that declare generated token prefill
 types. The command-line demo client can still list the configured scenarios:
 
 ```sh
-go run ./cmd/demo-scenario --config test/e2e/keycloak-demo-scenarios.yaml list
+go run ./cmd/demo-scenario --config test/e2e/demo-scenarios.yaml list
 ```
 
-The dashboard token tab decodes JWT-shaped input tokens. Its `Fetch` action
-uses each scenario's `request.token.prefill`, including invalid-token fixtures
-for the Keycloak negative scenarios, and can be adjusted with
+The dashboard shows every configured scenario from the unified catalog.
+Scenarios that require `local-keycloak` are marked `Skipped` until the
+`with-keycloak` profile is deployed. The token tab decodes JWT-shaped input
+tokens. Its `Fetch` action uses each scenario's `request.token.prefill`,
+including invalid-token fixtures for the Keycloak negative scenarios, and can be adjusted with
 `DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_ID`, `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_SECRET`,

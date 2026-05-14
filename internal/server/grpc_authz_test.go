@@ -46,8 +46,8 @@ entries:
       methods: ["OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -70,8 +70,8 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", map[string]string{
@@ -93,8 +93,8 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/customers/1", map[string]string{
@@ -119,8 +119,8 @@ entries:
       methods: ["OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/customers/1", map[string]string{
@@ -196,8 +196,8 @@ entries:
       methods: ["OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -220,8 +220,8 @@ entries:
       methods: ["OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", nil))
@@ -243,8 +243,8 @@ entries:
       methods: ["OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", nil))
@@ -265,9 +265,9 @@ entries:
       methods: ["OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("OPTIONS", "orders.example.com", "/api/orders", map[string]string{
@@ -290,8 +290,8 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", nil))
@@ -304,6 +304,37 @@ entries:
 		Expect(denied.GetBody()).To(MatchJSON(`{"error":"bearer_token_required"}`))
 	})
 
+	It("uses the matched issuer profile realm for bearer challenges", func() {
+		cfg.IssuerProfiles = map[string]config.IssuerProfile{
+			"primary": {
+				Name:          "primary",
+				TokenEndpoint: "http://issuer.example/token",
+				BearerRealm:   "issuer",
+				ClientID:      "client",
+				ClientSecret:  "secret",
+			},
+		}
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: primary
+      scope: read:orders
+`)), &fakeExchanger{})
+
+		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", nil))
+
+		Expect(err).NotTo(HaveOccurred())
+		denied := resp.GetDeniedResponse()
+		Expect(denied).NotTo(BeNil())
+		Expect(headerValue(denied.GetHeaders(), "WWW-Authenticate")).To(Equal(`Bearer realm="issuer", scope="read:orders"`))
+	})
+
 	It("overwrites authorization with the exchanged bearer token", func() {
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
@@ -314,9 +345,9 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}})
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
@@ -338,9 +369,9 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{err: &exchange.OAuthError{
 			StatusCode:      http.StatusUnauthorized,
 			Body:            `{"error":"invalid_client","issuer_detail":"kept only when passthrough is enabled"}`,
@@ -369,9 +400,9 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{err: &exchange.OAuthError{
 			StatusCode:       http.StatusBadRequest,
 			Error:            "invalid_target",
@@ -406,9 +437,9 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `)), &fakeExchanger{err: &exchange.OAuthError{
 			StatusCode: http.StatusInternalServerError,
 		}})
@@ -441,9 +472,9 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `)), exchanger)
 
 		resp, err := srv.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
@@ -476,6 +507,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: missing
       scope: read:orders
 `)), &fakeExchanger{})
 
@@ -498,8 +530,8 @@ entries:
       methods: ["GET", "OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
-      tokenEndpoint: http://issuer.example/token
   - match:
       host: orders.example.com
       pathPrefix: /api/deny
@@ -561,7 +593,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
-      tokenEndpoint: http://issuer.example/token
+      issuerRef: primary
 `)), &fakeExchanger{err: &exchange.OAuthError{StatusCode: http.StatusBadRequest, Error: "invalid_grant"}})
 		systemError := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
@@ -572,7 +604,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
-      tokenEndpoint: http://issuer.example/token
+      issuerRef: primary
 `)), &fakeExchanger{err: &exchange.OAuthError{StatusCode: http.StatusInternalServerError, Error: "server_error"}})
 
 		_, err := authDenied.Check(context.Background(), checkRequest("GET", "orders.example.com", "/api/orders/1", map[string]string{
@@ -619,6 +651,15 @@ func indexFor(data string) *policy.Index {
 		AllowHTTPTokenEndpoint:  true,
 		RequireIssuedTokenType:  true,
 		ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+		IssuerProfiles: map[string]config.IssuerProfile{
+			"primary": {
+				Name:          "primary",
+				TokenEndpoint: "http://issuer.example/token",
+				BearerRealm:   "issuer",
+				ClientID:      "client",
+				ClientSecret:  "secret",
+			},
+		},
 	})
 }
 

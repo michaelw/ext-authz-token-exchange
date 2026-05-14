@@ -33,7 +33,6 @@ import (
 var staticFiles embed.FS
 
 const defaultAddr = "127.0.0.1:8088"
-const keycloakConfigPath = "test/e2e/keycloak-demo-scenarios.yaml"
 const defaultKeycloakBaseURL = "https://keycloak.int.kube"
 const defaultKeycloakRealm = "token-exchange-e2e"
 const defaultKeycloakClientID = "tx-exchanger-client"
@@ -54,8 +53,14 @@ type issuerSelection struct {
 	Label          string `json:"label"`
 	Deployment     string `json:"deployment"`
 	ScenarioConfig string `json:"scenarioConfig"`
-	TokenEndpoint  string `json:"tokenEndpoint,omitempty"`
 	Warning        string `json:"warning,omitempty"`
+}
+
+type scenarioView struct {
+	demo.Scenario
+	Available  bool   `json:"available"`
+	Skipped    bool   `json:"skipped,omitempty"`
+	SkipReason string `json:"skipReason,omitempty"`
 }
 
 func main() {
@@ -63,7 +68,7 @@ func main() {
 	flag.Parse()
 
 	opts := demo.LoadOptionsFromEnv()
-	issuer := selectIssuer(context.Background(), opts)
+	issuer := configuredIssuers()
 	opts = issuer.apply(opts)
 	addr := envDefault("DEMO_DASHBOARD_ADDR", defaultAddr)
 
@@ -116,13 +121,14 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	opts := s.opts.WithDefaults()
 	plugin := deploymentStatus(r.Context(), opts.PluginNamespace, opts.PluginDeployment)
 	issuer := deploymentStatus(r.Context(), opts.SystemNamespace, s.issuer.Deployment)
+	availableIssuers := s.availableIssuers(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"plugin":         plugin,
-		"issuer":         issuer,
-		"issuerName":     s.issuer.Name,
-		"issuerLabel":    s.issuer.Label,
-		"scenarioConfig": opts.ConfigPath,
-		"tokenEndpoint":  s.issuer.TokenEndpoint,
+		"plugin":           plugin,
+		"issuer":           issuer,
+		"issuerName":       s.issuer.Name,
+		"issuerLabel":      s.issuer.Label,
+		"scenarioConfig":   opts.ConfigPath,
+		"availableIssuers": availableIssuers,
 	})
 }
 
@@ -181,8 +187,17 @@ func (s *server) scenarios(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	availableIssuers := s.availableIssuers(context.Background())
+	scenarios := make([]scenarioView, 0, len(cfg.Scenarios))
 	for i := range cfg.Scenarios {
-		cfg.Scenarios[i] = cfg.Scenarios[i].WithDefaults()
+		sc := cfg.Scenarios[i].WithDefaults()
+		view := scenarioView{Scenario: sc, Available: true}
+		if reason := unavailableScenarioReason(sc, availableIssuers); reason != "" {
+			view.Available = false
+			view.Skipped = true
+			view.SkipReason = reason
+		}
+		scenarios = append(scenarios, view)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"baseURL":          s.opts.WithDefaults().BaseURL,
@@ -191,7 +206,8 @@ func (s *server) scenarios(w http.ResponseWriter, _ *http.Request) {
 		"pluginNamespace":  s.opts.WithDefaults().PluginNamespace,
 		"pluginDeployment": s.opts.WithDefaults().PluginDeployment,
 		"issuer":           s.issuer,
-		"scenarios":        cfg.Scenarios,
+		"availableIssuers": availableIssuers,
+		"scenarios":        scenarios,
 	})
 }
 
@@ -214,6 +230,10 @@ func (s *server) runOne(w http.ResponseWriter, r *http.Request) {
 	if override != nil {
 		sc.Request.Token = demo.WithBearer(normalizeBearerInput(*override))
 	}
+	if reason := unavailableScenarioReason(sc, s.availableIssuers(r.Context())); reason != "" {
+		writeJSON(w, http.StatusOK, skippedResult(s.opts, sc.WithDefaults(), reason))
+		return
+	}
 	result, _ := demo.Run(r.Context(), s.opts, sc)
 	status := http.StatusOK
 	if !result.Passed {
@@ -233,7 +253,12 @@ func (s *server) scenarioToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Errorf("unknown scenario %q", r.PathValue("name")))
 		return
 	}
-	resp, err := s.tokenForScenario(r.Context(), sc.WithDefaults())
+	sc = sc.WithDefaults()
+	if reason := unavailableScenarioReason(sc, s.availableIssuers(r.Context())); reason != "" {
+		writeError(w, http.StatusBadGateway, errors.New(reason))
+		return
+	}
+	resp, err := s.tokenForScenario(r.Context(), sc)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -273,8 +298,8 @@ func (s *server) tokenForScenario(ctx context.Context, sc demo.Scenario) (tokenR
 }
 
 func (s *server) keycloakTokenForScenario(ctx context.Context, prefill string) (string, error) {
-	if s.issuer.Name != "keycloak" {
-		return "", fmt.Errorf("scenario token prefill %q requires the Keycloak issuer", prefill)
+	if !s.availableIssuers(ctx)["local-keycloak"] {
+		return "", fmt.Errorf("scenario token prefill %q requires local-keycloak", prefill)
 	}
 	switch prefill {
 	case "keycloak-subject":
@@ -312,7 +337,13 @@ func (s *server) runAll(w http.ResponseWriter, r *http.Request) {
 	}
 	results := make([]demo.Result, 0, len(cfg.Scenarios))
 	failed := 0
+	availableIssuers := s.availableIssuers(r.Context())
 	for _, sc := range cfg.Scenarios {
+		sc = sc.WithDefaults()
+		if reason := unavailableScenarioReason(sc, availableIssuers); reason != "" {
+			results = append(results, skippedResult(s.opts, sc, reason))
+			continue
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), demo.DefaultRequestTimeout+time.Second)
 		result, _ := demo.Run(ctx, s.opts, sc)
 		cancel()
@@ -387,75 +418,25 @@ func (s *server) logs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"component": component, "logs": string(out)})
 }
 
-func selectIssuer(ctx context.Context, opts demo.Options) issuerSelection {
-	if os.Getenv("DEMO_SCENARIO_CONFIG") != "" {
-		return issuerForConfig(opts.ConfigPath)
-	}
-	endpoint, err := deployedTokenEndpoint(ctx, opts)
-	if err != nil {
-		selection := fakeIssuer()
-		selection.Warning = err.Error()
-		return selection
-	}
-	switch {
-	case strings.Contains(endpoint, "keycloak"):
-		selection := keycloakIssuer()
-		selection.TokenEndpoint = endpoint
-		return selection
-	case strings.Contains(endpoint, "fake-token-endpoint"):
-		selection := fakeIssuer()
-		selection.TokenEndpoint = endpoint
-		return selection
-	default:
-		selection := fakeIssuer()
-		selection.TokenEndpoint = endpoint
-		selection.Warning = fmt.Sprintf("could not classify deployed token endpoint %q; using fake demo scenarios", endpoint)
-		return selection
-	}
-}
-
-func deployedTokenEndpoint(parent context.Context, opts demo.Options) (string, error) {
-	opts = opts.WithDefaults()
-	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "deployment", "-n", opts.PluginNamespace, opts.PluginDeployment, "-o", `jsonpath={range .spec.template.spec.containers[*].env[?(@.name=="TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT")]}{.value}{end}`)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(out))
-		if detail == "" {
-			detail = err.Error()
-		}
-		return "", fmt.Errorf("detect deployed token endpoint: %s", detail)
-	}
-	endpoint := strings.TrimSpace(string(out))
-	if endpoint == "" {
-		return "", fmt.Errorf("detect deployed token endpoint: TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT is empty")
-	}
-	return endpoint, nil
-}
-
-func issuerForConfig(path string) issuerSelection {
-	if path == keycloakConfigPath {
-		return keycloakIssuer()
-	}
-	return fakeIssuer()
-}
-
-func fakeIssuer() issuerSelection {
+func configuredIssuers() issuerSelection {
 	return issuerSelection{
-		Name:           "fake",
-		Label:          "Fake issuer",
+		Name:           "configured",
+		Label:          "Configured issuers",
 		Deployment:     "fake-token-endpoint",
 		ScenarioConfig: demo.DefaultConfigPath,
 	}
 }
 
+func fakeIssuer() issuerSelection {
+	return configuredIssuers()
+}
+
 func keycloakIssuer() issuerSelection {
 	return issuerSelection{
-		Name:           "keycloak",
+		Name:           "local-keycloak",
 		Label:          "Keycloak issuer",
 		Deployment:     "keycloak",
-		ScenarioConfig: keycloakConfigPath,
+		ScenarioConfig: demo.DefaultConfigPath,
 	}
 }
 
@@ -464,6 +445,48 @@ func (s issuerSelection) apply(opts demo.Options) demo.Options {
 		opts.ConfigPath = s.ScenarioConfig
 	}
 	return opts
+}
+
+func (s *server) availableIssuers(ctx context.Context) map[string]bool {
+	opts := s.opts.WithDefaults()
+	return map[string]bool{
+		"fake-issuer":    deploymentStatus(ctx, opts.SystemNamespace, "fake-token-endpoint").Ready && issuerProfileConfigured(ctx, opts, "fake-issuer"),
+		"local-keycloak": deploymentStatus(ctx, opts.SystemNamespace, "keycloak").Ready && issuerProfileConfigured(ctx, opts, "local-keycloak"),
+	}
+}
+
+func issuerProfileConfigured(ctx context.Context, opts demo.Options, name string) bool {
+	opts = opts.WithDefaults()
+	configMapName := opts.PluginDeployment + "-issuer-profiles"
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "configmap", "-n", opts.PluginNamespace, configMapName, "-o", "jsonpath={.data.issuers\\.yaml}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	data := string(out)
+	return strings.Contains(data, "name: "+name) || strings.Contains(data, `name: "`+name+`"`)
+}
+
+func unavailableScenarioReason(sc demo.Scenario, availableIssuers map[string]bool) string {
+	required := strings.TrimSpace(sc.Requires.Issuer)
+	if required == "" {
+		return ""
+	}
+	if availableIssuers[required] {
+		return ""
+	}
+	return fmt.Sprintf("requires issuer %s", required)
+}
+
+func skippedResult(opts demo.Options, sc demo.Scenario, reason string) demo.Result {
+	return demo.Result{
+		Scenario:   sc,
+		RequestURL: opts.WithDefaults().BaseURL + sc.Request.Path,
+		Curl:       demo.Curl(opts, sc),
+		Passed:     true,
+		Skipped:    true,
+		SkipReason: reason,
+	}
 }
 
 type keycloakSubjectCredentials struct {

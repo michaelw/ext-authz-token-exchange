@@ -8,21 +8,16 @@
 {{- if not .Values.oauth.clientSecret }}
 {{- fail "oauth.clientSecret is required when oauth.createSecret=true" }}
 {{- end }}
-{{- else if not .Values.oauth.existingSecret.name }}
-{{- fail "oauth.existingSecret.name is required when oauth.createSecret=false" }}
-{{- end }}
-{{- if not .Values.oauth.existingSecret.clientIDKey }}
-{{- fail "oauth.existingSecret.clientIDKey is required" }}
-{{- end }}
-{{- if not .Values.oauth.existingSecret.clientSecretKey }}
-{{- fail "oauth.existingSecret.clientSecretKey is required" }}
 {{- end }}
 {{- $env := .Values.env | default dict }}
 {{- if hasKey $env "OAUTH_CLIENT_ID" }}
-{{- fail "env.OAUTH_CLIENT_ID is chart-managed; use oauth.existingSecret.clientIDKey" }}
+{{- fail "env.OAUTH_CLIENT_ID is no longer supported; configure issuerProfiles.profiles[].clientIDSecretRef" }}
 {{- end }}
 {{- if hasKey $env "OAUTH_CLIENT_SECRET" }}
-{{- fail "env.OAUTH_CLIENT_SECRET is chart-managed; use oauth.existingSecret.clientSecretKey" }}
+{{- fail "env.OAUTH_CLIENT_SECRET is no longer supported; configure issuerProfiles.profiles[].clientSecretSecretRef" }}
+{{- end }}
+{{- if hasKey $env "TOKEN_EXCHANGE_ISSUER_PROFILES_FILE" }}
+{{- fail "env.TOKEN_EXCHANGE_ISSUER_PROFILES_FILE is chart-managed; use issuerProfiles.mountPath and issuerProfiles.fileName" }}
 {{- end }}
 {{- if and .Values.envoyFilter.enabled .Values.authorizationPolicy.enabled }}
 {{- fail "envoyFilter.enabled and authorizationPolicy.enabled are mutually exclusive gateway authz modes" }}

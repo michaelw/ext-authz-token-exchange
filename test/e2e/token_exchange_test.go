@@ -14,12 +14,6 @@ import (
 )
 
 var _ = Describe("multi-namespace token exchange", Ordered, func() {
-	BeforeEach(func() {
-		if env.issuer != defaultIssuer {
-			Skip("fake token endpoint scenarios run only when E2E_ISSUER=fake")
-		}
-	})
-
 	It("merges per-team ConfigMaps and exchanges tokens for each color namespace", func(ctx SpecContext) {
 		for _, color := range []string{"yellow", "red", "blue"} {
 			color := color
@@ -38,7 +32,7 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 	})
 
 	It("adds and deletes one team policy without disabling unrelated teams", func(ctx SpecContext) {
-		policy := createEphemeralPolicy(ctx, env.teamNamespace("red"), "red-v2", "red-v2", "/token/red")
+		policy := createEphemeralPolicy(ctx, env.teamNamespace("red"), "red-v2", "red-v2")
 
 		Eventually(func(g Gomega) {
 			resp, body := request(ctx, http.MethodGet, policy.Path, "incoming-red", nil)
@@ -179,7 +173,7 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 
 	It("ignores policies from namespaces that do not match the namespace selector", func(ctx SpecContext) {
 		namespace := createUnlabeledTeamNamespace(ctx, "black")
-		policy := createEphemeralPolicy(ctx, namespace, "black-unselected", "black", "/token/black")
+		policy := createEphemeralPolicy(ctx, namespace, "black-unselected", "black")
 
 		Consistently(func(g Gomega) {
 			resp, body := request(ctx, http.MethodGet, policy.Path, "original-black", nil)
@@ -190,8 +184,8 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 
 	It("fails closed for cross-namespace ties", func(ctx SpecContext) {
 		policy := newEphemeralPolicy("yellow-conflict")
-		createPolicy(ctx, env.teamNamespace("yellow"), policy.Name, "yellow-conflict", policy.Path, "/token/yellow")
-		createPolicy(ctx, env.teamNamespace("blue"), policy.Name, "yellow-conflict", policy.Path, "/token/blue")
+		createPolicy(ctx, env.teamNamespace("yellow"), policy.Name, "yellow-conflict", policy.Path)
+		createPolicy(ctx, env.teamNamespace("blue"), policy.Name, "yellow-conflict", policy.Path)
 		DeferCleanup(func() {
 			deleteConfigMapIgnoreNotFound(context.Background(), env.teamNamespace("yellow"), policy.Name)
 			deleteConfigMapIgnoreNotFound(context.Background(), env.teamNamespace("blue"), policy.Name)

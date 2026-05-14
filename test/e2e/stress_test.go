@@ -102,24 +102,7 @@ func (s stressCaseSet) pick(index uint64, worker int) stressCase {
 }
 
 func stressCases(ctx context.Context) stressCaseSet {
-	if env.issuer == keycloakIssuer {
-		subjectToken := fetchKeycloakSubjectToken(ctx)
-		return stressCaseSet{
-			Success: []stressCase{{
-				Name: "keycloak exchange", Method: http.MethodGet, Path: "/anything/keycloak-audience", Bearer: subjectToken, ExpectStatus: http.StatusOK, Kind: stressResultSuccess,
-			}},
-			UnmatchedAllow: []stressCase{{
-				Name: "unmatched allow", Method: http.MethodGet, Path: "/anything/no-policy-match", Bearer: "stress-original", ExpectStatus: http.StatusOK, Kind: stressResultSuccess,
-			}},
-			ExpectedDenial: []stressCase{{
-				Name: "missing bearer", Method: http.MethodGet, Path: "/anything/keycloak-audience", ExpectStatus: http.StatusUnauthorized, Kind: stressResultDenial,
-			}},
-			ExpectedFailure: []stressCase{{
-				Name: "invalid audience", Method: http.MethodGet, Path: "/anything/keycloak-invalid-audience", Bearer: subjectToken, ExpectStatus: http.StatusBadRequest, Kind: stressResultFailure,
-			}},
-		}
-	}
-	return stressCaseSet{
+	cases := stressCaseSet{
 		Success: []stressCase{
 			{Name: "yellow exchange", Method: http.MethodGet, Path: "/anything/yellow", Bearer: "stress-yellow", ExpectStatus: http.StatusOK, Kind: stressResultSuccess},
 			{Name: "red exchange", Method: http.MethodGet, Path: "/anything/red", Bearer: "stress-red", ExpectStatus: http.StatusOK, Kind: stressResultSuccess},
@@ -136,6 +119,19 @@ func stressCases(ctx context.Context) stressCaseSet {
 			Name: "invalid grant", Method: http.MethodGet, Path: "/anything/error-invalid-grant", Bearer: "stress-invalid", ExpectStatus: http.StatusBadRequest, Kind: stressResultFailure,
 		}},
 	}
+	if env.keycloakAvailable {
+		subjectToken := fetchKeycloakSubjectToken(ctx)
+		cases.Success = append(cases.Success, stressCase{
+			Name: "keycloak exchange", Method: http.MethodGet, Path: "/anything/keycloak-audience", Bearer: subjectToken, ExpectStatus: http.StatusOK, Kind: stressResultSuccess,
+		})
+		cases.ExpectedDenial = append(cases.ExpectedDenial, stressCase{
+			Name: "keycloak missing bearer", Method: http.MethodGet, Path: "/anything/keycloak-audience", ExpectStatus: http.StatusUnauthorized, Kind: stressResultDenial,
+		})
+		cases.ExpectedFailure = append(cases.ExpectedFailure, stressCase{
+			Name: "keycloak invalid audience", Method: http.MethodGet, Path: "/anything/keycloak-invalid-audience", Bearer: subjectToken, ExpectStatus: http.StatusBadRequest, Kind: stressResultFailure,
+		})
+	}
+	return cases
 }
 
 type stressResultKind string

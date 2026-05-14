@@ -34,7 +34,8 @@ import (
 const (
 	e2eLabelKey                = "app.kubernetes.io/part-of"
 	e2eLabelValue              = "ext-authz-token-exchange-e2e"
-	oauthSecretName            = "ext-authz-token-exchange-oauth"
+	oauthSecretName            = "ext-authz-token-exchange-fake-issuer-oauth"
+	issuerProfilesConfigMap    = "ext-authz-token-exchange-issuer-profiles"
 	policyLabelKey             = "ext-authz-token-exchange.magneticflux.net/enabled"
 	policyLabelValue           = "true"
 	policyNamespaceLabelKey    = "ext-authz-token-exchange.magneticflux.net/policy"
@@ -52,8 +53,6 @@ const (
 	defaultOAuthClientSecret   = "e2e-secret"
 	defaultBearerRealm         = "ext-authz-token-exchange-e2e"
 	defaultHTTPBinResourceBase = "https://httpbin.int.kube"
-	defaultIssuer              = "fake"
-	keycloakIssuer             = "keycloak"
 	defaultKeycloakName        = "keycloak"
 	defaultKeycloakRealm       = "token-exchange-e2e"
 	defaultKeycloakBaseURL     = "https://keycloak.int.kube"
@@ -89,11 +88,8 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		installDemo(ctx)
 	}
 	waitForDeployment(ctx, env.namespace, env.releaseName)
-	if env.issuer == keycloakIssuer {
-		waitForDeployment(ctx, env.demoNamespace, env.keycloakName)
-	} else {
-		waitForDeployment(ctx, env.demoNamespace, tokenEndpointName)
-	}
+	waitForDeployment(ctx, env.demoNamespace, tokenEndpointName)
+	env.keycloakAvailable = deploymentReady(ctx, env.demoNamespace, env.keycloakName) && issuerProfileConfigured(ctx, "local-keycloak")
 })
 
 var _ = AfterSuite(func(ctx SpecContext) {
@@ -119,7 +115,7 @@ type e2eEnv struct {
 	oauthClientID       string
 	oauthClientSecret   string
 	httpbinResourceBase string
-	issuer              string
+	keycloakAvailable   bool
 	keycloakName        string
 	keycloakRealm       string
 	keycloakBaseURL     string
@@ -160,7 +156,6 @@ func loadE2EEnv() e2eEnv {
 		oauthClientID:       envDefault("E2E_OAUTH_CLIENT_ID", defaultOAuthClientID),
 		oauthClientSecret:   envDefault("E2E_OAUTH_CLIENT_SECRET", defaultOAuthClientSecret),
 		httpbinResourceBase: envDefault("E2E_HTTPBIN_RESOURCE_BASE", defaultHTTPBinResourceBase),
-		issuer:              envDefault("E2E_ISSUER", defaultIssuer),
 		keycloakName:        envDefault("E2E_KEYCLOAK_NAME", defaultKeycloakName),
 		keycloakRealm:       envDefault("E2E_KEYCLOAK_REALM", defaultKeycloakRealm),
 		keycloakBaseURL:     strings.TrimRight(envDefault("E2E_KEYCLOAK_BASE_URL", defaultKeycloakBaseURL), "/"),
@@ -204,13 +199,6 @@ func newKubeClient() (*kubernetes.Clientset, error) {
 }
 
 func installDemo(ctx context.Context) {
-	if env.issuer == keycloakIssuer {
-		ensureNamespace(ctx, env.namespace)
-		keycloakValuesPath := filepath.Join(os.TempDir(), env.demoReleaseName+"-keycloak-values.yaml")
-		Expect(os.WriteFile(keycloakValuesPath, []byte(keycloakValues()), 0o600)).To(Succeed())
-		installHelmRelease(ctx, "keycloak", env.demoNamespace, repoPath("charts", "keycloak"), keycloakValuesPath, false)
-	}
-
 	pluginValuesPath := filepath.Join(os.TempDir(), env.releaseName+"-plugin-values.yaml")
 	Expect(os.WriteFile(pluginValuesPath, []byte(pluginValues()), 0o600)).To(Succeed())
 	installHelmRelease(ctx, env.releaseName, env.namespace, repoPath("charts", "ext-authz-token-exchange"), pluginValuesPath, true)
@@ -239,9 +227,6 @@ func installHelmRelease(ctx context.Context, releaseName, namespace, chartPath, 
 
 func uninstallDemo(ctx context.Context) {
 	uninstallHelmRelease(ctx, env.demoReleaseName, env.demoNamespace)
-	if env.issuer == keycloakIssuer {
-		uninstallHelmRelease(ctx, "keycloak", env.demoNamespace)
-	}
 	uninstallHelmRelease(ctx, env.releaseName, env.namespace)
 }
 
@@ -267,26 +252,12 @@ func imageValues(image string) string {
 
 func pluginValues() string {
 	defaultEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/token/success", tokenEndpointName, env.demoNamespace, tokenEndpointPort)
-	bearerRealm := defaultBearerRealm
-	oauthCreateSecret := true
-	oauthSecret := oauthSecretName
-	clientID := env.oauthClientID
-	clientSecret := env.oauthClientSecret
-	if env.issuer == keycloakIssuer {
-		defaultEndpoint = keycloakTokenEndpoint()
-		bearerRealm = env.keycloakRealm
-		oauthCreateSecret = false
-		oauthSecret = "ext-authz-token-exchange-keycloak-oauth"
-		clientID = env.keycloakClientID
-		clientSecret = env.keycloakSecret
-	}
 	return fmt.Sprintf(`image:
 %s
 env:
   GRPC_LOG_HEALTH_CHECKS: "false"
   TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
   TOKEN_EXCHANGE_BEARER_REALM: %q
-  TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: %q
   # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
   TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
 resources:
@@ -297,7 +268,7 @@ resources:
     cpu: 500m
     memory: 256Mi
 oauth:
-  createSecret: %t
+  createSecret: true
   secretName: %q
   clientID: %q
   clientSecret: %q
@@ -305,8 +276,21 @@ oauth:
     name: %q
     clientIDKey: client_id
     clientSecretKey: client_secret
-`, imageValues(env.pluginImage), bearerRealm, defaultEndpoint,
-		oauthCreateSecret, oauthSecret, clientID, clientSecret, oauthSecret)
+issuerProfiles:
+  profiles:
+    - name: fake-issuer
+      tokenEndpoint: %q
+      bearerRealm: %q
+      tokenEndpointAuthMethod: client_secret_basic
+      clientIDSecretRef:
+        name: %q
+        key: client_id
+      clientSecretSecretRef:
+        name: %q
+        key: client_secret
+`, imageValues(env.pluginImage), defaultBearerRealm,
+		oauthSecretName, env.oauthClientID, env.oauthClientSecret, oauthSecretName,
+		defaultEndpoint, defaultBearerRealm, oauthSecretName, oauthSecretName)
 }
 
 func demoValues() string {
@@ -327,14 +311,11 @@ fakeTokenEndpoint:
 `, env.host, env.namespacePrefix, env.demoNamespace,
 		policyLabelKey, policyLabelValue, policyNamespaceLabelKey, policyNamespaceLabelValue, policyNamespaceSelector, env.httpbinResourceBase,
 		tokenEndpointName, env.fakeTokenImage, tokenEndpointPort)
-	if env.issuer != keycloakIssuer {
-		return values
-	}
 	return values + fmt.Sprintf(`teams:
   - color: yellow
     scope: profile
     pathPrefix: /anything/keycloak-audience
-    tokenEndpoint: %q
+    issuerRef: local-keycloak
     resources: []
     audiences:
       - %q
@@ -342,7 +323,7 @@ fakeTokenEndpoint:
       - name: keycloak-resource
         scope: profile
         pathPrefix: /anything/keycloak-resource
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources:
           - %q
         audiences:
@@ -350,51 +331,51 @@ fakeTokenEndpoint:
       - name: keycloak-expired-subject-token
         scope: profile
         pathPrefix: /anything/keycloak-expired-subject-token
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources: []
         audiences:
           - %q
       - name: keycloak-unsigned-subject-token
         scope: profile
         pathPrefix: /anything/keycloak-unsigned-subject-token
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources: []
         audiences:
           - %q
       - name: keycloak-truncated-signature
         scope: profile
         pathPrefix: /anything/keycloak-truncated-signature
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources: []
         audiences:
           - %q
       - name: keycloak-untrusted-issuer
         scope: profile
         pathPrefix: /anything/keycloak-untrusted-issuer
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources: []
         audiences:
           - %q
       - name: keycloak-invalid-audience
         scope: profile
         pathPrefix: /anything/keycloak-invalid-audience
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources: []
         audiences:
           - tx-missing-audience-client
       - name: keycloak-invalid-scope
         scope: tx-missing-scope
         pathPrefix: /anything/keycloak-invalid-scope
-        tokenEndpoint: %q
+        issuerRef: local-keycloak
         resources: []
         audiences:
           - %q
-`, keycloakTokenEndpoint(), env.audienceClientID, keycloakTokenEndpoint(), env.httpbinResourceBase+"/anything/keycloak-resource", env.audienceClientID,
-		keycloakTokenEndpoint(), env.audienceClientID,
-		keycloakTokenEndpoint(), env.audienceClientID,
-		keycloakTokenEndpoint(), env.audienceClientID,
-		keycloakTokenEndpoint(), env.audienceClientID,
-		keycloakTokenEndpoint(), keycloakTokenEndpoint(), env.audienceClientID)
+`, env.audienceClientID, env.httpbinResourceBase+"/anything/keycloak-resource", env.audienceClientID,
+		env.audienceClientID,
+		env.audienceClientID,
+		env.audienceClientID,
+		env.audienceClientID,
+		env.audienceClientID)
 }
 
 func keycloakValues() string {
@@ -475,8 +456,7 @@ func createUnlabeledTeamNamespace(ctx context.Context, color string) string {
 	return namespace
 }
 
-func createPolicy(ctx context.Context, namespace, name, scope, pathPrefix, tokenPath string) {
-	tokenEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d%s", tokenEndpointName, env.demoNamespace, tokenEndpointPort, tokenPath)
+func createPolicy(ctx context.Context, namespace, name, scope, pathPrefix string) {
 	config := fmt.Sprintf(`version: v1
 entries:
   - match:
@@ -485,13 +465,13 @@ entries:
       methods: ["GET", "POST", "OPTIONS"]
     action: exchange
     exchange:
+      issuerRef: fake-issuer
       scope: %s
       resources:
         - %s%s
       audiences:
         - %s
-      tokenEndpoint: %s
-`, env.host, pathPrefix, scope, env.httpbinResourceBase, pathPrefix, audienceForNamespace(namespace), tokenEndpoint)
+`, env.host, pathPrefix, scope, env.httpbinResourceBase, pathPrefix, audienceForNamespace(namespace))
 	upsertConfigMap(ctx, namespace, name, config)
 }
 
@@ -508,9 +488,9 @@ type ephemeralPolicy struct {
 	Path string
 }
 
-func createEphemeralPolicy(ctx context.Context, namespace, scenario, scope, tokenPath string) ephemeralPolicy {
+func createEphemeralPolicy(ctx context.Context, namespace, scenario, scope string) ephemeralPolicy {
 	policy := newEphemeralPolicy(scenario)
-	createPolicy(ctx, namespace, policy.Name, scope, policy.Path, tokenPath)
+	createPolicy(ctx, namespace, policy.Name, scope, policy.Path)
 	DeferCleanup(func() {
 		deleteConfigMapIgnoreNotFound(context.Background(), namespace, policy.Name)
 	})
@@ -642,6 +622,30 @@ func waitForDeployment(ctx context.Context, namespace, name string) {
 			}
 		}
 	}, 2*time.Minute, 2*time.Second).Should(Succeed())
+}
+
+func deploymentReady(ctx context.Context, namespace, name string) bool {
+	deployment, err := env.kube.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+	replicas := int32(1)
+	if deployment.Spec.Replicas != nil {
+		replicas = *deployment.Spec.Replicas
+	}
+	return deployment.Status.ObservedGeneration >= deployment.Generation &&
+		deployment.Status.UpdatedReplicas == replicas &&
+		deployment.Status.ReadyReplicas == replicas &&
+		deployment.Status.AvailableReplicas == replicas
+}
+
+func issuerProfileConfigured(ctx context.Context, name string) bool {
+	cm, err := env.kube.CoreV1().ConfigMaps(env.namespace).Get(ctx, issuerProfilesConfigMap, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+	data := cm.Data["issuers.yaml"]
+	return strings.Contains(data, "name: "+name) || strings.Contains(data, `name: "`+name+`"`)
 }
 
 func deleteOwnedNamespace(ctx context.Context, namespace string) {

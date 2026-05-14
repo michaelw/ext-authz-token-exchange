@@ -74,6 +74,7 @@ const (
 	diagCreateExchangeRequest      = "TXE-1002"
 	diagExchangeRequestFailed      = "TXE-1003"
 	diagReadExchangeResponseFailed = "TXE-1004"
+	diagUnknownIssuerProfile       = "TXE-1005"
 
 	diagRecognizedOAuthError = "TXE-2001"
 	diagNonOAuthBadRequest   = "TXE-2002"
@@ -152,12 +153,21 @@ func NewHTTPTransport(cfg config.RuntimeConfig) *http.Transport {
 // Exchange performs an RFC8693 token exchange request for entry.
 func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken string) (Result, *OAuthError) {
 	started := time.Now()
-	endpointHost := tokenEndpointHost(entry.TokenEndpoint)
+	issuer, ok := c.cfg.IssuerProfile(entry.IssuerRef)
+	if !ok {
+		recordExchangeMetrics(started, "unknown", metricResultFailure, "unknown_issuer_profile", metricStatusNone)
+		return Result{}, internalError("unknown issuer profile", diagUnknownIssuerProfile)
+	}
+	authMethod := strings.TrimSpace(issuer.TokenEndpointAuthMethod)
+	if authMethod == "" {
+		authMethod = c.cfg.TokenEndpointAuthMethod
+	}
+	endpointHost := tokenEndpointHost(issuer.TokenEndpoint)
 	otelTokenEndpointInFlight.Add(ctx, 1, metric.WithAttributes(attribute.String("endpoint_host", endpointHost)))
 	defer otelTokenEndpointInFlight.Add(ctx, -1, metric.WithAttributes(attribute.String("endpoint_host", endpointHost)))
 	tokenEndpointInFlight.WithLabelValues(endpointHost).Inc()
 	defer tokenEndpointInFlight.WithLabelValues(endpointHost).Dec()
-	if err := c.cfg.ValidateTokenEndpoint(entry.TokenEndpoint); err != nil {
+	if err := c.cfg.ValidateTokenEndpoint(issuer.TokenEndpoint); err != nil {
 		recordExchangeMetrics(started, endpointHost, metricResultFailure, "invalid_token_endpoint", metricStatusNone)
 		return Result{}, internalError("invalid token endpoint", diagInvalidTokenEndpoint)
 	}
@@ -178,12 +188,12 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 		form.Add("audience", audience)
 	}
 
-	if c.cfg.TokenEndpointAuthMethod == config.AuthMethodClientSecretPost {
-		form.Set("client_id", c.cfg.ClientID)
-		form.Set("client_secret", c.cfg.ClientSecret)
+	if authMethod == config.AuthMethodClientSecretPost {
+		form.Set("client_id", issuer.ClientID)
+		form.Set("client_secret", issuer.ClientSecret)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, entry.TokenEndpoint, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, issuer.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		recordExchangeMetrics(started, endpointHost, metricResultFailure, "create_request", metricStatusNone)
 		return Result{}, internalError("failed to create token exchange request", diagCreateExchangeRequest)
@@ -193,8 +203,8 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 	// RFC6749 Section 2.3.1: client_secret_basic is the required-to-support
 	// password authentication method for token endpoints.
 	// https://www.rfc-editor.org/rfc/rfc6749#section-2.3.1
-	if c.cfg.TokenEndpointAuthMethod == config.AuthMethodClientSecretBasic {
-		req.SetBasicAuth(c.cfg.ClientID, c.cfg.ClientSecret)
+	if authMethod == config.AuthMethodClientSecretBasic {
+		req.SetBasicAuth(issuer.ClientID, issuer.ClientSecret)
 	}
 
 	resp, err := c.httpClient.Do(req)

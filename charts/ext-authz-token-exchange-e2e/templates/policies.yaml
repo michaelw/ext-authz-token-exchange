@@ -1,7 +1,7 @@
 {{- range $team := .Values.teams }}
 {{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color) }}
 {{- $audience := printf "httpbin-%s" $team.color }}
-{{- $baseScenario := mergeOverwrite (dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "tokenPath" (printf "/token/%s" $team.color) "audience" $audience) (omit $team "color" "scenarios") }}
+{{- $baseScenario := mergeOverwrite (dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "audience" $audience) (omit $team "color" "scenarios") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

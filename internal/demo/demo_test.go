@@ -81,20 +81,14 @@ func TestScenarioTokenValidation(t *testing.T) {
 }
 
 func TestCheckedInScenarioConfigsValidate(t *testing.T) {
-	for _, path := range []string{
-		"../../test/e2e/demo-scenarios.yaml",
-		"../../test/e2e/keycloak-demo-scenarios.yaml",
-	} {
-		t.Run(path, func(t *testing.T) {
-			cfg, err := LoadConfig(Options{ConfigPath: path})
-			if err != nil {
-				t.Fatalf("LoadConfig(%q): %v", path, err)
-			}
-			for _, sc := range cfg.Scenarios {
-				if sc.Behavior.Summary == "" || sc.Behavior.Detail == "" {
-					t.Fatalf("scenario %q has incomplete behavior: %+v", sc.Name, sc.Behavior)
-				}
-			}
-		})
+	path := "../../test/e2e/demo-scenarios.yaml"
+	cfg, err := LoadConfig(Options{ConfigPath: path})
+	if err != nil {
+		t.Fatalf("LoadConfig(%q): %v", path, err)
+	}
+	for _, sc := range cfg.Scenarios {
+		if sc.Behavior.Summary == "" || sc.Behavior.Detail == "" {
+			t.Fatalf("scenario %q has incomplete behavior: %+v", sc.Name, sc.Behavior)
+		}
 	}
 }

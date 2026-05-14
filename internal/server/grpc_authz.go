@@ -198,7 +198,7 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 		metricResult = checkResultAuthDenied
 		return s.denyJSON(http.StatusUnauthorized, map[string]string{
 			"error": "bearer_token_required",
-		}, []headerPair{{Name: "WWW-Authenticate", Value: bearerChallenge(s.cfg.BearerRealm, decision.Entry.Scope)}}), nil
+		}, []headerPair{{Name: "WWW-Authenticate", Value: bearerChallenge(s.bearerRealm(decision.Entry), decision.Entry.Scope)}}), nil
 	}
 
 	ctx = telemetry.ExtractHTTPHeaders(ctx, headers)
@@ -219,6 +219,13 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 	metricDecision = checkDecisionAllowExchange
 	metricResult = checkResultAllowed
 	return allowResponse([]headerPair{{Name: "authorization", Value: "Bearer " + result.AccessToken}}), nil
+}
+
+func (s *AuthzGRPCServer) bearerRealm(entry policy.Entry) string {
+	if profile, ok := s.cfg.IssuerProfile(entry.IssuerRef); ok && strings.TrimSpace(profile.BearerRealm) != "" {
+		return profile.BearerRealm
+	}
+	return s.cfg.BearerRealm
 }
 
 func (s *AuthzGRPCServer) logDeny(reason, method, host, path string, entry policy.Entry) {

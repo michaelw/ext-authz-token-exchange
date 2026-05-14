@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 )
 
 func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
-	handler := tokenHandler("e2e-client", "e2e-secret")
+	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
 	form := url.Values{}
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
 	form.Set("subject_token", "incoming-yellow")
@@ -73,7 +74,7 @@ func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
 }
 
 func TestTokenHandlerSupportsClientSecretPost(t *testing.T) {
-	handler := tokenHandler("e2e-client", "e2e-secret")
+	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
 	form := baseTokenForm()
 	form.Set("client_id", "e2e-client")
 	form.Set("client_secret", "e2e-secret")
@@ -94,6 +95,333 @@ func TestTokenHandlerSupportsClientSecretPost(t *testing.T) {
 	_, payload := decodeUnsignedJWT(t, body["access_token"])
 	if got, _ := payload["client_id"].(string); got != "e2e-client" {
 		t.Fatalf("client_id claim = %#v, want e2e-client", payload["client_id"])
+	}
+}
+
+func TestSuccessEndpointDerivesScenarioFromExchangeRequest(t *testing.T) {
+	cases := []struct {
+		name       string
+		form       url.Values
+		wantStatus int
+		want       string
+	}{
+		{
+			name: "color audience",
+			form: func() url.Values {
+				form := baseTokenForm()
+				form.Add("audience", "httpbin-red")
+				form.Set("scope", "red-v2")
+				return form
+			}(),
+			wantStatus: http.StatusOK,
+			want:       "red",
+		},
+		{
+			name: "error resource",
+			form: func() url.Values {
+				form := baseTokenForm()
+				form.Add("resource", "https://httpbin.int.kube/anything/error-invalid-grant")
+				return form
+			}(),
+			wantStatus: http.StatusBadRequest,
+			want:       "invalid_grant",
+		},
+	}
+
+	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(tc.form.Encode()))
+			req.Header.Set("Content-Type", contentTypeFormEncoded)
+			req.SetBasicAuth("e2e-client", "e2e-secret")
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if rec.Code == http.StatusOK {
+				_, payload := decodeUnsignedJWT(t, body["access_token"])
+				if got, _ := payload["scenario"].(string); got != tc.want {
+					t.Fatalf("scenario = %q, want %q", got, tc.want)
+				}
+				return
+			}
+			if got := body["error"]; got != tc.want {
+				t.Fatalf("error = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFakeConfigRoutesByExactRequestInputs(t *testing.T) {
+	cfg := fakeConfig{
+		Routes: []fakeRoute{
+			{
+				Name:     "red-audience",
+				Match:    fakeMatch{Audience: "httpbin-red"},
+				Response: fakeResponse{Type: responseSuccess, Scenario: "red"},
+			},
+			{
+				Name:  "invalid-grant-resource",
+				Match: fakeMatch{Resource: "https://httpbin.int.kube/anything/error-invalid-grant"},
+				Response: fakeResponse{
+					Type:             responseOAuthError,
+					Status:           http.StatusBadRequest,
+					Error:            "invalid_grant",
+					ErrorDescription: "subject token is invalid",
+				},
+			},
+		},
+		DefaultResponse: fakeResponse{
+			Type:             responseOAuthError,
+			Status:           http.StatusBadRequest,
+			Error:            "invalid_request",
+			ErrorDescription: "unknown fake token scenario",
+		},
+	}
+	if err := (&cfg).validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+	handler := tokenHandler("e2e-client", "e2e-secret", cfg)
+
+	t.Run("matches audience exactly", func(t *testing.T) {
+		form := baseTokenForm()
+		form.Add("audience", "httpbin-red")
+		form.Set("scope", "red-v2")
+		req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", contentTypeFormEncoded)
+		req.SetBasicAuth("e2e-client", "e2e-secret")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		_, payload := decodeUnsignedJWT(t, body["access_token"])
+		if got, _ := payload["scenario"].(string); got != "red" {
+			t.Fatalf("scenario = %q, want red", got)
+		}
+	})
+
+	t.Run("matches resource exactly", func(t *testing.T) {
+		form := baseTokenForm()
+		form.Add("resource", "https://httpbin.int.kube/anything/error-invalid-grant")
+		req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", contentTypeFormEncoded)
+		req.SetBasicAuth("e2e-client", "e2e-secret")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if got := body["error"]; got != "invalid_grant" {
+			t.Fatalf("error = %q, want invalid_grant", got)
+		}
+	})
+}
+
+func TestLoadFakeConfigDefaultsAndNormalizesRoutes(t *testing.T) {
+	path := writeFakeConfig(t, `routes:
+  - name: "  green route  "
+    match:
+      path: " /token/green "
+      scope: " green "
+    response:
+      type: " success "
+`)
+
+	cfg, err := loadFakeConfig(path)
+	if err != nil {
+		t.Fatalf("loadFakeConfig: %v", err)
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("routes = %d, want 1", len(cfg.Routes))
+	}
+	route := cfg.Routes[0]
+	if route.Name != "green route" {
+		t.Fatalf("route name = %q, want green route", route.Name)
+	}
+	if route.Match.Path != "/token/green" || route.Match.Scope != "green" {
+		t.Fatalf("route match = %#v, want trimmed path and scope", route.Match)
+	}
+	if route.scenario() != "green route" {
+		t.Fatalf("scenario = %q, want route name fallback", route.scenario())
+	}
+	if cfg.DefaultResponse.Type != responseOAuthError ||
+		cfg.DefaultResponse.Status != http.StatusBadRequest ||
+		cfg.DefaultResponse.Error != "invalid_request" {
+		t.Fatalf("default response = %#v, want configured unknown scenario OAuth error", cfg.DefaultResponse)
+	}
+}
+
+func TestFakeConfigRouteOrderFirstMatchWins(t *testing.T) {
+	cfg := fakeConfig{
+		Routes: []fakeRoute{
+			{
+				Name:  "first-red-audience",
+				Match: fakeMatch{Audience: "httpbin-red"},
+				Response: fakeResponse{
+					Type:             responseOAuthError,
+					Status:           http.StatusBadRequest,
+					Error:            "invalid_target",
+					ErrorDescription: "first route wins",
+				},
+			},
+			{
+				Name:     "second-red-audience",
+				Match:    fakeMatch{Audience: "httpbin-red"},
+				Response: fakeResponse{Type: responseSuccess, Scenario: "red"},
+			},
+		},
+		DefaultResponse: defaultUnknownResponse(),
+	}
+	if err := (&cfg).validate(); err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+	handler := tokenHandler("e2e-client", "e2e-secret", cfg)
+	form := baseTokenForm()
+	form.Add("audience", "httpbin-red")
+	req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", contentTypeFormEncoded)
+	req.SetBasicAuth("e2e-client", "e2e-secret")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "invalid_target" || body["error_description"] != "first route wins" {
+		t.Fatalf("body = %#v, want first route OAuth error", body)
+	}
+}
+
+func TestLoadFakeConfigValidatesRoutes(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "duplicate route names",
+			body: `routes:
+  - name: duplicate
+    match:
+      path: /token/one
+    response:
+      type: success
+  - name: duplicate
+    match:
+      path: /token/two
+    response:
+      type: success
+`,
+			want: `duplicate route name "duplicate"`,
+		},
+		{
+			name: "empty match",
+			body: `routes:
+  - name: empty
+    match: {}
+    response:
+      type: success
+`,
+			want: `route "empty" must configure at least one match field`,
+		},
+		{
+			name: "unknown response type",
+			body: `routes:
+  - name: strange
+    match:
+      path: /token/strange
+    response:
+      type: strange
+`,
+			want: `unknown type "strange"`,
+		},
+		{
+			name: "invalid response status",
+			body: `routes:
+  - name: invalid-status
+    match:
+      path: /token/invalid-status
+    response:
+      type: oauth_error
+      status: 99
+      error: invalid_request
+`,
+			want: `response status must be between 100 and 599`,
+		},
+		{
+			name: "negative delay",
+			body: `routes:
+  - name: negative-delay
+    match:
+      path: /token/negative-delay
+    response:
+      type: delay
+      delayMilliseconds: -1
+`,
+			want: `response delayMilliseconds must not be negative`,
+		},
+		{
+			name: "oauth error requires code",
+			body: `routes:
+  - name: missing-oauth-error
+    match:
+      path: /token/missing-oauth-error
+    response:
+      type: oauth_error
+      status: 400
+`,
+			want: `response requires error`,
+		},
+		{
+			name: "json error requires code",
+			body: `routes:
+  - name: missing-json-error
+    match:
+      path: /token/missing-json-error
+    response:
+      type: json_error
+      status: 500
+`,
+			want: `response requires error`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeFakeConfig(t, tc.body)
+			_, err := loadFakeConfig(path)
+			if err == nil {
+				t.Fatalf("loadFakeConfig succeeded, want error containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want containing %q", err.Error(), tc.want)
+			}
+		})
 	}
 }
 
@@ -258,7 +586,7 @@ func TestTokenHandlerScenarios(t *testing.T) {
 		},
 	}
 
-	handler := tokenHandler("e2e-client", "e2e-secret")
+	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			form := baseTokenForm()
@@ -309,7 +637,7 @@ func TestFakeTokenEndpointHealthAndEnvDefault(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	fakeTokenEndpointHandler("e2e-client", "e2e-secret").ServeHTTP(rec, req)
+	fakeTokenEndpointHandler("e2e-client", "e2e-secret", defaultFakeConfig()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("health status = %d, want %d", rec.Code, http.StatusNoContent)
@@ -355,7 +683,7 @@ func TestFakeTokenEndpointRecordsServerSpanUnderIncomingTrace(t *testing.T) {
 	req.SetBasicAuth("e2e-client", "e2e-secret")
 	rec := httptest.NewRecorder()
 
-	fakeTokenEndpointHandler("e2e-client", "e2e-secret").ServeHTTP(rec, req)
+	fakeTokenEndpointHandler("e2e-client", "e2e-secret", defaultFakeConfig()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
@@ -427,4 +755,19 @@ func assertStringArrayClaim(t *testing.T, payload map[string]any, key string, wa
 			t.Fatalf("payload[%q][%d] = %#v, want %q", key, i, item, want[i])
 		}
 	}
+}
+
+func writeFakeConfig(t *testing.T, body string) string {
+	t.Helper()
+	file, err := os.CreateTemp(t.TempDir(), "fake-config-*.yaml")
+	if err != nil {
+		t.Fatalf("create temp config: %v", err)
+	}
+	if _, err := file.WriteString(body); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close temp config: %v", err)
+	}
+	return file.Name()
 }
