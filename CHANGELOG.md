@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.4.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.3.0...v0.4.0) (2026-05-18)
+
+
+### Features
+
+* **chart:** add Ext AuthZ Grafana dashboard ([573fa4c](https://github.com/michaelw/ext-authz-token-exchange/commit/573fa4cc0d2407f5dbbc113fc22b9526ba742a25))
+* **chart:** add gateway authz observability wiring ([85141c4](https://github.com/michaelw/ext-authz-token-exchange/commit/85141c4a5e17b43d517ed2bb807fbc52883ebfd0))
+* **exchange:** add named issuer profiles ([71e9477](https://github.com/michaelw/ext-authz-token-exchange/commit/71e94776d517110236357421881b245c0ff94aec))
+* **observability:** add ext-authz RED metrics ([48abc1a](https://github.com/michaelw/ext-authz-token-exchange/commit/48abc1a681697606689379e543994b17fcae3bbd))
+
+
+### Bug Fixes
+
+* **deps:** update google.golang.org/genproto/googleapis/rpc digest to 3700d41 ([09a789e](https://github.com/michaelw/ext-authz-token-exchange/commit/09a789efb8ecaa4db36e64b8924bc8634f9e9446))
+* **deps:** update google.golang.org/genproto/googleapis/rpc digest to 3700d41 ([e80d8cd](https://github.com/michaelw/ext-authz-token-exchange/commit/e80d8cd63994eb45b80d4ce198d3da5bb984f408))
+* **deps:** update kubernetes monorepo to v0.36.1 ([76759a0](https://github.com/michaelw/ext-authz-token-exchange/commit/76759a0ebc2b4bb9bcc970dac857412e7191224c))
+* **deps:** update kubernetes monorepo to v0.36.1 ([a053cb1](https://github.com/michaelw/ext-authz-token-exchange/commit/a053cb169267c2b34129271a66ab108244911cfe))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.29.0 ([da33da6](https://github.com/michaelw/ext-authz-token-exchange/commit/da33da6581ec251a148886cbfb76179f83f7b3c1))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.29.0 ([e28c641](https://github.com/michaelw/ext-authz-token-exchange/commit/e28c6417a495dbe5b5539c8e3d6cf51afc7349df))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.29.0 ([#87](https://github.com/michaelw/ext-authz-token-exchange/issues/87)) ([da33da6](https://github.com/michaelw/ext-authz-token-exchange/commit/da33da6581ec251a148886cbfb76179f83f7b3c1))
+* **deps:** update module github.com/onsi/gomega to v1.41.0 ([f5df416](https://github.com/michaelw/ext-authz-token-exchange/commit/f5df4169978a226393d0130ee0b52a0415819292))
+* **deps:** update module github.com/onsi/gomega to v1.41.0 ([491bb8a](https://github.com/michaelw/ext-authz-token-exchange/commit/491bb8a8221e11df214f35cd12122cc2101b11f7))
+* **deps:** update module github.com/onsi/gomega to v1.41.0 ([#88](https://github.com/michaelw/ext-authz-token-exchange/issues/88)) ([f5df416](https://github.com/michaelw/ext-authz-token-exchange/commit/f5df4169978a226393d0130ee0b52a0415819292))
+* **deps:** update module google.golang.org/grpc to v1.81.1 ([952a441](https://github.com/michaelw/ext-authz-token-exchange/commit/952a44138d9ac79d5182ab01b80af47a8c5dff99))
+* **deps:** update module google.golang.org/grpc to v1.81.1 ([1f57c06](https://github.com/michaelw/ext-authz-token-exchange/commit/1f57c06b36b47616287a9c23611d3432ae293e2b))
+* **deps:** update module google.golang.org/grpc to v1.81.1 ([#86](https://github.com/michaelw/ext-authz-token-exchange/issues/86)) ([952a441](https://github.com/michaelw/ext-authz-token-exchange/commit/952a44138d9ac79d5182ab01b80af47a8c5dff99))
+* **renovate:** block indirect Go major bumps ([2bccea7](https://github.com/michaelw/ext-authz-token-exchange/commit/2bccea744c193d135376eb277a81a79fafae27ee))
+* **renovate:** block indirect Go major bumps ([19408f8](https://github.com/michaelw/ext-authz-token-exchange/commit/19408f811e01a164a198dfbb0291700c757fe847))
+* **renovate:** rebase automerged update PRs ([59fcfcb](https://github.com/michaelw/ext-authz-token-exchange/commit/59fcfcb13405394c8e98381c17fbad7d3c13e953))
+* **tracing:** suppress health check spans ([ca5601b](https://github.com/michaelw/ext-authz-token-exchange/commit/ca5601bf6ed2c093e376383301fe7fbc970f9360))
+* **tracing:** suppress health check spans ([ef8b816](https://github.com/michaelw/ext-authz-token-exchange/commit/ef8b81601a88c07bc538177aaaf1abec20332167))
+
 ## [0.3.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.2.0...v0.3.0) (2026-05-08)
 
 
