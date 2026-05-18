@@ -2,8 +2,8 @@ apiVersion: v2
 type: application
 name: ext-authz-token-exchange
 description: Envoy Ext AuthZ token exchange plugin
-version: 0.3.0
-appVersion: 0.3.0
+version: 0.4.0
+appVersion: 0.4.0
 dependencies:
   - name: common.itsumi
     version: 0.5.2
