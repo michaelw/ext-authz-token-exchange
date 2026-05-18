@@ -3,15 +3,21 @@
 # match relative path from the root of the repository
 ARG WORKSPACE=/workspaces/ext-authz-token-exchange
 ARG USER=devuser
+ARG USER_ID=1000
+ARG GROUP_ID=1000
 
 # Base stage
 FROM golang:1.26.3-bookworm AS base
 ARG WORKSPACE
 ARG USER
+ARG USER_ID
+ARG GROUP_ID
 
 USER root
 
-RUN adduser --disabled-password --gecos "" ${USER} && adduser ${USER} sudo
+RUN addgroup --gid ${GROUP_ID} ${USER} \
+    && adduser --disabled-password --gecos "" --uid ${USER_ID} --gid ${GROUP_ID} ${USER} \
+    && adduser ${USER} sudo
 
 # Dev stage
 FROM base AS dev
@@ -49,9 +55,6 @@ RUN curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/s
     && rm get_helm.sh \
     && helm completion bash > /usr/local/share/bash-completion/completions/helm
 
-RUN --mount=type=cache,target=/go-cache \
-    chown -v ${USER}:${USER} /go-cache
-
 USER ${USER}
 
 ENV GOCACHE=/go-cache/build
@@ -66,9 +69,8 @@ CMD ["sleep", "infinity"]
 FROM base AS build
 ARG WORKSPACE
 ARG USER
-
-RUN --mount=type=cache,target=/go-cache \
-    chown -v ${USER}:${USER} /go-cache
+ARG USER_ID
+ARG GROUP_ID
 
 USER ${USER}
 
@@ -79,10 +81,10 @@ ENV CGO_ENABLED=0
 WORKDIR ${WORKSPACE}
 
 COPY --chown=${USER}:${USER} go.mod go.sum ./
-RUN --mount=type=cache,target=/go-cache \
+RUN --mount=type=cache,target=/go-cache,uid=${USER_ID},gid=${GROUP_ID} \
     go mod download
 COPY --chown=${USER}:${USER} . .
-RUN --mount=type=cache,target=/go-cache \
+RUN --mount=type=cache,target=/go-cache,uid=${USER_ID},gid=${GROUP_ID} \
     go build -o bin/ -v ./cmd/...
 
 # Run stage
