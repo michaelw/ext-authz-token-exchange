@@ -33,10 +33,17 @@ var _ = Describe("Index", func() {
 			SubjectTokenType:        config.DefaultSubjectTokenType,
 			LabelSelector:           config.DefaultConfigMapLabelSelector,
 			NamespaceSelector:       config.DefaultConfigMapNamespaceSelector,
-			DefaultTokenEndpoint:    "http://issuer.example/token",
 			AllowHTTPTokenEndpoint:  true,
 			RequireIssuedTokenType:  true,
 			ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+			IssuerProfiles: map[string]config.IssuerProfile{
+				"primary": {
+					Name:          "primary",
+					TokenEndpoint: "http://issuer.example/token",
+					ClientID:      "client",
+					ClientSecret:  "secret",
+				},
+			},
 		}
 	})
 
@@ -51,6 +58,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:any
   - match:
       host: orders.example.com
@@ -58,6 +66,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
 `,
@@ -80,6 +89,7 @@ entries:
       pathPrefix: /api/orders
       methods: ["GET"]
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 		}, cfg)
@@ -102,6 +112,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 		}, cfg)
@@ -144,12 +155,12 @@ entries:
       methods: ["GET"]
     action: deny
     exchange:
+      issuerRef: primary
       scope: ignored
       resources:
         - https://orders.example.com/api/
       audiences:
         - ignored
-      tokenEndpoint: not-a-url
 `,
 		}, cfg)
 
@@ -166,8 +177,30 @@ entries:
 		Expect(index.Match("orders.example.com", "/api/orders/1", "GET").Matched).To(BeFalse())
 	})
 
-	It("fails closed for invalid configured regions", func() {
-		cfg.DefaultTokenEndpoint = ""
+	It("fails closed for unknown issuer profiles", func() {
+		index := policy.BuildIndex(map[policy.Source]string{
+			{Namespace: "orders", Name: "token-exchange"}: `
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: missing
+      scope: read:orders
+`,
+		}, cfg)
+
+		decision := index.Match("orders.example.com", "/api/orders/1", "GET")
+
+		Expect(decision.Matched).To(BeTrue())
+		Expect(decision.Unhealthy).To(BeTrue())
+		Expect(decision.Reason).To(ContainSubstring(`entries[0].exchange.issuerRef references unknown issuer profile "missing"`))
+	})
+
+	It("fails closed when exchange action omits issuerRef", func() {
 		index := policy.BuildIndex(map[policy.Source]string{
 			{Namespace: "orders", Name: "token-exchange"}: `
 version: v1
@@ -186,7 +219,7 @@ entries:
 
 		Expect(decision.Matched).To(BeTrue())
 		Expect(decision.Unhealthy).To(BeTrue())
-		Expect(decision.Reason).To(ContainSubstring("entries[0].exchange.tokenEndpoint is required"))
+		Expect(decision.Reason).To(ContainSubstring("entries[0].exchange.issuerRef is required"))
 	})
 
 	It("fails closed for unknown actions", func() {
@@ -225,6 +258,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 		}, cfg)
@@ -253,6 +287,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 			{Namespace: "orders", Name: "two"}: `
@@ -264,6 +299,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
 `,
@@ -296,6 +332,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       resources:
         - https://orders.example.com/api/
 `,
@@ -335,6 +372,7 @@ version: v1
 entries:
   - action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 		}, cfg)
@@ -393,8 +431,8 @@ entries:
       pathPrefix: /api/orders
     action: exchange
     exchange:
+      issuerRef: primary
       resource: https://orders.example.com/api/
-      tokenEndpoint: http://issuer.example/token
 `, "resource"),
 	)
 
@@ -424,6 +462,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 				},
@@ -469,6 +508,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:orders
 `,
 				},
@@ -491,6 +531,7 @@ entries:
       methods: ["GET"]
     action: exchange
     exchange:
+      issuerRef: primary
       scope: read:ignored
 `,
 				},

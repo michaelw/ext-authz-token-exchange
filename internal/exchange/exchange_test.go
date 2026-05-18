@@ -44,6 +44,14 @@ var _ = Describe("Client", func() {
 			AllowHTTPTokenEndpoint:  true,
 			RequireIssuedTokenType:  true,
 			ExpectedIssuedTokenType: config.DefaultIssuedTokenType,
+			IssuerProfiles: map[string]config.IssuerProfile{
+				"primary": {
+					Name:          "primary",
+					TokenEndpoint: "http://issuer.example/token",
+					ClientID:      "client",
+					ClientSecret:  "secret",
+				},
+			},
 		}
 	})
 
@@ -64,11 +72,13 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		result, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read write",
-			Resources:     []string{"https://orders.example.com/api/"},
-			Audiences:     []string{"orders-api", "orders-backend"},
+			IssuerRef: "primary",
+			Scope:     "read write",
+			Resources: []string{"https://orders.example.com/api/"},
+			Audiences: []string{"orders-api", "orders-backend"},
 		}, "subject")
 
 		Expect(oauthErr).To(BeNil())
@@ -97,9 +107,11 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).To(BeNil())
@@ -115,9 +127,11 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).NotTo(BeNil())
@@ -133,9 +147,11 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).NotTo(BeNil())
@@ -163,10 +179,11 @@ var _ = Describe("Client", func() {
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(`not-oauth-json`))
 			}))
+			setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
 
 			_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-				TokenEndpoint: tokenEndpoint.URL,
-				Scope:         "read",
+				IssuerRef: "primary",
+				Scope:     "read",
 			}, "subject")
 			tokenEndpoint.Close()
 
@@ -192,10 +209,11 @@ var _ = Describe("Client", func() {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tc.body))
 			}))
+			setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
 
 			_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-				TokenEndpoint: tokenEndpoint.URL,
-				Scope:         "read",
+				IssuerRef: "primary",
+				Scope:     "read",
 			}, "subject")
 			tokenEndpoint.Close()
 
@@ -207,19 +225,21 @@ var _ = Describe("Client", func() {
 	})
 
 	It("uses stable diagnostic codes for operational failures", func() {
+		setPrimaryEndpoint(&cfg, "ftp://issuer.example/token")
 		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: "ftp://issuer.example/token",
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 		Expect(oauthErr).NotTo(BeNil())
 		Expect(oauthErr.Message).To(Equal("invalid token endpoint (TXE-1001)"))
 		Expect(oauthErr.Message).NotTo(ContainSubstring("ftp://issuer.example/token"))
 
+		setPrimaryEndpoint(&cfg, "http://issuer.example/token")
 		_, oauthErr = exchange.NewClient(cfg, clientWithRoundTripper(roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, context.Canceled
 		}))).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: "http://issuer.example/token",
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 		Expect(oauthErr).NotTo(BeNil())
 		Expect(oauthErr.Message).To(Equal("token exchange request failed (TXE-1003)"))
@@ -227,8 +247,8 @@ var _ = Describe("Client", func() {
 		_, oauthErr = exchange.NewClient(cfg, clientWithRoundTripper(roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return responseWithReadError(http.StatusOK), nil
 		}))).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: "http://issuer.example/token",
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 		Expect(oauthErr).NotTo(BeNil())
 		Expect(oauthErr.Message).To(Equal("failed to read token exchange response (TXE-1004)"))
@@ -242,9 +262,11 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL+"/oauth/token?tenant=secret")
+
 		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).NotTo(BeNil())
@@ -263,6 +285,8 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		traceID, err := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
 		Expect(err).NotTo(HaveOccurred())
 		spanID, err := trace.SpanIDFromHex("00f067aa0ba902b7")
@@ -275,8 +299,8 @@ var _ = Describe("Client", func() {
 		ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
 
 		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(ctx, policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).To(BeNil())
@@ -299,6 +323,8 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		traceID, err := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
 		Expect(err).NotTo(HaveOccurred())
 		spanID, err := trace.SpanIDFromHex("00f067aa0ba902b7")
@@ -311,8 +337,8 @@ var _ = Describe("Client", func() {
 		})
 
 		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(trace.ContextWithSpanContext(context.Background(), remoteParent), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).To(BeNil())
@@ -359,9 +385,11 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		_, oauthErr := exchange.NewClient(cfg, nil).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).NotTo(BeNil())
@@ -382,11 +410,13 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		defer cancel()
 		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(ctx, policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL,
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject")
 
 		Expect(oauthErr).NotTo(BeNil())
@@ -409,8 +439,8 @@ var _ = Describe("Client", func() {
 		}))
 		go func() {
 			_, oauthErr := exchange.NewClient(cfg, client).Exchange(ctx, policy.Entry{
-				TokenEndpoint: "http://issuer.example/token",
-				Scope:         "read",
+				IssuerRef: "primary",
+				Scope:     "read",
 			}, "subject")
 			done <- oauthErr
 		}()
@@ -432,9 +462,11 @@ var _ = Describe("Client", func() {
 		}))
 		defer tokenEndpoint.Close()
 
+		setPrimaryEndpoint(&cfg, tokenEndpoint.URL)
+
 		_, oauthErr := exchange.NewClient(cfg, tokenEndpoint.Client()).Exchange(context.Background(), policy.Entry{
-			TokenEndpoint: tokenEndpoint.URL + "/oauth/token?tenant=secret",
-			Scope:         "read",
+			IssuerRef: "primary",
+			Scope:     "read",
 		}, "subject-token-secret")
 
 		Expect(oauthErr).NotTo(BeNil())
@@ -461,8 +493,8 @@ var _ = Describe("Client", func() {
 
 		go func() {
 			_, oauthErr := exchange.NewClient(cfg, client).Exchange(context.Background(), policy.Entry{
-				TokenEndpoint: "http://issuer.example/token",
-				Scope:         "read",
+				IssuerRef: "primary",
+				Scope:     "read",
 			}, "subject")
 			done <- oauthErr
 		}()
@@ -506,6 +538,12 @@ func responseWithBody(status int, body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     http.Header{},
 	}
+}
+
+func setPrimaryEndpoint(cfg *config.RuntimeConfig, endpoint string) {
+	profile := cfg.IssuerProfiles["primary"]
+	profile.TokenEndpoint = endpoint
+	cfg.IssuerProfiles["primary"] = profile
 }
 
 type readErrorBody struct{}

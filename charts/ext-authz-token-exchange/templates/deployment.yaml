@@ -1,3 +1,24 @@
 {{- $values := deepCopy .Values }}
 {{- $_ := set $values "env" (include "ext-authz-token-exchange.env" . | fromYaml) }}
+{{- $deploymentAnnotations := deepCopy (.Values.deploymentAnnotations | default dict) }}
+{{- $_ := set $deploymentAnnotations "configmap.reloader.stakater.com/reload" (include "ext-authz-token-exchange.issuerProfilesConfigMapName" .) }}
+{{- $secretNames := list }}
+{{- range $profile := .Values.issuerProfiles.profiles }}
+{{- with $profile.clientIDSecretRef }}
+{{- $secretNames = append $secretNames .name }}
+{{- end }}
+{{- with $profile.clientSecretSecretRef }}
+{{- $secretNames = append $secretNames .name }}
+{{- end }}
+{{- end }}
+{{- if gt (len $secretNames) 0 }}
+{{- $_ := set $deploymentAnnotations "secret.reloader.stakater.com/reload" (join "," (uniq $secretNames)) }}
+{{- end }}
+{{- $_ := set $values "deploymentAnnotations" $deploymentAnnotations }}
+{{- $volumeMounts := deepCopy (.Values.volumeMounts | default dict) }}
+{{- $_ := set $volumeMounts "issuer-profiles" (dict "name" "issuer-profiles" "mountPath" (.Values.issuerProfiles.mountPath | default "/etc/ext-authz-token-exchange") "readOnly" true) }}
+{{- $_ := set $values "volumeMounts" $volumeMounts }}
+{{- $volumes := deepCopy (.Values.volumes | default dict) }}
+{{- $_ := set $volumes "issuer-profiles" (dict "configMap" (dict "name" (include "ext-authz-token-exchange.issuerProfilesConfigMapName" .))) }}
+{{- $_ := set $values "volumes" $volumes }}
 {{- include "common.itsumi.deployments.tpl" (merge (dict "Values" $values) (omit . "Values")) }}

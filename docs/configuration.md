@@ -34,12 +34,12 @@ data:
           methods: ["GET", "POST"]
         action: exchange
         exchange:
+          issuerRef: primary
           scope: read:orders
           resources:
             - https://api.example.com/orders
           audiences:
             - orders-api
-          tokenEndpoint: https://issuer.example.com/oauth/token
 ```
 
 ### Policy File
@@ -81,7 +81,10 @@ the match is ambiguous.
 | `exchange.scope` | Conditional | Space-delimited OAuth scope string sent as one `scope` form parameter. |
 | `exchange.resources` | Conditional | Resource indicator URIs sent as repeated `resource` form parameters. |
 | `exchange.audiences` | Conditional | Logical audience values sent as repeated `audience` form parameters. |
-| `exchange.tokenEndpoint` | Conditional | Absolute token endpoint URL. May be omitted only when `TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT` is configured. |
+| `exchange.issuerRef` | Yes | Name of an operator-defined issuer profile. Unknown issuer refs fail closed for the matched policy region. |
+
+Token endpoint URLs, bearer realms, OAuth client authentication methods, and
+OAuth client credentials are selected from the referenced issuer profile.
 
 The plugin sends all configured target fields to the authorization server. It
 does not choose precedence between `scope`, `resources`, and `audiences`, and it
@@ -119,23 +122,42 @@ production Helm chart, set runtime environment variables with the chart's `env`
 map. Runtime defaults live in the binary; omit values from `env` when the binary
 default is appropriate.
 
-The chart owns OAuth client credential Secret wiring through `oauth.*`, because
-those settings are Kubernetes Secret references rather than plain runtime
-defaults.
+The chart owns OAuth client credential Secret wiring through issuer profiles,
+because those settings are Kubernetes Secret references rather than app-owned
+policy defaults.
 
 For example:
 
 ```yaml
-env:
-  TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT: https://issuer.example.com/oauth/token
-  TOKEN_ENDPOINT_ALLOWLIST: issuer.example.com
-  TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange
-oauth:
-  existingSecret:
-    name: ext-authz-token-exchange-oauth
-    clientIDKey: client_id
-    clientSecretKey: client_secret
+issuerProfiles:
+  profiles:
+    - name: primary
+      tokenEndpoint: https://issuer.example.com/oauth/token
+      bearerRealm: issuer
+      tokenEndpointAuthMethod: client_secret_basic
+      clientIDSecretRef:
+        name: issuer-oauth
+        key: client_id
+      clientSecretSecretRef:
+        name: issuer-oauth
+        key: client_secret
 ```
+
+Issuer profile files use this shape:
+
+```yaml
+issuers:
+  - name: primary
+    tokenEndpoint: https://issuer.example.com/oauth/token
+    bearerRealm: issuer
+    tokenEndpointAuthMethod: client_secret_basic
+    clientID: example-client
+    clientSecret: example-secret
+```
+
+In Kubernetes deployments, prefer `clientIDSecretRef` and
+`clientSecretSecretRef` over inline credentials. Secret refs default to the pod
+namespace unless `namespace` is set explicitly.
 
 ### Core Service
 
@@ -143,9 +165,8 @@ oauth:
 | --- | --- | --- | --- |
 | `GRPC_LOG_HEALTH_CHECKS` | `true` | No | Logs successful gRPC health probe requests. Disable in noisy local/demo environments when probe chatter is not useful. |
 | `GRPC_PORT` | `3001` | No | Port for the ext-authz gRPC service. |
-| `OAUTH_CLIENT_ID` | none | Yes | OAuth client ID used when calling token endpoints. |
-| `OAUTH_CLIENT_SECRET` | none | Yes | OAuth client secret. Do not log or commit this value. |
-| `TOKEN_ENDPOINT_AUTH_METHOD` | `client_secret_basic` | No | OAuth client authentication method. Supported values are `client_secret_basic` and `client_secret_post`. |
+| `TOKEN_EXCHANGE_ISSUER_PROFILES_FILE` | empty | No | YAML or JSON file containing named issuer profiles. Policies with `action: exchange` reference these profiles with `exchange.issuerRef`. |
+| `TOKEN_ENDPOINT_AUTH_METHOD` | `client_secret_basic` | No | Default OAuth client authentication method for issuer profiles that omit `tokenEndpointAuthMethod`. Supported values are `client_secret_basic` and `client_secret_post`. |
 | `TOKEN_EXCHANGE_GRANT_TYPE` | `urn:ietf:params:oauth:grant-type:token-exchange` | No | Grant type form parameter for token exchange requests. |
 | `TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE` | `urn:ietf:params:oauth:token-type:access_token` | No | Subject token type form parameter. |
 
@@ -163,19 +184,13 @@ RBAC still controls which namespaces and ConfigMaps the plugin can read.
 
 | Environment variable | Default | Required | Description |
 | --- | --- | --- | --- |
-| `TOKEN_EXCHANGE_DEFAULT_TOKEN_ENDPOINT` | empty | No | Fallback token endpoint used when policy omits `exchange.tokenEndpoint`. |
-| `TOKEN_ENDPOINT_ALLOWLIST` | empty | No | Comma-separated hostname allowlist for token endpoints. Empty means no hostname restriction. |
 | `TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT` | `false` | No | Allows `http://` token endpoints. Keep `false` for production unless there is a deliberate local/demo exception. |
 
 Token endpoints must be absolute URLs. They must use HTTPS unless
 `TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT=true`.
 
-`TOKEN_ENDPOINT_ALLOWLIST` is evaluated against the parsed endpoint hostname:
-
-- `auth.example.com` matches `auth.example.com`, case-insensitively.
-- `.example.com` matches subdomains such as `auth.example.com`.
-- `.example.com` does not match the bare hostname `example.com`.
-- Ports are not part of the allowlist comparison.
+The configured issuer profile list is the token endpoint allowlist. App-owned
+policies cannot introduce arbitrary token endpoint URLs.
 
 ### Error Handling And Validation
 

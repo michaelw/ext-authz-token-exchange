@@ -8,8 +8,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- printf "%s-%s" $.Values.namespacePrefix .color -}}
 {{- end }}
 
-{{- define "ext-authz-token-exchange-e2e.tokenEndpointURL" -}}
-{{- printf "http://%s.%s.svc.cluster.local:%v%s" $.Values.fakeTokenEndpoint.name $.Values.systemNamespace $.Values.fakeTokenEndpoint.port .tokenPath -}}
+{{- define "ext-authz-token-exchange-e2e.fakeTokenEndpointConfigMapName" -}}
+{{- printf "%s-routes" .Values.fakeTokenEndpoint.name -}}
 {{- end }}
 
 {{- define "ext-authz-token-exchange-e2e.policyConfig" -}}
@@ -21,10 +21,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- if and (not (hasKey . "audiences")) .audience }}
 {{- $audiences = list .audience }}
 {{- end }}
-{{- $tokenEndpoint := .tokenEndpoint }}
-{{- if not $tokenEndpoint }}
-{{- $tokenEndpoint = include "ext-authz-token-exchange-e2e.tokenEndpointURL" (dict "Values" $.Values "tokenPath" .tokenPath) }}
-{{- end }}
+{{- $issuerRef := .issuerRef | default "fake-issuer" }}
 version: v1
 entries:
   - match:
@@ -43,6 +40,7 @@ entries:
     action: exchange
 {{- end }}
     exchange:
+      issuerRef: {{ $issuerRef | quote }}
       scope: {{ .scope }}
 {{- if $resources }}
       resources:
@@ -56,6 +54,5 @@ entries:
         - {{ $audience | quote }}
 {{- end }}
 {{- end }}
-      tokenEndpoint: {{ $tokenEndpoint }}
 {{- end }}
 {{- end }}

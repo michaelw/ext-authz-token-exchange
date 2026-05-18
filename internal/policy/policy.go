@@ -20,15 +20,15 @@ type Source struct {
 
 // Entry is a validated app-owned token exchange policy entry.
 type Entry struct {
-	Source        Source
-	Action        Action
-	Host          string
-	PathPrefix    string
-	Methods       []string
-	Scope         string
-	Resources     []string
-	Audiences     []string
-	TokenEndpoint string
+	Source     Source
+	Action     Action
+	Host       string
+	PathPrefix string
+	Methods    []string
+	Scope      string
+	Resources  []string
+	Audiences  []string
+	IssuerRef  string
 }
 
 // Action describes what to do with a matched policy entry.
@@ -88,10 +88,10 @@ type rawMatch struct {
 }
 
 type rawExchange struct {
-	Scope         string   `yaml:"scope"`
-	Resources     []string `yaml:"resources"`
-	Audiences     []string `yaml:"audiences"`
-	TokenEndpoint string   `yaml:"tokenEndpoint"`
+	Scope     string   `yaml:"scope"`
+	Resources []string `yaml:"resources"`
+	Audiences []string `yaml:"audiences"`
+	IssuerRef string   `yaml:"issuerRef"`
 }
 
 // BuildIndex parses all supplied ConfigMap payloads into a new immutable index.
@@ -233,14 +233,11 @@ func normalizeEntry(source Source, idx int, raw rawEntry, cfg config.RuntimeConf
 		problems = append(problems, entryPath(idx, "exchange")+" requires at least one of scope, resources, or audiences")
 	}
 
-	tokenEndpoint := strings.TrimSpace(exchange.TokenEndpoint)
-	if tokenEndpoint == "" {
-		tokenEndpoint = cfg.DefaultTokenEndpoint
-	}
-	if tokenEndpoint == "" {
-		problems = append(problems, entryPath(idx, "exchange.tokenEndpoint")+" is required when no default is configured")
-	} else if err := cfg.ValidateTokenEndpoint(tokenEndpoint); err != nil {
-		problems = append(problems, fmt.Sprintf("%s: %v", entryPath(idx, "exchange.tokenEndpoint"), err))
+	issuerRef := strings.TrimSpace(exchange.IssuerRef)
+	if issuerRef == "" {
+		problems = append(problems, entryPath(idx, "exchange.issuerRef")+" is required")
+	} else if _, ok := cfg.IssuerProfile(issuerRef); !ok {
+		problems = append(problems, fmt.Sprintf("%s references unknown issuer profile %q", entryPath(idx, "exchange.issuerRef"), issuerRef))
 	}
 
 	if len(problems) > 0 {
@@ -248,15 +245,15 @@ func normalizeEntry(source Source, idx int, raw rawEntry, cfg config.RuntimeConf
 		return Entry{}, region, false
 	}
 	return Entry{
-		Source:        source,
-		Action:        action,
-		Host:          region.Host,
-		PathPrefix:    region.PathPrefix,
-		Methods:       region.Methods,
-		Scope:         strings.TrimSpace(exchange.Scope),
-		Resources:     resources,
-		Audiences:     audiences,
-		TokenEndpoint: tokenEndpoint,
+		Source:     source,
+		Action:     action,
+		Host:       region.Host,
+		PathPrefix: region.PathPrefix,
+		Methods:    region.Methods,
+		Scope:      strings.TrimSpace(exchange.Scope),
+		Resources:  resources,
+		Audiences:  audiences,
+		IssuerRef:  issuerRef,
 	}, Region{}, true
 }
 

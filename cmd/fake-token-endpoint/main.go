@@ -34,6 +34,11 @@ func main() {
 	addr := envDefault("FAKE_TOKEN_ENDPOINT_ADDR", defaultListenAddr)
 	clientID := envDefault("FAKE_TOKEN_ENDPOINT_CLIENT_ID", defaultClientID)
 	clientSecret := envDefault("FAKE_TOKEN_ENDPOINT_CLIENT_SECRET", defaultClientSecret)
+	configPath := strings.TrimSpace(os.Getenv("FAKE_TOKEN_ENDPOINT_CONFIG"))
+	cfg, err := loadFakeConfig(configPath)
+	if err != nil {
+		log.Fatalf("failed to load fake token endpoint config: %v", err)
+	}
 
 	shutdownTelemetry, err := telemetry.InitWithServiceName(ctx, defaultServiceName)
 	if err != nil {
@@ -47,7 +52,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: fakeTokenEndpointHandler(clientID, clientSecret),
+		Handler: fakeTokenEndpointHandler(clientID, clientSecret, cfg),
 	}
 	go func() {
 		<-ctx.Done()
@@ -62,13 +67,13 @@ func main() {
 	}
 }
 
-func fakeTokenEndpointHandler(clientID, clientSecret string) http.Handler {
+func fakeTokenEndpointHandler(clientID, clientSecret string, cfg fakeConfig) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.Handle("/token/", otelhttp.NewHandler(
-		tokenHandler(clientID, clientSecret),
+		tokenHandler(clientID, clientSecret, cfg),
 		"fake_token_endpoint token",
 		otelhttp.WithPropagators(telemetry.Propagators()),
 		otelhttp.WithTracerProvider(otel.GetTracerProvider()),
@@ -76,7 +81,7 @@ func fakeTokenEndpointHandler(clientID, clientSecret string) http.Handler {
 	return mux
 }
 
-func tokenHandler(clientID, clientSecret string) http.HandlerFunc {
+func tokenHandler(clientID, clientSecret string, cfg fakeConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "POST required")
@@ -95,60 +100,54 @@ func tokenHandler(clientID, clientSecret string) http.HandlerFunc {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid form")
 			return
 		}
-		log.Printf("token request scenario=%s", strings.TrimPrefix(r.URL.Path, "/token/"))
+		route := cfg.routeFor(r)
+		scenario := route.scenario()
+		log.Printf("token request route=%s scenario=%s", route.Name, scenario)
 
-		switch strings.TrimPrefix(r.URL.Path, "/token/") {
-		case "success", "yellow", "red", "blue":
+		switch route.Response.Type {
+		case responseSuccess:
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r, authenticatedClientID(r)),
+				"access_token":      exchangedToken(r, authenticatedClientID(r), scenario),
 				"issued_token_type": accessTokenType,
 				"token_type":        "Bearer",
 			})
-		case "invalid-request":
-			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid token exchange request")
-		case "invalid-target":
-			writeOAuthError(w, http.StatusBadRequest, "invalid_target", "resource or audience is invalid")
-		case "invalid-grant":
-			writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "subject token is invalid")
-		case "expired-subject-token":
-			writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "subject_token_expired")
-		case "unauthorized":
-			w.Header().Add("WWW-Authenticate", `Bearer realm="issuer", error="invalid_token"`)
-			writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "client rejected")
-		case "forbidden":
-			writeOAuthError(w, http.StatusForbidden, "invalid_target", "target rejected")
-		case "server-error":
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "temporarily_unavailable"})
-		case "malformed":
+		case responseOAuthError:
+			if route.Response.WWWAuthenticate != "" {
+				w.Header().Add("WWW-Authenticate", route.Response.WWWAuthenticate)
+			}
+			writeOAuthError(w, statusDefault(route.Response.Status, http.StatusBadRequest), route.Response.Error, route.Response.ErrorDescription)
+		case responseJSONError:
+			writeJSON(w, statusDefault(route.Response.Status, http.StatusInternalServerError), map[string]string{"error": route.Response.Error})
+		case responseMalformed:
 			w.Header().Set("Content-Type", contentTypeJSON)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"access_token":`))
-		case "missing-access-token":
+		case responseMissingAccessToken:
 			writeJSON(w, http.StatusOK, map[string]string{
 				"issued_token_type": accessTokenType,
 				"token_type":        "Bearer",
 			})
-		case "wrong-token-type":
+		case responseWrongTokenType:
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r, authenticatedClientID(r)),
+				"access_token":      exchangedToken(r, authenticatedClientID(r), scenario),
 				"issued_token_type": accessTokenType,
 				"token_type":        "N_A",
 			})
-		case "wrong-issued-token-type":
+		case responseWrongIssuedTokenType:
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r, authenticatedClientID(r)),
+				"access_token":      exchangedToken(r, authenticatedClientID(r), scenario),
 				"issued_token_type": "urn:ietf:params:oauth:token-type:refresh_token",
 				"token_type":        "Bearer",
 			})
-		case "delay":
-			time.Sleep(10 * time.Second)
+		case responseDelay:
+			time.Sleep(time.Duration(intDefault(route.Response.DelayMilliseconds, 10000)) * time.Millisecond)
 			writeJSON(w, http.StatusOK, map[string]string{
-				"access_token":      exchangedToken(r, authenticatedClientID(r)),
+				"access_token":      exchangedToken(r, authenticatedClientID(r), scenario),
 				"issued_token_type": accessTokenType,
 				"token_type":        "Bearer",
 			})
 		default:
-			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "unknown fake token scenario")
+			writeOAuthError(w, http.StatusInternalServerError, "server_error", "fake token endpoint route is invalid")
 		}
 	}
 }
@@ -167,8 +166,7 @@ func authenticatedClientID(r *http.Request) string {
 	return strings.TrimSpace(r.FormValue("client_id"))
 }
 
-func exchangedToken(r *http.Request, clientID string) string {
-	scenario := strings.TrimPrefix(r.URL.Path, "/token/")
+func exchangedToken(r *http.Request, clientID string, scenario string) string {
 	subject := strings.TrimSpace(r.FormValue("subject_token"))
 	if subject == "" {
 		subject = "missing-subject"
@@ -236,6 +234,20 @@ func writeJSON(w http.ResponseWriter, status int, body map[string]string) {
 func envDefault(name, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func statusDefault(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
+}
+
+func intDefault(value, fallback int) int {
+	if value == 0 {
 		return fallback
 	}
 	return value
