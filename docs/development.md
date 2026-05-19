@@ -17,6 +17,10 @@ This document provides comprehensive development guidelines.
 
   This helps with changelog generation.
 
+* Use squash or rebase merges. Plain GitHub merge commits repeat the pull
+  request title alongside the original commits, which can make Release Please
+  generate duplicate changelog entries.
+
 ---
 
 ## ⏱️ Development Phases
