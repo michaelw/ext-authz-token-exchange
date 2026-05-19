@@ -212,6 +212,11 @@ production chart `version` and `appVersion`. The service images and chart share
 one version for now; split plugin and chart versions only after chart-only
 releases need their own compatibility policy.
 
+Merge commits are disabled for this repository. Use squash or rebase merges so
+Release Please sees one conventional commit message for each change. GitHub
+merge commits can repeat the PR title alongside the original commit, which makes
+Release Please generate duplicate changelog entries.
+
 Release Please uses a dedicated GitHub App token so release PRs trigger the
 same required CI checks as human-authored PRs. The GitHub App should be
 installed on this repository with repository permissions for contents, issues,
