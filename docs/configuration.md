@@ -143,7 +143,7 @@ issuerProfiles:
         key: client_secret
 ```
 
-Issuer profile files use this shape:
+The chart renders those values into an issuer profile file with this shape:
 
 ```yaml
 issuers:
@@ -151,13 +151,18 @@ issuers:
     tokenEndpoint: https://issuer.example.com/oauth/token
     bearerRealm: issuer
     tokenEndpointAuthMethod: client_secret_basic
-    clientID: example-client
-    clientSecret: example-secret
+    clientIDSecretRef:
+      name: issuer-oauth
+      key: client_id
+    clientSecretSecretRef:
+      name: issuer-oauth
+      key: client_secret
 ```
 
-In Kubernetes deployments, prefer `clientIDSecretRef` and
-`clientSecretSecretRef` over inline credentials. Secret refs default to the pod
-namespace unless `namespace` is set explicitly.
+Secret refs default to the pod namespace unless `namespace` is set explicitly.
+Inline `clientID` and `clientSecret` are accepted by the runtime issuer profile
+file parser for non-Kubernetes deployments, but the production Helm chart should
+use `clientIDSecretRef` and `clientSecretSecretRef`.
 
 ### Core Service
 
