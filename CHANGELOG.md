@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.4.0...v0.4.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **deps:** update google.golang.org/genproto/googleapis/rpc digest to 037a81a ([#92](https://github.com/michaelw/ext-authz-token-exchange/issues/92)) ([c5a0344](https://github.com/michaelw/ext-authz-token-exchange/commit/c5a034448086dcbe75d99bacf4a92d734e3f0f00))
+* **docker:** set build cache ownership ([01c3a11](https://github.com/michaelw/ext-authz-token-exchange/commit/01c3a11be0f2c4bbf85117c132021786a3495607))
+* **docker:** set build cache ownership ([c5f0370](https://github.com/michaelw/ext-authz-token-exchange/commit/c5f03709d9a70938223bfdf85d5493473060c358))
+
 ## [0.4.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.3.0...v0.4.0) (2026-05-18)
 
 
