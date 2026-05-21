@@ -1,0 +1,63 @@
+name: Container CI
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build intermediate stage (Go compile)
+  build-stage:
+    uses: IDme/workflow-library/.github/workflows/docker-build.yml@master
+    with:
+      build_container_name: "ext-authz-token-exchange"
+      docker_build_target: build
+    secrets: inherit
+
+  # Build final production image
+  prod-stage:
+    needs: ["build-stage"]
+    uses: IDme/workflow-library/.github/workflows/docker-build.yml@master
+    with:
+      build_container_name: "ext-authz-token-exchange"
+      docker_build_target: prod
+      docker_build_args: "SOURCE_IMAGE=${{ needs.build-stage.outputs.image_name }}"
+    secrets: inherit
+
+  # TODO: remove fake-token-endpoint-stage when core-api replaces the fake token endpoint in prod
+  # Build fake token endpoint image (used for e2e testing only)
+  fake-token-endpoint-stage:
+    uses: IDme/workflow-library/.github/workflows/docker-build.yml@master
+    with:
+      build_container_name: "ext-authz-token-exchange-fake-token-endpoint"
+      docker_build_target: fake-token-endpoint
+    secrets: inherit
+
+  # Run image checks on prod image
+  checks:
+    needs: ["prod-stage"]
+    uses: IDme/workflow-library/.github/workflows/docker-checks.yml@master
+    with:
+      image_name: ${{ needs.prod-stage.outputs.image_name }}
+    secrets: inherit
+
+  # Publish release candidate
+  app-release-candidate:
+    needs: ["prod-stage"]
+    uses: IDme/workflow-library/.github/workflows/docker-publish.yml@master
+    with:
+      image_name: ${{ needs.prod-stage.outputs.image_name }}
+      build_container_name: "ext-authz-token-exchange"
+    secrets: inherit
+
+  # TODO: remove fake-token-endpoint-release-candidate when core-api replaces the fake token endpoint in prod
+  fake-token-endpoint-release-candidate:
+    needs: ["fake-token-endpoint-stage"]
+    uses: IDme/workflow-library/.github/workflows/docker-publish.yml@master
+    with:
+      image_name: ${{ needs.fake-token-endpoint-stage.outputs.image_name }}
+      build_container_name: "ext-authz-token-exchange-fake-token-endpoint"
+    secrets: inherit

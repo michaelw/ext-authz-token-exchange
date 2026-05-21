@@ -1,0 +1,27 @@
+name: Publish Container
+
+on:
+  release:
+    types: ["published"]
+
+concurrency:
+  group: release-process-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  ext-authz-token-exchange:
+    uses: IDme/workflow-library/.github/workflows/docker-publish.yml@master
+    with:
+      image_name: 'containers.packages.idme.co/idme/ext-authz-token-exchange'
+      build_container_name: 'ext-authz-token-exchange'
+      publish_release: true
+    secrets: inherit
+
+  # TODO: remove fake-token-endpoint when core-api replaces the fake token endpoint in prod
+  fake-token-endpoint:
+    uses: IDme/workflow-library/.github/workflows/docker-publish.yml@master
+    with:
+      image_name: 'containers.packages.idme.co/idme/ext-authz-token-exchange-fake-token-endpoint'
+      build_container_name: 'ext-authz-token-exchange-fake-token-endpoint'
+      publish_release: true
+    secrets: inherit

@@ -80,12 +80,13 @@ ENV CGO_ENABLED=0
 
 WORKDIR ${WORKSPACE}
 
-COPY --chown=${USER}:${USER} go.mod go.sum ./
-RUN --mount=type=cache,target=/go-cache,uid=${USER_ID},gid=${GROUP_ID} \
-    go mod download
 COPY --chown=${USER}:${USER} . .
 RUN --mount=type=cache,target=/go-cache,uid=${USER_ID},gid=${GROUP_ID} \
-    go build -o bin/ -v ./cmd/...
+    if [ -d vendor ]; then \
+        go build -mod=vendor -o bin/ -v ./cmd/...; \
+    else \
+        go mod download && go build -o bin/ -v ./cmd/...; \
+    fi
 
 # Run stage
 FROM gcr.io/distroless/static-debian12 AS prod

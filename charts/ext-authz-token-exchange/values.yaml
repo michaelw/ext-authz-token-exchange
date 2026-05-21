@@ -81,6 +81,15 @@ issuerProfiles:
   mountPath: /etc/ext-authz-token-exchange
   fileName: issuers.yaml
   profiles: []
+  # profiles:
+  #   - name: core-api
+  #     tokenEndpoint: "https://core-api.example.com/oauth/token"  # TODO: replace with real core-api token endpoint URL
+  #     clientIDSecretRef:
+  #       name: core-api-oauth-secret
+  #       key: client_id
+  #     clientSecretSecretRef:
+  #       name: core-api-oauth-secret
+  #       key: client_secret
 
 env:
   GRPC_LOG_HEALTH_CHECKS: "true"
