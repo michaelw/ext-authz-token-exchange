@@ -634,8 +634,42 @@ commands:
       if [ "$GATEWAY_PROVIDER" = "gke-gateway" ]; then
         DEMO_PLUGIN_NAMESPACE="$GATEWAY_NAMESPACE"
       fi
+      KEYCLOAK_PORT_FORWARD_PID=""
+      if [ -z "${DEMO_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" != "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
+        for port in 18080 18081 18082 18083 18084 18085 18086 18087 18088 18089; do
+          if ! nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
+            KEYCLOAK_PORT="$port"
+            break
+          fi
+        done
+        if [ -z "${KEYCLOAK_PORT:-}" ]; then
+          echo "E: no free local Keycloak port found in 18080-18089" >&2
+          exit 1
+        fi
+        KEYCLOAK_PORT_FORWARD_LOG="/tmp/ext-authz-token-exchange-demo-keycloak-port-forward.log"
+        kubectl -n ext-authz-token-exchange-e2e port-forward --address 127.0.0.1 svc/keycloak "${KEYCLOAK_PORT}:8080" >"$KEYCLOAK_PORT_FORWARD_LOG" 2>&1 &
+        KEYCLOAK_PORT_FORWARD_PID="$!"
+        trap 'if [ -n "${KEYCLOAK_PORT_FORWARD_PID:-}" ]; then kill "$KEYCLOAK_PORT_FORWARD_PID" >/dev/null 2>&1 || true; fi' EXIT
+        KEYCLOAK_READY=false
+        for _ in $(seq 1 60); do
+          if curl -fsS "http://127.0.0.1:${KEYCLOAK_PORT}/realms/token-exchange-e2e" >/dev/null 2>&1; then
+            KEYCLOAK_READY=true
+            break
+          fi
+          sleep 1
+        done
+        if [ "$KEYCLOAK_READY" != "true" ]; then
+          echo "E: Keycloak port-forward did not become ready; log follows:" >&2
+          cat "$KEYCLOAK_PORT_FORWARD_LOG" >&2
+          exit 1
+        fi
+        DEMO_KEYCLOAK_BASE_URL="http://127.0.0.1:${KEYCLOAK_PORT}"
+        export DEMO_KEYCLOAK_BASE_URL
+        echo "I: using local Keycloak port-forward at ${DEMO_KEYCLOAK_BASE_URL}"
+      fi
       DEMO_BASE_URL="${DEMO_BASE_URL:-https://httpbin.$DEPLOYMENT_DOMAIN}" \
       DEMO_KEYCLOAK_BASE_URL="${DEMO_KEYCLOAK_BASE_URL:-https://keycloak.$DEPLOYMENT_DOMAIN}" \
+      DEMO_KEYCLOAK_ISSUER="${DEMO_KEYCLOAK_ISSUER:-https://keycloak.$DEPLOYMENT_DOMAIN/realms/token-exchange-e2e}" \
       DEMO_PLUGIN_NAMESPACE="${DEMO_PLUGIN_NAMESPACE}" \
         go run ./cmd/demo-dashboard $@
 

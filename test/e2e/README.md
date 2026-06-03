@@ -321,6 +321,12 @@ including invalid-token fixtures for the Keycloak negative scenarios, and can be
 `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_ID`, `DEMO_KEYCLOAK_SHORT_TTL_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.
 
+On GKE, the public `keycloak.${DEPLOYMENT_DOMAIN}` route is intentionally
+IAP-protected. When `DEMO_KEYCLOAK_BASE_URL` is unset, `devspace run
+demo-dashboard` starts a local port-forward to the Keycloak Service and uses
+that URL for dashboard token fetches. Override `DEMO_KEYCLOAK_BASE_URL` only
+when you intentionally want a different reachable Keycloak endpoint.
+
 The profile uses these local-only clients:
 
 - `tx-subject-client`: issues inbound subject tokens.

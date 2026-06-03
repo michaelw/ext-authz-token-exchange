@@ -107,6 +107,12 @@ profile defaults for its `Fetch` action. Those defaults can be adjusted with
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.
 
+On GKE, `keycloak.${DEPLOYMENT_DOMAIN}` is IAP-protected by design. If
+`DEMO_KEYCLOAK_BASE_URL` is not set, `devspace run demo-dashboard` opens a
+temporary local port-forward to `svc/keycloak` and uses that URL for dashboard
+subject-token fetches. This does not change the plugin issuer profile, which
+continues to use the in-cluster Keycloak Service.
+
 The `keycloak-audience` scenario should reach httpbin with an upstream
 Keycloak-issued bearer token. The `keycloak-resource` scenario keeps resource
 coverage separate from the audience-only baseline so provider behavior stays

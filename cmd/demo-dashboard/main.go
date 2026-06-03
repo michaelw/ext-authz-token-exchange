@@ -540,7 +540,7 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 	client := &http.Client{Transport: transport}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch Keycloak demo subject token: %w", err)
+		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: %w", baseURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -551,7 +551,7 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 		Description string `json:"error_description"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return "", fmt.Errorf("fetch Keycloak demo subject token: decode response: %w", err)
+		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: decode response: %w", baseURL, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		detail := parsed.Error
@@ -561,10 +561,10 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 		if detail == "" {
 			detail = resp.Status
 		}
-		return "", fmt.Errorf("fetch Keycloak demo subject token: %s", detail)
+		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: %s", baseURL, detail)
 	}
 	if parsed.TokenType != "Bearer" || parsed.AccessToken == "" {
-		return "", fmt.Errorf("fetch Keycloak demo subject token: response did not contain a bearer access token")
+		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: response did not contain a bearer access token", baseURL)
 	}
 	return parsed.AccessToken, nil
 }
