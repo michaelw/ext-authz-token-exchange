@@ -701,8 +701,8 @@ func TestFakeTokenEndpointRecordsServerSpanUnderIncomingTrace(t *testing.T) {
 		t.Fatalf("ended spans = %d, want 1", len(spans))
 	}
 	span := spans[0]
-	if span.Name() != "fake_token_endpoint token" {
-		t.Fatalf("span name = %q, want fake_token_endpoint token", span.Name())
+	if span.Name() != "POST /token/" {
+		t.Fatalf("span name = %q, want POST /token/", span.Name())
 	}
 	if span.SpanKind() != trace.SpanKindServer {
 		t.Fatalf("span kind = %s, want server", span.SpanKind())
