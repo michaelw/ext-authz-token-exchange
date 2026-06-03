@@ -18,13 +18,13 @@ import (
 )
 
 func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
-	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
+	handler := tokenHandler("e2e-client", "e2e-secret", testFakeConfig())
 	form := url.Values{}
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
 	form.Set("subject_token", "incoming-yellow")
 	form.Set("subject_token_type", "urn:ietf:params:oauth:token-type:access_token")
 	form.Set("scope", "yellow")
-	form.Add("resource", "https://httpbin.int.kube/anything/yellow")
+	form.Add("resource", "https://httpbin.example.test/anything/yellow")
 	form.Add("audience", "httpbin-yellow")
 
 	req := httptest.NewRequest(http.MethodPost, "/token/yellow", strings.NewReader(form.Encode()))
@@ -66,7 +66,7 @@ func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
 			t.Fatalf("payload[%q] = %#v, want %q", key, payload[key], want)
 		}
 	}
-	assertStringArrayClaim(t, payload, "resource", []string{"https://httpbin.int.kube/anything/yellow"})
+	assertStringArrayClaim(t, payload, "resource", []string{"https://httpbin.example.test/anything/yellow"})
 	assertStringArrayClaim(t, payload, "aud", []string{"httpbin-yellow"})
 	if _, ok := payload["client_secret"]; ok {
 		t.Fatalf("payload must not include client_secret: %#v", payload)
@@ -74,7 +74,7 @@ func TestSuccessfulExchangeReturnsUnsignedJWTWithExchangeInputs(t *testing.T) {
 }
 
 func TestTokenHandlerSupportsClientSecretPost(t *testing.T) {
-	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
+	handler := tokenHandler("e2e-client", "e2e-secret", testFakeConfig())
 	form := baseTokenForm()
 	form.Set("client_id", "e2e-client")
 	form.Set("client_secret", "e2e-secret")
@@ -120,7 +120,7 @@ func TestSuccessEndpointDerivesScenarioFromExchangeRequest(t *testing.T) {
 			name: "error resource",
 			form: func() url.Values {
 				form := baseTokenForm()
-				form.Add("resource", "https://httpbin.int.kube/anything/error-invalid-grant")
+				form.Add("resource", "https://httpbin.gcp.kube/anything/error-invalid-grant")
 				return form
 			}(),
 			wantStatus: http.StatusBadRequest,
@@ -128,7 +128,7 @@ func TestSuccessEndpointDerivesScenarioFromExchangeRequest(t *testing.T) {
 		},
 	}
 
-	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
+	handler := tokenHandler("e2e-client", "e2e-secret", testFakeConfig())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(tc.form.Encode()))
@@ -169,7 +169,7 @@ func TestFakeConfigRoutesByExactRequestInputs(t *testing.T) {
 			},
 			{
 				Name:  "invalid-grant-resource",
-				Match: fakeMatch{Resource: "https://httpbin.int.kube/anything/error-invalid-grant"},
+				Match: fakeMatch{Resource: "https://httpbin.gcp.kube/anything/error-invalid-grant"},
 				Response: fakeResponse{
 					Type:             responseOAuthError,
 					Status:           http.StatusBadRequest,
@@ -216,7 +216,7 @@ func TestFakeConfigRoutesByExactRequestInputs(t *testing.T) {
 
 	t.Run("matches resource exactly", func(t *testing.T) {
 		form := baseTokenForm()
-		form.Add("resource", "https://httpbin.int.kube/anything/error-invalid-grant")
+		form.Add("resource", "https://httpbin.gcp.kube/anything/error-invalid-grant")
 		req := httptest.NewRequest(http.MethodPost, "/token/success", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", contentTypeFormEncoded)
 		req.SetBasicAuth("e2e-client", "e2e-secret")
@@ -268,6 +268,13 @@ func TestLoadFakeConfigDefaultsAndNormalizesRoutes(t *testing.T) {
 		cfg.DefaultResponse.Status != http.StatusBadRequest ||
 		cfg.DefaultResponse.Error != "invalid_request" {
 		t.Fatalf("default response = %#v, want configured unknown scenario OAuth error", cfg.DefaultResponse)
+	}
+}
+
+func TestLoadFakeConfigRequiresExplicitPath(t *testing.T) {
+	_, err := loadFakeConfig("")
+	if err == nil || !strings.Contains(err.Error(), "FAKE_TOKEN_ENDPOINT_CONFIG is required") {
+		t.Fatalf("loadFakeConfig empty path error = %v, want required config error", err)
 	}
 }
 
@@ -586,7 +593,7 @@ func TestTokenHandlerScenarios(t *testing.T) {
 		},
 	}
 
-	handler := tokenHandler("e2e-client", "e2e-secret", defaultFakeConfig())
+	handler := tokenHandler("e2e-client", "e2e-secret", testFakeConfig())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			form := baseTokenForm()
@@ -637,7 +644,7 @@ func TestFakeTokenEndpointHealthAndEnvDefault(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	fakeTokenEndpointHandler("e2e-client", "e2e-secret", defaultFakeConfig()).ServeHTTP(rec, req)
+	fakeTokenEndpointHandler("e2e-client", "e2e-secret", testFakeConfig()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("health status = %d, want %d", rec.Code, http.StatusNoContent)
@@ -683,7 +690,7 @@ func TestFakeTokenEndpointRecordsServerSpanUnderIncomingTrace(t *testing.T) {
 	req.SetBasicAuth("e2e-client", "e2e-secret")
 	rec := httptest.NewRecorder()
 
-	fakeTokenEndpointHandler("e2e-client", "e2e-secret", defaultFakeConfig()).ServeHTTP(rec, req)
+	fakeTokenEndpointHandler("e2e-client", "e2e-secret", testFakeConfig()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
@@ -754,6 +761,125 @@ func assertStringArrayClaim(t *testing.T, payload map[string]any, key string, wa
 		if got, _ := item.(string); got != want[i] {
 			t.Fatalf("payload[%q][%d] = %#v, want %q", key, i, item, want[i])
 		}
+	}
+}
+
+func testFakeConfig() fakeConfig {
+	cfg := fakeConfig{
+		Routes: []fakeRoute{
+			testSuccessPathRoute("yellow"),
+			testSuccessPathRoute("red"),
+			testSuccessPathRoute("blue"),
+			testOAuthErrorPathRoute("invalid-request", http.StatusBadRequest, "invalid_request", "invalid token exchange request"),
+			testOAuthErrorPathRoute("invalid-target", http.StatusBadRequest, "invalid_target", "resource or audience is invalid"),
+			testOAuthErrorPathRoute("invalid-grant", http.StatusBadRequest, "invalid_grant", "subject token is invalid"),
+			testOAuthErrorPathRoute("expired-subject-token", http.StatusBadRequest, "invalid_grant", "subject_token_expired"),
+			{
+				Name:  "unauthorized",
+				Match: fakeMatch{Path: "/token/unauthorized"},
+				Response: fakeResponse{
+					Type:             responseOAuthError,
+					Status:           http.StatusUnauthorized,
+					Error:            "invalid_client",
+					ErrorDescription: "client rejected",
+					WWWAuthenticate:  `Bearer realm="issuer", error="invalid_token"`,
+				},
+			},
+			testOAuthErrorPathRoute("forbidden", http.StatusForbidden, "invalid_target", "target rejected"),
+			testJSONErrorPathRoute("server-error", http.StatusInternalServerError, "temporarily_unavailable"),
+			testTypedPathRoute("malformed", responseMalformed),
+			testTypedPathRoute("missing-access-token", responseMissingAccessToken),
+			testTypedPathRoute("wrong-token-type", responseWrongTokenType),
+			testTypedPathRoute("wrong-issued-token-type", responseWrongIssuedTokenType),
+			testTypedPathRoute("delay", responseDelay),
+			testOAuthErrorResourceRoute("resource-invalid-grant", "https://httpbin.gcp.kube/anything/error-invalid-grant", "invalid_grant", "subject token is invalid"),
+			testSuccessAudienceRoute("yellow", "httpbin-yellow"),
+			testSuccessAudienceRoute("red", "httpbin-red"),
+			testSuccessAudienceRoute("blue", "httpbin-blue"),
+			testSuccessScopeRoute("scope-yellow", "yellow", "yellow"),
+			testSuccessScopeRoute("scope-red", "red", "red"),
+			testSuccessScopeRoute("scope-blue", "blue", "blue"),
+			{
+				Name:     "success",
+				Match:    fakeMatch{Path: "/token/success"},
+				Response: fakeResponse{Type: responseSuccess, Scenario: "success"},
+			},
+		},
+		DefaultResponse: defaultUnknownResponse(),
+	}
+	if err := (&cfg).validate(); err != nil {
+		panic(err)
+	}
+	return cfg
+}
+
+func testSuccessPathRoute(scenario string) fakeRoute {
+	return fakeRoute{
+		Name:     scenario,
+		Match:    fakeMatch{Path: "/token/" + scenario},
+		Response: fakeResponse{Type: responseSuccess, Scenario: scenario},
+	}
+}
+
+func testSuccessAudienceRoute(name, audience string) fakeRoute {
+	return fakeRoute{
+		Name:     "audience-" + name,
+		Match:    fakeMatch{Audience: audience},
+		Response: fakeResponse{Type: responseSuccess, Scenario: name},
+	}
+}
+
+func testSuccessScopeRoute(name, scenario, scope string) fakeRoute {
+	return fakeRoute{
+		Name:     name,
+		Match:    fakeMatch{Scope: scope},
+		Response: fakeResponse{Type: responseSuccess, Scenario: scenario},
+	}
+}
+
+func testOAuthErrorPathRoute(name string, status int, code, description string) fakeRoute {
+	return fakeRoute{
+		Name:  name,
+		Match: fakeMatch{Path: "/token/" + name},
+		Response: fakeResponse{
+			Type:             responseOAuthError,
+			Status:           status,
+			Error:            code,
+			ErrorDescription: description,
+		},
+	}
+}
+
+func testOAuthErrorResourceRoute(name, resource, code, description string) fakeRoute {
+	return fakeRoute{
+		Name:  name,
+		Match: fakeMatch{Resource: resource},
+		Response: fakeResponse{
+			Type:             responseOAuthError,
+			Status:           http.StatusBadRequest,
+			Error:            code,
+			ErrorDescription: description,
+		},
+	}
+}
+
+func testJSONErrorPathRoute(name string, status int, code string) fakeRoute {
+	return fakeRoute{
+		Name:  name,
+		Match: fakeMatch{Path: "/token/" + name},
+		Response: fakeResponse{
+			Type:   responseJSONError,
+			Status: status,
+			Error:  code,
+		},
+	}
+}
+
+func testTypedPathRoute(name, responseType string) fakeRoute {
+	return fakeRoute{
+		Name:     name,
+		Match:    fakeMatch{Path: "/token/" + name},
+		Response: fakeResponse{Type: responseType, Scenario: name},
 	}
 }
 

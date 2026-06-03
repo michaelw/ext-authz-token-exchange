@@ -30,3 +30,22 @@ data:
 ---
 {{- end }}
 {{- end }}
+{{- range $group := .Values.additionalScenarios }}
+{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $group.color) }}
+{{- $audience := printf "httpbin-%s" $group.color }}
+{{- range $scenario := $group.scenarios }}
+{{- $scenarioConfig := merge (dict "audience" $audience) $scenario }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-policy" $scenario.name | quote }}
+  namespace: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    {{ $.Values.policy.labelKey }}: {{ $.Values.policy.labelValue | quote }}
+data:
+  config.yaml: |
+{{ include "ext-authz-token-exchange-e2e.policyConfig" (merge (dict "Values" $.Values) $scenarioConfig) | indent 4 }}
+---
+{{- end }}
+{{- end }}

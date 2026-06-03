@@ -19,12 +19,14 @@ client credentials it consumes. The demo/e2e chart owns demo-only resources:
 the fake token endpoint, color team namespaces, and app-owned policy ConfigMaps.
 The test code intentionally does not construct baseline Kubernetes manifests;
 use chart values to change namespaces, credentials, images, policy entries, or
-the fake token endpoint.
+the fake token endpoint. The fake token endpoint requires
+`FAKE_TOKEN_ENDPOINT_CONFIG`; the e2e chart supplies it from
+`fakeTokenEndpoint.routes` and `policy.httpbinResourceBase`.
 
-You can also let DevSpace deploy the full local demo stack:
+You can also let DevSpace deploy the provider-selected demo stack:
 
 ```sh
-devspace deploy -p local-test
+devspace deploy
 devspace run test-e2e
 ```
 
@@ -32,7 +34,7 @@ To deploy the same local demo stack with a Keycloak RFC 8693 issuer, add
 the opt-in Keycloak profile:
 
 ```sh
-devspace deploy -p local-test -p with-keycloak
+devspace deploy -p with-keycloak
 devspace run test-e2e
 ```
 
@@ -40,7 +42,7 @@ If the cluster does not already provide Gateway, DNS, and certificate
 infrastructure for `*.int.kube`, include the infra profile:
 
 ```sh
-devspace deploy -p with-infra -p local-test -p with-keycloak
+devspace deploy -p with-infra -p with-keycloak
 devspace run test-e2e
 ```
 
@@ -62,10 +64,10 @@ deployed. In the Keycloak mode, the specs fetch a subject token from
 and verify that the upstream bearer token is signed by Keycloak for
 `tx-audience-client`.
 
-The `local-test` profile builds the plugin and fake token endpoint images, then
+The auto-activated `with-test` profile builds the plugin and fake token endpoint images, then
 deploys the plugin chart as release `ext-authz-token-exchange` and the demo/e2e
 chart as release `ext-authz-token-exchange-e2e`. DevSpace updates the image
-tags in Helm values in memory, so the local-test flow does not require pushing
+tags in Helm values in memory, so the with-test flow does not require pushing
 images to `ghcr.io/michaelw` when your cluster can use DevSpace-built images.
 
 The production plugin image intentionally contains only
@@ -76,7 +78,7 @@ own image.
 ## Recorded Demo
 
 Use the Go demo runner for a terminal-friendly walkthrough once
-`devspace deploy -p local-test` has installed the demo stack. It uses typed HTTP
+`devspace deploy` has installed the demo stack. It uses typed HTTP
 and JSON handling, and renders `test/e2e/demo-scenarios.yaml` as a Go template:
 
 ```sh
@@ -260,7 +262,7 @@ test and places a valid policy ConfigMap in it. Requests for that policy must
 pass through unchanged, proving that ConfigMap labels alone are not enough:
 the namespace must match `CONFIGMAP_NAMESPACE_SELECTOR`.
 
-When using `devspace deploy -p local-test`, DevSpace creates or updates the
+When using `devspace deploy`, DevSpace creates or updates the
 color namespaces before Helm deploys the demo chart and labels them with the
 policy namespace selector. A direct `helm upgrade --install` of the demo chart
 also labels namespaces that the chart creates or already owns.
@@ -284,16 +286,16 @@ Useful overrides:
 - `E2E_DEMO_RELEASE`: Helm release name for demo/e2e resources. Defaults to `ext-authz-token-exchange-e2e`.
 - `E2E_DEMO_NAMESPACE`: Namespace for demo/e2e resources. Defaults to `ext-authz-token-exchange-e2e`.
 - `E2E_FAKE_TOKEN_ENDPOINT_IMAGE`: Image for the demo token endpoint.
-- `E2E_HTTPBIN_RESOURCE_BASE`: Resource URI base used in demo ConfigMaps.
+- `E2E_BASE_URL`: Gateway URL used for requests and resource URI matching.
 - `E2E_SKIP_CLEANUP=true`: Keep test namespaces for inspection.
-- `E2E_SKIP_INSTALL=true`: Test an already deployed local-test chart release.
+- `E2E_SKIP_INSTALL=true`: Test an already deployed with-test chart release.
 - `E2E_INSECURE_SKIP_VERIFY=false`: Enforce TLS verification for the gateway URL.
-- `E2E_KEYCLOAK_BASE_URL`: External Keycloak base URL. Defaults to `https://keycloak.int.kube`.
-- `E2E_KEYCLOAK_ISSUER`: Expected issuer claim for exchanged tokens. Defaults to `https://keycloak.int.kube/realms/token-exchange-e2e`.
+- `E2E_KEYCLOAK_BASE_URL`: External Keycloak base URL. Required when Keycloak e2e resources are deployed unless `devspace run test-e2e` sets up the GKE port-forward.
+- `E2E_KEYCLOAK_ISSUER`: Expected issuer claim for exchanged tokens. Required when it differs from `E2E_KEYCLOAK_BASE_URL` plus the test realm.
 
 ## Manual Keycloak Demo
 
-After `devspace deploy -p local-test -p with-keycloak`, the dashboard detects
+After `devspace deploy -p with-keycloak`, the dashboard detects
 the deployed Keycloak issuer. Each scenario declares its input token shape in
 the scenario YAML, and the token tab's `Fetch` button generates the selected
 scenario's token when needed:
