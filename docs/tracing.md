@@ -97,7 +97,7 @@ values in `devspace.yaml`, and keep production defaults in the plugin chart
 ## Enable Fake Issuer Trace Export
 
 The fake issuer is deployed by the local e2e chart in the
-`ext-authz-token-exchange-e2e` namespace. The local DevSpace `local-test`
+`ext-authz-token-exchange-e2e` namespace. The local DevSpace `with-test`
 profile enables its application server span by default. To verify or patch a
 running deployment manually, set the same environment variables with
 `kubectl`:
@@ -117,7 +117,7 @@ kubectl -n ext-authz-token-exchange-e2e rollout status deploy/fake-token-endpoin
 ```
 
 For a persistent fake issuer setup, put those keys under
-`fakeTokenEndpoint.env` in the e2e chart values or the `local-test` DevSpace
+`fakeTokenEndpoint.env` in the e2e chart values or the `with-test` DevSpace
 profile values. The same redeploy caveat applies to the disable command below.
 
 If mesh tracing is enabled and you want fewer duplicate spans around the fake

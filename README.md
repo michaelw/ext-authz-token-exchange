@@ -45,7 +45,7 @@ For the local demo/e2e stack that assumes infrastructure already provides
 `https://httpbin.int.kube/` through the Gateway API gateway, use:
 
 ```bash
-devspace deploy -p local-test
+devspace deploy
 devspace run test-e2e
 ```
 
@@ -70,7 +70,7 @@ and inspecting policy, response, log, and request-flow details.
 
 </details>
 
-The `local-test` profile deploys the plugin chart as release
+The auto-activated `with-test` profile deploys the plugin chart as release
 `ext-authz-token-exchange` in namespace `ext-authz-token-exchange`, and the
 demo/e2e chart as release `ext-authz-token-exchange-e2e` in namespace
 `ext-authz-token-exchange-e2e`. The demo/e2e chart owns the fake token
@@ -120,15 +120,16 @@ values and policies rendered by the e2e chart, while arbitrary app-owned
 ConfigMaps can use `docs/policy.schema.json` for editor or CI validation before
 they are applied.
 
-Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra
--p local-test` to install required infrastructure plus the local demo/e2e stack.
+Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra`
+to install required starter-pack infrastructure, including starter-pack's
+`with-test` httpbin routes, plus this repo's demo/e2e stack.
 
 Refer to the [DevSpace](docs/devspace.md) and [devspace-starter-pack](https://github.com/michaelw/devspace-starter-pack) documentation
 for more information.
 
 ### Uninstall
 
-- `devspace purge`, `devspace purge -p with-infra`, `devspace purge -p local-test`, or `devspace purge -p with-infra -p local-test`
+- `devspace purge` or `devspace purge -p with-infra`
 
 ## Development Quickstart Guide
 
