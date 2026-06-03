@@ -1,0 +1,42 @@
+{{- if eq (include "keycloak.gkeIapEnabled" .) "true" }}
+{{- if ne .Values.gkeIap.protection "iap" -}}
+{{- fail (printf "unsupported keycloak gkeIap.protection=%s; expected iap" .Values.gkeIap.protection) -}}
+{{- end -}}
+{{- if or (and .Values.gkeIap.oauthClientID (not .Values.gkeIap.oauthClientSecret)) (and .Values.gkeIap.oauthClientSecret (not .Values.gkeIap.oauthClientID)) -}}
+{{- fail "custom Keycloak GKE IAP OAuth requires both oauthClientID and oauthClientSecret; leave both empty to use Google-managed OAuth" -}}
+{{- end -}}
+{{- $customOAuth := and .Values.gkeIap.oauthClientID .Values.gkeIap.oauthClientSecret -}}
+{{- if $customOAuth }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.gkeIap.secretName | quote }}
+  namespace: {{ .Values.namespace | quote }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+type: Opaque
+stringData:
+  key: {{ .Values.gkeIap.oauthClientSecret | quote }}
+---
+{{- end }}
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: {{ .Values.gkeIap.policyName | quote }}
+  namespace: {{ .Values.namespace | quote }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+spec:
+  default:
+    iap:
+      enabled: true
+      {{- if $customOAuth }}
+      oauth2ClientSecret:
+        name: {{ .Values.gkeIap.secretName | quote }}
+      clientID: {{ .Values.gkeIap.oauthClientID | quote }}
+      {{- end }}
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ .Values.keycloak.name | quote }}
+{{- end }}

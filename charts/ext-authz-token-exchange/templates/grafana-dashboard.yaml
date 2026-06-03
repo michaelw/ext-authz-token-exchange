@@ -1028,13 +1028,13 @@ data:
           {
             "current": {
               "selected": false,
-              "text": {{ .Values.grafanaDashboard.providerCluster | quote }},
-              "value": {{ .Values.grafanaDashboard.providerCluster | quote }}
+              "text": {{ include "ext-authz-token-exchange.grafanaProviderCluster" . | quote }},
+              "value": {{ include "ext-authz-token-exchange.grafanaProviderCluster" . | quote }}
             },
             "hide": 0,
             "label": "Provider cluster",
             "name": "provider_cluster",
-            "query": {{ .Values.grafanaDashboard.providerCluster | quote }},
+            "query": {{ include "ext-authz-token-exchange.grafanaProviderCluster" . | quote }},
             "type": "constant"
           },
           {

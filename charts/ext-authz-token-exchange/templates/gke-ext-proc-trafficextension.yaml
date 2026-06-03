@@ -1,0 +1,39 @@
+{{- if eq (include "ext-authz-token-exchange.gkeExtProcEnabled" .) "true" }}
+apiVersion: networking.gke.io/v1
+kind: GCPTrafficExtension
+metadata:
+  name: {{ .Values.gkeExtProc.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gkeExtProc.gateway.name | quote }}
+  extensionChains:
+    - name: {{ .Values.gkeExtProc.chainName | quote }}
+      matchCondition:
+        celExpressions:
+          - celMatcher: {{ printf "request.host.contains('%s')" .Values.gkeExtProc.host | quote }}
+      extensions:
+        - name: {{ .Values.gkeExtProc.extensionName | quote }}
+          authority: {{ printf "%s.%s.svc.cluster.local" .Values.gkeAuthz.callout.service.name .Release.Namespace | quote }}
+          backendRef:
+            group: ""
+            kind: Service
+            name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+            port: {{ .Values.gkeAuthz.callout.service.port }}
+          failOpen: {{ .Values.gkeExtProc.failOpen }}
+          timeout: {{ .Values.gkeExtProc.timeout | quote }}
+          supportedEvents:
+{{ toYaml .Values.gkeExtProc.supportedEvents | indent 12 }}
+{{- with .Values.gkeExtProc.forwardHeaders }}
+          forwardHeaders:
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- with .Values.gkeExtProc.forwardAttributes }}
+          forwardAttributes:
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- end }}

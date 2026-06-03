@@ -13,6 +13,14 @@
       "type": "string",
       "minLength": 1
     },
+    "gatewayProvider": {
+      "type": "string",
+      "enum": ["local-istio", "gke-gateway"]
+    },
+    "gkeGatewayNamespace": {
+      "type": "string",
+      "minLength": 1
+    },
     "keycloak": {
       "type": "object",
       "additionalProperties": true,
@@ -52,6 +60,15 @@
         "realm": {
           "type": "string",
           "minLength": 1
+        },
+        "strategy": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -79,6 +96,76 @@
         "namespace": {
           "type": "string",
           "minLength": 1
+        },
+        "sectionName": {
+          "type": "string"
+        },
+        "httpRedirect": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "sectionName": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "gkeIap": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "protection": {
+          "type": "string"
+        },
+        "policyName": {
+          "type": "string"
+        },
+        "oauthClientID": {
+          "type": "string"
+        },
+        "oauthClientSecret": {
+          "type": "string"
+        },
+        "secretName": {
+          "type": "string"
+        }
+      }
+    },
+    "gkeHealthCheck": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requestPath": {
+          "type": "string"
+        },
+        "checkIntervalSec": {
+          "type": "integer"
+        },
+        "timeoutSec": {
+          "type": "integer"
+        },
+        "healthyThreshold": {
+          "type": "integer"
+        },
+        "unhealthyThreshold": {
+          "type": "integer"
+        },
+        "logConfig": {
+          "type": "object",
+          "additionalProperties": true
         }
       }
     },

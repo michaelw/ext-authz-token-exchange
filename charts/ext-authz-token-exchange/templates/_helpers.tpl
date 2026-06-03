@@ -74,6 +74,61 @@ Name of the optional OAuth client credential Secret rendered by the chart.
 {{- end }}
 
 {{/*
+Gateway provider selected by DevSpace or chart consumers.
+*/}}
+{{- define "ext-authz-token-exchange.gatewayProvider" -}}
+{{- .Values.gatewayProvider | default "local-istio" -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.isGKEGateway" -}}
+{{- eq (include "ext-authz-token-exchange.gatewayProvider" .) "gke-gateway" -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.extensionMode" -}}
+{{- if eq (include "ext-authz-token-exchange.isGKEGateway" .) "true" -}}
+ext_proc
+{{- else -}}
+{{- .Values.extensionMode | default "ext_authz" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.authorizationPolicyEnabled" -}}
+{{- and (eq (include "ext-authz-token-exchange.gatewayProvider" .) "local-istio") (eq (include "ext-authz-token-exchange.extensionMode" .) "ext_authz") -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.gatewayExtAuthzServiceEnabled" -}}
+{{- and (eq (include "ext-authz-token-exchange.gatewayProvider" .) "local-istio") (eq (include "ext-authz-token-exchange.extensionMode" .) "ext_authz") -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.gkeExtProcEnabled" -}}
+{{- or .Values.gkeExtProc.enabled (eq (include "ext-authz-token-exchange.gatewayProvider" .) "gke-gateway") -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.gkeAuthzEnabled" -}}
+{{- .Values.gkeAuthz.enabled -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.gkeCalloutEnabled" -}}
+{{- or (eq (include "ext-authz-token-exchange.gkeAuthzEnabled" .) "true") (eq (include "ext-authz-token-exchange.gkeExtProcEnabled" .) "true") -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.grafanaProviderCluster" -}}
+{{- if eq (include "ext-authz-token-exchange.gatewayProvider" .) "gke-gateway" -}}
+{{- "" -}}
+{{- else -}}
+{{- .Values.grafanaDashboard.providerCluster -}}
+{{- end -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange.otelEnvironment" -}}
+{{- if eq (include "ext-authz-token-exchange.gatewayProvider" .) "gke-gateway" -}}
+gke
+{{- else -}}
+local
+{{- end -}}
+{{- end }}
+
+{{/*
 Runtime environment rendered from operator env plus chart-owned issuer profile wiring.
 */}}
 {{- define "ext-authz-token-exchange.env" -}}
@@ -83,6 +138,9 @@ Runtime environment rendered from operator env plus chart-owned issuer profile w
 }}
 {{- with .Values.env }}
 {{- $env = mergeOverwrite $env . }}
+{{- end }}
+{{- if not (hasKey $env "OTEL_RESOURCE_ATTRIBUTES") }}
+{{- $_ := set $env "OTEL_RESOURCE_ATTRIBUTES" (printf "deployment.environment=%s" (include "ext-authz-token-exchange.otelEnvironment" .)) }}
 {{- end }}
 {{- toYaml $env }}
 {{- end }}

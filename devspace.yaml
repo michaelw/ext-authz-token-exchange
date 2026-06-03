@@ -12,10 +12,44 @@ require:
 vars:
   DEVSPACE_USER: $(tr -d '._' <<< ${USER:-$(whoami)})
   CONTAINER_USER_HOME: /home/devuser
+  DNS_DOMAIN:
+    value: kube
+  GKE_DNS_DOMAIN:
+    value: gcp.kube
+  DNS_MODE:
+    value: local
+  DNS_SERVICE_ID:
+    value: kube
+  GKE_DNS_ZONE:
+    value: ""
+  GKE_PROJECT_ID:
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "GKE_PROJECT_ID", "", "${DEVSPACE_CONTEXT}"]
+  GKE_REGION:
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "GKE_REGION", "", "${DEVSPACE_CONTEXT}"]
+  DNS_NAMESERVERS:
+    value: ""
+  HOST_INTEGRATION:
+    value: "true"
+  GATEWAY_PROVIDER:
+    command: ./scripts/starter-pack-env.sh
+    args: ["gateway-provider", "${DEVSPACE_CONTEXT}"]
+  DEPLOYMENT_DOMAIN:
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "DEPLOYMENT_DOMAIN", "int.kube", "${DEVSPACE_CONTEXT}"]
+  GATEWAY_NAMESPACE:
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "GATEWAY_NAMESPACE", "gke-gateway", "${DEVSPACE_CONTEXT}"]
+  DEV_REGISTRY_IMAGE_PREFIX:
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "DEV_REGISTRY_IMAGE_PREFIX", "", "${DEVSPACE_CONTEXT}"]
   REGISTRY:
-    value: "ghcr.io/michaelw"
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "REGISTRY", "ghcr.io/michaelw", "${DEVSPACE_CONTEXT}"]
   DEV_REGISTRY:
-    value: "ghcr.io/michaelw"
+    command: ./scripts/starter-pack-env.sh
+    args: ["get", "DEV_REGISTRY", "ghcr.io/michaelw", "${DEVSPACE_CONTEXT}"]
   IMAGE_NAME:
     value: "ext-authz-token-exchange"
   FAKE_TOKEN_ENDPOINT_IMAGE_NAME:
@@ -31,18 +65,31 @@ profiles:
       dependencies:
         infra:
           git: https://github.com/michaelw/devspace-starter-pack
-  - name: local-test
+          profiles:
+            - with-test
+  - name: with-test
+    activation:
+      - vars:
+          DEVSPACE_CONTEXT: .+
     merge:
       deployments:
         ext-authz-token-exchange:
           helm:
             values:
+              gatewayProvider: ${GATEWAY_PROVIDER}
               envoyFilter:
                 enabled: false
-              authorizationPolicy:
-                enabled: true
-              gatewayExtAuthzService:
-                enabled: true
+              gkeAuthz:
+                gateway:
+                  namespace: ${GATEWAY_NAMESPACE}
+                host: httpbin.${DEPLOYMENT_DOMAIN}
+                callout:
+                  tls:
+                    certificate:
+                      dnsNames:
+                        - gateway-ext-authz.${GATEWAY_NAMESPACE}.svc.cluster.local
+              gkeExtProc:
+                host: httpbin.${DEPLOYMENT_DOMAIN}
               grafanaDashboard:
                 enabled: true
                 providerCluster: outbound|3001||gateway-ext-authz.istio-ingress.svc.cluster.local
@@ -79,52 +126,32 @@ profiles:
             chart:
               name: ./charts/ext-authz-token-exchange-e2e
             values:
-              host: httpbin.int.kube
+              gatewayProvider: ${GATEWAY_PROVIDER}
+              host: httpbin.${DEPLOYMENT_DOMAIN}
               namespacePrefix: service
               systemNamespace: ext-authz-token-exchange-e2e
+              policy:
+                httpbinResourceBase: https://httpbin.${DEPLOYMENT_DOMAIN}
               fakeTokenEndpoint:
-                image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint
+                image: ${runtime.images.fake-token-endpoint.image}:${runtime.images.fake-token-endpoint.tag}
                 env:
                   OTEL_TRACES_EXPORTER: otlp
                   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
                   OTEL_SERVICE_NAME: fake-token-endpoint
-                  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
     patches:
       - op: replace
         path: pipelines.deploy.run
         value: |-
-          run_dependencies --all
-          ensure_pull_secrets --all
-          build_images prod fake-token-endpoint
-          helm dependency build charts/ext-authz-token-exchange
-          kubectl create namespace ext-authz-token-exchange --dry-run=client -o yaml | kubectl apply -f -
-          for ns in service-yellow service-red service-blue; do
-            kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
-            kubectl label namespace "$ns" ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
-          done
-          create_deployments --all
+          source ./scripts/devspace-pipeline.sh
+          devspace_pipeline_deploy
   - name: with-keycloak
     merge:
       deployments:
         ext-authz-token-exchange:
           helm:
             values:
-              env:
-                TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
-                TOKEN_EXCHANGE_BEARER_REALM: token-exchange-e2e
-                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
               issuerProfiles:
-                profiles:
-                  - name: fake-issuer
-                    tokenEndpoint: http://fake-token-endpoint.ext-authz-token-exchange-e2e.svc.cluster.local:8080/token/success
-                    bearerRealm: ext-authz-token-exchange-e2e
-                    tokenEndpointAuthMethod: client_secret_basic
-                    clientIDSecretRef:
-                      name: ext-authz-token-exchange-fake-issuer-oauth
-                      key: client_id
-                    clientSecretSecretRef:
-                      name: ext-authz-token-exchange-fake-issuer-oauth
-                      key: client_secret
+                extraProfiles:
                   - name: local-keycloak
                     tokenEndpoint: http://keycloak.ext-authz-token-exchange-e2e.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
                     bearerRealm: token-exchange-e2e
@@ -142,13 +169,9 @@ profiles:
             chart:
               name: ./charts/ext-authz-token-exchange-e2e
             values:
-              host: httpbin.int.kube
-              namespacePrefix: service
-              systemNamespace: ext-authz-token-exchange-e2e
               fakeTokenEndpoint:
-                image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint
-              teams:
-                - color: blue
+                image: ${runtime.images.fake-token-endpoint.image}:${runtime.images.fake-token-endpoint.tag}
+              additionalScenarios:
                 - color: yellow
                   scenarios:
                     - name: keycloak-audience
@@ -163,7 +186,7 @@ profiles:
                       pathPrefix: /anything/keycloak-resource
                       issuerRef: local-keycloak
                       resources:
-                        - https://httpbin.int.kube/anything/keycloak-resource
+                        - https://httpbin.${DEPLOYMENT_DOMAIN}/anything/keycloak-resource
                       audiences:
                         - tx-audience-client
                     - name: keycloak-expired-subject-token
@@ -208,30 +231,6 @@ profiles:
                       resources: []
                       audiences:
                         - tx-audience-client
-                - color: red
-                  scenarios:
-                    - name: error-invalid-target
-                      scope: errors
-                      pathPrefix: /anything/error-invalid-target
-                    - name: error-invalid-grant
-                      scope: invalid-grant
-                      pathPrefix: /anything/error-invalid-grant
-                    - name: error-expired-subject-token
-                      scope: expired-subject-token
-                      pathPrefix: /anything/error-expired-subject-token
-                    - name: error-unauthorized
-                      scope: unauthorized
-                      pathPrefix: /anything/error-unauthorized
-                    - name: error-forbidden
-                      scope: forbidden
-                      pathPrefix: /anything/error-forbidden
-                    - name: error-malformed
-                      scope: malformed
-                      pathPrefix: /anything/error-malformed
-                    - name: denied
-                      action: deny
-                      pathPrefix: /anything/denied
-                      methods: ["*"]
         keycloak:
           namespace: ext-authz-token-exchange-e2e
           helm:
@@ -239,11 +238,56 @@ profiles:
             chart:
               name: ./charts/keycloak
             values:
+              gatewayProvider: ${GATEWAY_PROVIDER}
+              gkeGatewayNamespace: ${GATEWAY_NAMESPACE}
               namespace: ext-authz-token-exchange-e2e
               pluginNamespace: ext-authz-token-exchange
               keycloak:
-                externalHost: keycloak.int.kube
-                externalURL: https://keycloak.int.kube
+                externalHost: keycloak.${DEPLOYMENT_DOMAIN}
+                externalURL: https://keycloak.${DEPLOYMENT_DOMAIN}
+  - name: ext-proc
+    merge:
+      deployments:
+        ext-authz-token-exchange:
+          helm:
+            values:
+              extensionMode: ext_proc
+              envoyFilter:
+                enabled: true
+              authorizationPolicy:
+                enabled: false
+              gatewayExtAuthzService:
+                enabled: false
+  - name: gke
+    activation:
+      - vars:
+          DEVSPACE_CONTEXT: gke_.*
+    merge:
+      deployments:
+        ext-authz-token-exchange:
+          namespace: ${GATEWAY_NAMESPACE}
+    patches:
+      - op: add
+        path: localRegistry
+        value:
+          enabled: false
+      - op: replace
+        path: deployments.ext-authz-token-exchange.namespace
+        value: ${GATEWAY_NAMESPACE}
+      - op: add
+        path: images.prod.buildKit.args
+        value:
+          - --platform=linux/amd64
+      - op: add
+        path: images.fake-token-endpoint.buildKit.args
+        value:
+          - --platform=linux/amd64
+      - op: replace
+        path: images.prod.image
+        value: ${REGISTRY}/${IMAGE_NAME}
+      - op: replace
+        path: images.fake-token-endpoint.image
+        value: ${REGISTRY}/${FAKE_TOKEN_ENDPOINT_IMAGE_NAME}
 # Images to build and push
 images:
   # Development image - not pushed to production registry
@@ -297,7 +341,6 @@ deployments:
           OTEL_METRICS_EXPORTER: otlp
           OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
           OTEL_SERVICE_NAME: ext-authz-token-exchange
-          OTEL_RESOURCE_ATTRIBUTES: deployment.environment=local
         resources:
           requests:
             cpu: 50m
@@ -509,28 +552,77 @@ commands:
         > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
 
   smoke:
-    description: "Deploy local-test and run Kubernetes e2e smoke tests"
+    description: "Deploy the selected provider test stack and run Kubernetes e2e smoke tests"
     section: build
     command: |
       echo "I: target=smoke"
-      devspace deploy -p local-test
-      devspace run test-e2e $@
+      devspace deploy
+      E2E_BASE_URL="https://httpbin.$DEPLOYMENT_DOMAIN" devspace run test-e2e $@
 
   test-e2e:
-    description: "Run Kubernetes e2e tests against the local-test stack"
+    description: "Run Kubernetes e2e tests against the selected test stack"
     section: build
     command: |
       echo "I: target=test-e2e"
-      E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.int.kube}" \
+      LABEL_FILTER_ARGS=""
+      case " $* " in
+        *"--label-filter"*) ;;
+        *) LABEL_FILTER_ARGS="--label-filter=!stress" ;;
+      esac
+      if [ "${DEVSPACE_CONTEXT#gke_}" != "$DEVSPACE_CONTEXT" ] && [ -z "${E2E_NAMESPACE:-}" ]; then
+        E2E_NAMESPACE="${GATEWAY_NAMESPACE}"
+        export E2E_NAMESPACE
+      fi
+      KEYCLOAK_PORT_FORWARD_PID=""
+      if [ -z "${E2E_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" != "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
+        for port in 18080 18081 18082 18083 18084 18085 18086 18087 18088 18089; do
+          if ! nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
+            KEYCLOAK_PORT="$port"
+            break
+          fi
+        done
+        if [ -z "${KEYCLOAK_PORT:-}" ]; then
+          echo "E: no free local Keycloak port found in 18080-18089" >&2
+          exit 1
+        fi
+        KEYCLOAK_PORT_FORWARD_LOG="/tmp/ext-authz-token-exchange-keycloak-port-forward.log"
+        kubectl -n ext-authz-token-exchange-e2e port-forward --address 127.0.0.1 svc/keycloak "${KEYCLOAK_PORT}:8080" >"$KEYCLOAK_PORT_FORWARD_LOG" 2>&1 &
+        KEYCLOAK_PORT_FORWARD_PID="$!"
+        trap 'if [ -n "${KEYCLOAK_PORT_FORWARD_PID:-}" ]; then kill "$KEYCLOAK_PORT_FORWARD_PID" >/dev/null 2>&1 || true; fi' EXIT
+        KEYCLOAK_READY=false
+        for _ in $(seq 1 60); do
+          if curl -fsS "http://127.0.0.1:${KEYCLOAK_PORT}/realms/token-exchange-e2e" >/dev/null 2>&1; then
+            KEYCLOAK_READY=true
+            break
+          fi
+          sleep 1
+        done
+        if [ "$KEYCLOAK_READY" != "true" ]; then
+          echo "E: Keycloak port-forward did not become ready; log follows:" >&2
+          cat "$KEYCLOAK_PORT_FORWARD_LOG" >&2
+          exit 1
+        fi
+        E2E_KEYCLOAK_BASE_URL="http://127.0.0.1:${KEYCLOAK_PORT}"
+        E2E_KEYCLOAK_ISSUER="${E2E_KEYCLOAK_ISSUER:-https://keycloak.$DEPLOYMENT_DOMAIN/realms/token-exchange-e2e}"
+        export E2E_KEYCLOAK_BASE_URL E2E_KEYCLOAK_ISSUER
+      fi
+      E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.$DEPLOYMENT_DOMAIN}" \
       E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
-      go run github.com/onsi/ginkgo/v2/ginkgo -r "$@" ./test/e2e
+      go run github.com/onsi/ginkgo/v2/ginkgo -r $LABEL_FILTER_ARGS "$@" ./test/e2e
+
+  gke-smoke:
+    description: "Deploy the GKE test stack and run Kubernetes e2e smoke tests"
+    section: build
+    command: |
+      echo "I: target=gke-smoke"
+      devspace run smoke $@
 
   stress-e2e:
-    description: "Deploy local-test and run the small opt-in Kubernetes e2e stress test"
+    description: "Deploy the selected provider test stack and run the small opt-in Kubernetes e2e stress test"
     section: build
     command: |
       echo "I: target=stress-e2e"
-      devspace deploy -p local-test
+      devspace deploy
       devspace run test-e2e --label-filter=stress "$@"
 
   demo-dashboard:
@@ -538,7 +630,14 @@ commands:
     section: build
     command: |
       echo "I: target=demo-dashboard"
-      go run ./cmd/demo-dashboard $@
+      DEMO_PLUGIN_NAMESPACE="ext-authz-token-exchange"
+      if [ "$GATEWAY_PROVIDER" = "gke-gateway" ]; then
+        DEMO_PLUGIN_NAMESPACE="$GATEWAY_NAMESPACE"
+      fi
+      DEMO_BASE_URL="${DEMO_BASE_URL:-https://httpbin.$DEPLOYMENT_DOMAIN}" \
+      DEMO_KEYCLOAK_BASE_URL="${DEMO_KEYCLOAK_BASE_URL:-https://keycloak.$DEPLOYMENT_DOMAIN}" \
+      DEMO_PLUGIN_NAMESPACE="${DEMO_PLUGIN_NAMESPACE}" \
+        go run ./cmd/demo-dashboard $@
 
   start:
     description: "Start the application"

@@ -1,9 +1,24 @@
 {{- $values := deepCopy .Values }}
 {{- $_ := set $values "env" (include "ext-authz-token-exchange.env" . | fromYaml) }}
+{{- $_ := set $values "extensionMode" (include "ext-authz-token-exchange.extensionMode" .) }}
+{{- if eq (include "ext-authz-token-exchange.isGKEGateway" .) "true" }}
+{{- $image := deepCopy (.Values.image | default dict) }}
+{{- $_ := set $image "pullPolicy" "Always" }}
+{{- $_ := set $values "image" $image }}
+{{- $deployments := deepCopy (.Values.deployments | default dict) }}
+{{- $defaultDeployment := deepCopy (get $deployments "default" | default dict) }}
+{{- $_ := set $defaultDeployment "replicaCount" 2 }}
+{{- $_ := set $defaultDeployment "minReadySeconds" 10 }}
+{{- $_ := set $defaultDeployment "terminationGracePeriodSeconds" 45 }}
+{{- $_ := set $defaultDeployment "strategy" (dict "type" "RollingUpdate" "rollingUpdate" (dict "maxUnavailable" 0 "maxSurge" 1)) }}
+{{- $_ := set $defaultDeployment "lifecycle" (dict "preStop" (dict "exec" (dict "command" (list "/app/ext-authz-token-exchange-service" "pre-stop-sleep" "30s")))) }}
+{{- $_ := set $deployments "default" $defaultDeployment }}
+{{- $_ := set $values "deployments" $deployments }}
+{{- end }}
 {{- $deploymentAnnotations := deepCopy (.Values.deploymentAnnotations | default dict) }}
 {{- $_ := set $deploymentAnnotations "configmap.reloader.stakater.com/reload" (include "ext-authz-token-exchange.issuerProfilesConfigMapName" .) }}
 {{- $secretNames := list }}
-{{- range $profile := .Values.issuerProfiles.profiles }}
+{{- range $profile := concat (.Values.issuerProfiles.profiles | default list) (.Values.issuerProfiles.extraProfiles | default list) }}
 {{- with $profile.clientIDSecretRef }}
 {{- $secretNames = append $secretNames .name }}
 {{- end }}
@@ -11,14 +26,33 @@
 {{- $secretNames = append $secretNames .name }}
 {{- end }}
 {{- end }}
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled }}
+{{- $secretNames = append $secretNames .Values.gkeAuthz.callout.tls.secretName }}
+{{- end }}
 {{- if gt (len $secretNames) 0 }}
 {{- $_ := set $deploymentAnnotations "secret.reloader.stakater.com/reload" (join "," (uniq $secretNames)) }}
 {{- end }}
 {{- $_ := set $values "deploymentAnnotations" $deploymentAnnotations }}
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled }}
+{{- $env := deepCopy ($values.env | default dict) }}
+{{- $_ := set $env "GRPC_TLS_PORT" (toString (.Values.gkeAuthz.callout.tls.port | default 3000)) }}
+{{- $_ := set $env "GRPC_TLS_CERT_FILE" (printf "%s/tls.crt" (.Values.gkeAuthz.callout.tls.mountPath | default "/etc/ext-authz-token-exchange/tls")) }}
+{{- $_ := set $env "GRPC_TLS_KEY_FILE" (printf "%s/tls.key" (.Values.gkeAuthz.callout.tls.mountPath | default "/etc/ext-authz-token-exchange/tls")) }}
+{{- $_ := set $values "env" $env }}
+{{- $ports := deepCopy (.Values.ports | default dict) }}
+{{- $_ := set $ports "grpc-authz-tls" (dict "containerPort" (.Values.gkeAuthz.callout.tls.port | default 3000)) }}
+{{- $_ := set $values "ports" $ports }}
+{{- end }}
 {{- $volumeMounts := deepCopy (.Values.volumeMounts | default dict) }}
 {{- $_ := set $volumeMounts "issuer-profiles" (dict "name" "issuer-profiles" "mountPath" (.Values.issuerProfiles.mountPath | default "/etc/ext-authz-token-exchange") "readOnly" true) }}
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled }}
+{{- $_ := set $volumeMounts "gke-authz-tls" (dict "name" "gke-authz-tls" "mountPath" (.Values.gkeAuthz.callout.tls.mountPath | default "/etc/ext-authz-token-exchange/tls") "readOnly" true) }}
+{{- end }}
 {{- $_ := set $values "volumeMounts" $volumeMounts }}
 {{- $volumes := deepCopy (.Values.volumes | default dict) }}
 {{- $_ := set $volumes "issuer-profiles" (dict "configMap" (dict "name" (include "ext-authz-token-exchange.issuerProfilesConfigMapName" .))) }}
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled }}
+{{- $_ := set $volumes "gke-authz-tls" (dict "secret" (dict "secretName" .Values.gkeAuthz.callout.tls.secretName)) }}
+{{- end }}
 {{- $_ := set $values "volumes" $volumes }}
 {{- include "common.itsumi.deployments.tpl" (merge (dict "Values" $values) (omit . "Values")) }}

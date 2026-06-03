@@ -1,0 +1,27 @@
+{{- if eq (include "keycloak.gkeHealthCheckEnabled" .) "true" }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ .Values.gkeHealthCheck.name | quote }}
+  namespace: {{ .Values.namespace | quote }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ .Values.keycloak.name | quote }}
+  default:
+    checkIntervalSec: {{ .Values.gkeHealthCheck.checkIntervalSec }}
+    timeoutSec: {{ .Values.gkeHealthCheck.timeoutSec }}
+    healthyThreshold: {{ .Values.gkeHealthCheck.healthyThreshold }}
+    unhealthyThreshold: {{ .Values.gkeHealthCheck.unhealthyThreshold }}
+    logConfig:
+      enabled: {{ .Values.gkeHealthCheck.logConfig.enabled }}
+    config:
+      type: HTTP
+      httpHealthCheck:
+        portSpecification: USE_FIXED_PORT
+        port: {{ .Values.keycloak.port }}
+        requestPath: {{ .Values.gkeHealthCheck.requestPath | quote }}
+{{- end }}

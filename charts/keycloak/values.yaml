@@ -1,5 +1,7 @@
 namespace: ext-authz-token-exchange-e2e
 pluginNamespace: ext-authz-token-exchange
+gatewayProvider: local-istio
+gkeGatewayNamespace: gke-gateway
 
 labels:
   partOfKey: app.kubernetes.io/part-of
@@ -16,6 +18,8 @@ keycloak:
   adminUsername: admin
   adminPassword: admin
   realm: token-exchange-e2e
+  strategy:
+    type: Recreate
   resources:
     requests:
       cpu: 250m
@@ -47,6 +51,29 @@ gateway:
   enabled: true
   name: gateway
   namespace: istio-ingress
+  sectionName: ""
+  httpRedirect:
+    enabled: false
+    sectionName: http
+
+gkeIap:
+  enabled: false
+  protection: iap
+  policyName: keycloak-iap
+  oauthClientID: ""
+  oauthClientSecret: ""
+  secretName: iap-oauth-client
+
+gkeHealthCheck:
+  enabled: false
+  name: keycloak
+  requestPath: /realms/token-exchange-e2e
+  checkIntervalSec: 5
+  timeoutSec: 3
+  healthyThreshold: 1
+  unhealthyThreshold: 2
+  logConfig:
+    enabled: true
 
 testUser:
   username: token-user

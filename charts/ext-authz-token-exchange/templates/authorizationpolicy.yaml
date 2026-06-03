@@ -1,4 +1,4 @@
-{{- if .Values.authorizationPolicy.enabled }}
+{{- if eq (include "ext-authz-token-exchange.authorizationPolicyEnabled" .) "true" }}
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:

@@ -1,4 +1,4 @@
-{{- if and .Values.gatewayExtAuthzService.enabled (not .Values.gatewayExtAuthzService.serviceEntry.enabled) }}
+{{- if and (eq (include "ext-authz-token-exchange.gatewayExtAuthzServiceEnabled" .) "true") (not .Values.gatewayExtAuthzService.serviceEntry.enabled) }}
 {{- $externalName := .Values.gatewayExtAuthzService.externalName | default (printf "%s.%s.svc.cluster.local" (include "ext-authz-token-exchange.serviceName" .) .Release.Namespace) }}
 apiVersion: v1
 kind: Service

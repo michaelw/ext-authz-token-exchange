@@ -11,6 +11,7 @@
   "KC_HEALTH_ENABLED" "true"
 ) }}
 {{- $_ := set $values "ports" (dict "http" (dict "containerPort" .Values.keycloak.port)) }}
+{{- $_ := set $values "strategy" .Values.keycloak.strategy }}
 {{- $_ := set $values "readinessProbe" (dict
   "httpGet" (dict "path" (printf "/realms/%s" .Values.keycloak.realm) "port" "http")
   "initialDelaySeconds" 15

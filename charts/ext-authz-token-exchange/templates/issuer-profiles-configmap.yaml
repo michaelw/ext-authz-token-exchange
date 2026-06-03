@@ -8,7 +8,7 @@ metadata:
 data:
   {{ .Values.issuerProfiles.fileName | default "issuers.yaml" }}: |
     issuers:
-{{- range $profile := .Values.issuerProfiles.profiles }}
+{{- range $profile := concat (.Values.issuerProfiles.profiles | default list) (.Values.issuerProfiles.extraProfiles | default list) }}
       - name: {{ $profile.name | quote }}
         tokenEndpoint: {{ $profile.tokenEndpoint | quote }}
 {{- with $profile.bearerRealm }}

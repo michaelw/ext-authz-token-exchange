@@ -24,6 +24,14 @@
         }
       }
     },
+    "gatewayProvider": {
+      "type": "string",
+      "enum": ["local-istio", "gke-gateway"]
+    },
+    "extensionMode": {
+      "type": "string",
+      "enum": ["ext_authz", "ext_proc"]
+    },
     "deployments": {
       "type": "object",
       "additionalProperties": true
@@ -168,6 +176,14 @@
               }
             }
           }
+        },
+        "extraProfiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["name", "tokenEndpoint"]
+          }
         }
       }
     },
@@ -181,6 +197,12 @@
         "serviceAccountName": {
           "type": "string",
           "minLength": 1
+        },
+        "clusterRoleName": {
+          "type": "string"
+        },
+        "clusterRoleBindingName": {
+          "type": "string"
         }
       }
     },
