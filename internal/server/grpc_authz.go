@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,6 +77,23 @@ type tokenExchanger interface {
 	Exchange(ctx context.Context, entry policy.Entry, subjectToken string) (exchange.Result, *exchange.OAuthError)
 }
 
+type httpEvaluationRequest struct {
+	Method  string
+	Scheme  string
+	Host    string
+	Path    string
+	Headers map[string]string
+}
+
+type httpEvaluation struct {
+	Allowed        bool
+	Status         int
+	Body           string
+	Headers        []headerPair
+	MetricDecision string
+	MetricResult   string
+}
+
 // NewAuthzGRPCServer creates a gRPC authorization server.
 func NewAuthzGRPCServer(cfg config.RuntimeConfig, store policy.Store, exchanger tokenExchanger) *AuthzGRPCServer {
 	return &AuthzGRPCServer{cfg: cfg, store: store, exchanger: exchanger}
@@ -124,19 +142,25 @@ func summarizeAuthzResponse(resp any) string {
 
 // Check implements the Envoy external authorization check.
 func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.CheckRequest) (*envoy_service_auth_v3.CheckResponse, error) {
-	started := time.Now()
-	metricDecision := checkDecisionMissingAttributes
-	metricResult := checkResultSystemError
-	otelAuthzCheckInFlight.Add(ctx, 1)
-	defer otelAuthzCheckInFlight.Add(ctx, -1)
-	authzCheckInFlight.Inc()
-	defer func() {
-		authzCheckInFlight.Dec()
-		recordAuthzCheckMetrics(started, metricDecision, metricResult)
-	}()
-
-	httpReq := req.GetAttributes().GetRequest().GetHttp()
+	attributes := req.GetAttributes()
+	if attributes == nil {
+		customLogger.Printf("ERROR: structural attributes block is nil")
+		return s.denyJSON(http.StatusInternalServerError, map[string]string{
+			"error":   "server_error",
+			"message": "missing request attributes",
+		}, nil), nil
+	}
+	requestAttributes := attributes.GetRequest()
+	if requestAttributes == nil {
+		customLogger.Printf("ERROR: structural request attributes block is nil")
+		return s.denyJSON(http.StatusInternalServerError, map[string]string{
+			"error":   "server_error",
+			"message": "missing request attributes",
+		}, nil), nil
+	}
+	httpReq := requestAttributes.GetHttp()
 	if httpReq == nil {
+		customLogger.Printf("ERROR: structural HTTP request attributes block is nil")
 		return s.denyJSON(http.StatusInternalServerError, map[string]string{
 			"error":   "server_error",
 			"message": "missing HTTP request attributes",
@@ -144,8 +168,7 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 	}
 
 	method := strings.ToUpper(httpReq.GetMethod())
-	headers := httpReq.GetHeaders()
-	subjectToken, hasBearerToken := bearerToken(header(headers, "authorization"))
+	headers := httpRequestHeaders(httpReq)
 
 	host := header(headers, ":authority")
 	if host == "" {
@@ -155,50 +178,77 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 		host = httpReq.GetHost()
 	}
 
-	decision := s.store.Index().Match(host, httpReq.GetPath(), method)
+	evaluation := s.evaluateHTTPWithMetrics(ctx, httpEvaluationRequest{
+		Method:  method,
+		Scheme:  httpReq.GetScheme(),
+		Host:    host,
+		Path:    httpReq.GetPath(),
+		Headers: headers,
+	})
+	return extAuthzResponse(evaluation), nil
+}
+
+func (s *AuthzGRPCServer) evaluateHTTPWithMetrics(ctx context.Context, req httpEvaluationRequest) httpEvaluation {
+	started := time.Now()
+	otelAuthzCheckInFlight.Add(ctx, 1)
+	defer otelAuthzCheckInFlight.Add(ctx, -1)
+	authzCheckInFlight.Inc()
+	defer authzCheckInFlight.Dec()
+
+	evaluation := s.evaluateHTTP(ctx, req)
+	recordAuthzCheckMetrics(started, evaluation.MetricDecision, evaluation.MetricResult)
+	return evaluation
+}
+
+func (s *AuthzGRPCServer) evaluateHTTP(ctx context.Context, req httpEvaluationRequest) httpEvaluation {
+	method := strings.ToUpper(req.Method)
+	headers := req.Headers
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	s.logHeaderKeysIfInsecureEnabled(headers)
+	subjectToken, hasBearerToken := bearerToken(header(headers, "authorization"))
+
+	host := req.Host
+	if host == "" {
+		host = header(headers, ":authority")
+	}
+	if host == "" {
+		host = header(headers, "host")
+	}
+
+	decision := s.store.Index().Match(host, req.Path, method)
 	if !decision.Matched {
 		if s.cfg.DefaultDenyUnmatched {
-			s.logDeny("unmatched_default_deny", method, host, httpReq.GetPath(), policy.Entry{})
-			metricDecision = checkDecisionDenyUnmatchedDefault
-			metricResult = checkResultAuthDenied
-			return s.denyJSON(http.StatusForbidden, map[string]string{
+			s.logDeny("unmatched_default_deny", method, host, req.Path, policy.Entry{})
+			return s.denyJSONEvaluation(http.StatusForbidden, map[string]string{
 				"error": "policy_denied",
-			}, nil), nil
+			}, nil, checkDecisionDenyUnmatchedDefault, checkResultAuthDenied)
 		}
-		metricDecision = checkDecisionAllowUnmatched
-		metricResult = checkResultAllowed
-		return allowResponse(nil), nil
+		return allowEvaluation(nil, checkDecisionAllowUnmatched, checkResultAllowed)
 	}
 	if decision.Unhealthy {
-		metricDecision = checkDecisionDenyPolicyUnhealthy
-		metricResult = checkResultSystemError
-		return s.denyJSON(http.StatusInternalServerError, map[string]string{
+		return s.denyJSONEvaluation(http.StatusInternalServerError, map[string]string{
 			"error":             "server_error",
 			"error_description": "internal server error",
-		}, nil), nil
+		}, nil, checkDecisionDenyPolicyUnhealthy, checkResultSystemError)
 	}
 	if decision.Entry.Action == policy.ActionDeny {
-		s.logDeny("explicit_policy", method, host, httpReq.GetPath(), decision.Entry)
-		metricDecision = checkDecisionDenyExplicitPolicy
-		metricResult = checkResultAuthDenied
-		return s.denyJSON(http.StatusForbidden, map[string]string{
+		s.logDeny("explicit_policy", method, host, req.Path, decision.Entry)
+		return s.denyJSONEvaluation(http.StatusForbidden, map[string]string{
 			"error": "policy_denied",
-		}, nil), nil
+		}, nil, checkDecisionDenyExplicitPolicy, checkResultAuthDenied)
 	}
 	if shouldBypassOptions(method, headers, s.cfg.AllowUnauthenticatedOptions, hasBearerToken) {
-		metricDecision = checkDecisionAllowOptionsBypass
-		metricResult = checkResultAllowed
-		return allowResponse(nil), nil
+		return allowEvaluation(nil, checkDecisionAllowOptionsBypass, checkResultAllowed)
 	}
 
 	if !hasBearerToken {
 		// RFC6750 Section 3 defines Bearer challenges for protected resources.
 		// https://www.rfc-editor.org/rfc/rfc6750#section-3
-		metricDecision = checkDecisionDenyMissingBearer
-		metricResult = checkResultAuthDenied
-		return s.denyJSON(http.StatusUnauthorized, map[string]string{
+		return s.denyJSONEvaluation(http.StatusUnauthorized, map[string]string{
 			"error": "bearer_token_required",
-		}, []headerPair{{Name: "WWW-Authenticate", Value: bearerChallenge(s.bearerRealm(decision.Entry), decision.Entry.Scope)}}), nil
+		}, []headerPair{{Name: "WWW-Authenticate", Value: bearerChallenge(s.bearerRealm(decision.Entry), decision.Entry.Scope)}}, checkDecisionDenyMissingBearer, checkResultAuthDenied)
 	}
 
 	ctx = telemetry.ExtractHTTPHeaders(ctx, headers)
@@ -211,14 +261,10 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 
 	result, oauthErr := s.exchanger.Exchange(ctx, decision.Entry, subjectToken)
 	if oauthErr != nil {
-		metricDecision = checkDecisionDenyExchangeError
-		metricResult = checkResultForOAuthError(oauthErr)
-		return s.oauthDeny(oauthErr), nil
+		return s.oauthDenyEvaluation(oauthErr)
 	}
-	s.logTokensIfInsecureEnabled(method, host, httpReq.GetPath(), decision.Entry, subjectToken, result.AccessToken)
-	metricDecision = checkDecisionAllowExchange
-	metricResult = checkResultAllowed
-	return allowResponse([]headerPair{{Name: "authorization", Value: "Bearer " + result.AccessToken}}), nil
+	s.logTokensIfInsecureEnabled(method, host, req.Path, decision.Entry, subjectToken, result.AccessToken)
+	return allowEvaluation([]headerPair{{Name: "authorization", Value: "Bearer " + result.AccessToken}}, checkDecisionAllowExchange, checkResultAllowed)
 }
 
 func (s *AuthzGRPCServer) bearerRealm(entry policy.Entry) string {
@@ -226,6 +272,72 @@ func (s *AuthzGRPCServer) bearerRealm(entry policy.Entry) string {
 		return profile.BearerRealm
 	}
 	return s.cfg.BearerRealm
+}
+
+func allowEvaluation(headers []headerPair, decision, result string) httpEvaluation {
+	return httpEvaluation{
+		Allowed:        true,
+		Headers:        headers,
+		MetricDecision: decision,
+		MetricResult:   result,
+	}
+}
+
+func (s *AuthzGRPCServer) denyJSONEvaluation(status int, body map[string]string, headers []headerPair, decision, result string) httpEvaluation {
+	data, err := json.Marshal(body)
+	if err != nil {
+		data = []byte(`{"error":"server_error"}`)
+	}
+	headers = append([]headerPair{{Name: "Content-Type", Value: "application/json"}}, headers...)
+	return httpEvaluation{
+		Status:         status,
+		Body:           string(data),
+		Headers:        headers,
+		MetricDecision: decision,
+		MetricResult:   result,
+	}
+}
+
+func (s *AuthzGRPCServer) oauthDenyEvaluation(oauthErr *exchange.OAuthError) httpEvaluation {
+	headers := []headerPair{{Name: "Content-Type", Value: "application/json"}}
+	for _, value := range oauthErr.WWWAuthenticate {
+		headers = append(headers, headerPair{Name: "WWW-Authenticate", Value: value})
+	}
+	body := oauthErr.Body
+	if body == "" {
+		fields := map[string]string{}
+		if oauthErr.Error != "" {
+			fields["error"] = oauthErr.Error
+		}
+		if oauthErr.ErrorDescription != "" {
+			fields["error_description"] = oauthErr.ErrorDescription
+		}
+		if oauthErr.Message != "" {
+			fields["message"] = oauthErr.Message
+		}
+		if len(fields) == 0 {
+			fields["error"] = "server_error"
+		}
+		data, err := json.Marshal(fields)
+		if err != nil {
+			data = []byte(`{"error":"server_error"}`)
+		}
+		body = string(data)
+	}
+	return httpEvaluation{
+		Status:         oauthErr.StatusCode,
+		Body:           body,
+		Headers:        headers,
+		MetricDecision: checkDecisionDenyExchangeError,
+		MetricResult:   checkResultForOAuthError(oauthErr),
+	}
+}
+
+func extAuthzResponse(evaluation httpEvaluation) *envoy_service_auth_v3.CheckResponse {
+	if evaluation.Allowed {
+		return allowResponse(evaluation.Headers)
+	}
+	return denyResponse(evaluation.Status, evaluation.Body, evaluation.Headers)
 }
 
 func (s *AuthzGRPCServer) logDeny(reason, method, host, path string, entry policy.Entry) {
@@ -253,6 +365,23 @@ func (s *AuthzGRPCServer) logTokensIfInsecureEnabled(method, host, path string, 
 		logField(entry.Source.Name),
 		logField(subjectToken),
 		logField(exchangedToken))
+}
+
+func (s *AuthzGRPCServer) logHeaderKeysIfInsecureEnabled(requestHeaders map[string]string) {
+	if !s.cfg.InsecureLogTokens {
+		return
+	}
+	customLogger.Printf("INSECURE_LOG_HEADER_KEYS request_headers=%s",
+		strings.Join(sortedMapKeys(requestHeaders), ","))
+}
+
+func sortedMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (s *AuthzGRPCServer) oauthDeny(oauthErr *exchange.OAuthError) *envoy_service_auth_v3.CheckResponse {
@@ -324,7 +453,7 @@ func headerOptions(headers []headerPair) []*envoy_config_core_v3.HeaderValueOpti
 			continue
 		}
 		options = append(options, &envoy_config_core_v3.HeaderValueOption{
-			Header: &envoy_config_core_v3.HeaderValue{Key: h.Name, Value: h.Value},
+			Header: &envoy_config_core_v3.HeaderValue{Key: h.Name, RawValue: []byte(h.Value)},
 			Append: wrapperspb.Bool(false),
 		})
 	}
@@ -344,6 +473,32 @@ func envoyStatus(status int) envoy_type_v3.StatusCode {
 	default:
 		return envoy_type_v3.StatusCode_InternalServerError
 	}
+}
+
+func httpRequestHeaders(httpReq *envoy_service_auth_v3.AttributeContext_HttpRequest) map[string]string {
+	if httpReq == nil {
+		return map[string]string{}
+	}
+	headers := make(map[string]string, len(httpReq.GetHeaders())+len(httpReq.GetHeaderMap().GetHeaders()))
+	for key, value := range httpReq.GetHeaders() {
+		headers[key] = value
+	}
+	for _, headerValue := range httpReq.GetHeaderMap().GetHeaders() {
+		key := headerValue.GetKey()
+		if key == "" {
+			continue
+		}
+		value := headerValue.GetValue()
+		if rawValue := headerValue.GetRawValue(); len(rawValue) > 0 {
+			value = string(rawValue)
+		}
+		if existing, ok := headers[key]; ok && existing != "" && value != "" {
+			headers[key] = existing + "," + value
+			continue
+		}
+		headers[key] = value
+	}
+	return headers
 }
 
 func header(headers map[string]string, name string) string {

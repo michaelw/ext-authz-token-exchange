@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -12,12 +13,14 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/stats"
 
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	envoy_service_ext_proc_v3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
@@ -33,6 +36,15 @@ import (
 const healthCheckMethod = "/grpc.health.v1.Health/Check"
 
 func main() {
+	if duration, ok, err := preStopSleepDuration(os.Args); ok {
+		if err != nil {
+			log.Fatalf("invalid pre-stop sleep configuration: %v", err)
+		}
+		log.Printf("Sleeping %s for Kubernetes preStop drain", duration)
+		time.Sleep(duration)
+		return
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -65,27 +77,56 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create ConfigMap policy store: %v", err)
 	}
-	go func() {
-		if err := policyStore.Run(ctx); err != nil {
-			log.Printf("ConfigMap policy store stopped: %v", err)
-		}
-	}()
+	if err := policyStore.Start(ctx); err != nil {
+		log.Fatalf("failed to start ConfigMap policy store: %v", err)
+	}
 	if cfg.MetricsEnabled {
 		go serveMetrics(ctx, cfg)
 	}
 
-	grpcPort := grpcPortFromEnv()
-
-	lis, err := net.Listen("tcp", ":"+grpcPort)
-	if err != nil {
-		log.Fatalf("failed to listen on gRPC port %s: %v", grpcPort, err)
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- serveGRPC(ctx, grpcPortFromEnv(), nil, cfg, policyStore)
+	}()
+	if tlsCfg, ok, err := grpcTLSConfigFromEnv(); err != nil {
+		log.Fatalf("invalid TLS gRPC configuration: %v", err)
+	} else if ok {
+		go func() {
+			errCh <- serveGRPC(ctx, grpcTLSPortFromEnv(), tlsCfg, cfg, policyStore)
+		}()
 	}
 
-	grpcServer := grpc.NewServer(
+	if err := <-errCh; err != nil {
+		log.Fatalf("gRPC server failed: %v", err)
+	}
+}
+
+type grpcTLSConfig struct {
+	certFile string
+	keyFile  string
+}
+
+func serveGRPC(ctx context.Context, port string, tlsCfg *grpcTLSConfig, cfg config.RuntimeConfig, policyStore policy.Store) error {
+	lis, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		return fmt.Errorf("listen on gRPC port %s: %w", port, err)
+	}
+
+	opts := []grpc.ServerOption{
 		grpc.StatsHandler(grpcStatsHandler()),
 		grpc.UnaryInterceptor(server.LoggingInterceptorWithOptions(loggingOptions(cfg))),
-	)
-	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchange.NewClient(cfg, nil)))
+	}
+	if tlsCfg != nil {
+		creds, err := credentials.NewServerTLSFromFile(tlsCfg.certFile, tlsCfg.keyFile)
+		if err != nil {
+			return fmt.Errorf("load gRPC TLS credentials: %w", err)
+		}
+		opts = append(opts, grpc.Creds(creds))
+	}
+	grpcServer := grpc.NewServer(opts...)
+	exchanger := exchange.NewClient(cfg, nil)
+	envoy_service_auth_v3.RegisterAuthorizationServer(grpcServer, server.NewAuthzGRPCServer(cfg, policyStore, exchanger))
+	envoy_service_ext_proc_v3.RegisterExternalProcessorServer(grpcServer, server.NewExtProcGRPCServer(cfg, policyStore, exchanger))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	healthpb.RegisterHealthServer(grpcServer, healthServer)
@@ -97,10 +138,15 @@ func main() {
 		grpcServer.GracefulStop()
 	}()
 
-	log.Printf("Starting gRPC ext_authz server on :%s", grpcPort)
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("gRPC server failed: %v", err)
+	if tlsCfg != nil {
+		log.Printf("Starting TLS gRPC ext_authz server on :%s", port)
+	} else {
+		log.Printf("Starting gRPC ext_authz server on :%s", port)
 	}
+	if err := grpcServer.Serve(lis); err != nil {
+		return err
+	}
+	return nil
 }
 
 func inClusterKubernetesClient() (kubernetes.Interface, error) {
@@ -149,6 +195,43 @@ func grpcPortFromEnv() string {
 		return "3001"
 	}
 	return grpcPort
+}
+
+func grpcTLSPortFromEnv() string {
+	grpcTLSPort := os.Getenv("GRPC_TLS_PORT")
+	if grpcTLSPort == "" {
+		return "3000"
+	}
+	return grpcTLSPort
+}
+
+func grpcTLSConfigFromEnv() (*grpcTLSConfig, bool, error) {
+	certFile := strings.TrimSpace(os.Getenv("GRPC_TLS_CERT_FILE"))
+	keyFile := strings.TrimSpace(os.Getenv("GRPC_TLS_KEY_FILE"))
+	switch {
+	case certFile == "" && keyFile == "":
+		return nil, false, nil
+	case certFile == "":
+		return nil, false, fmt.Errorf("GRPC_TLS_CERT_FILE is required when GRPC_TLS_KEY_FILE is set")
+	case keyFile == "":
+		return nil, false, fmt.Errorf("GRPC_TLS_KEY_FILE is required when GRPC_TLS_CERT_FILE is set")
+	default:
+		return &grpcTLSConfig{certFile: certFile, keyFile: keyFile}, true, nil
+	}
+}
+
+func preStopSleepDuration(args []string) (time.Duration, bool, error) {
+	if len(args) < 2 || args[1] != "pre-stop-sleep" {
+		return 0, false, nil
+	}
+	if len(args) == 2 {
+		return 30 * time.Second, true, nil
+	}
+	duration, err := time.ParseDuration(args[2])
+	if err != nil {
+		return 0, true, err
+	}
+	return duration, true, nil
 }
 
 func serveMetrics(ctx context.Context, cfg config.RuntimeConfig) {

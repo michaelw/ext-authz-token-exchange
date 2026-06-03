@@ -2,11 +2,13 @@ package server_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"testing"
 
 	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_service_auth_v3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	envoy_service_ext_proc_v3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,6 +18,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
@@ -359,6 +363,32 @@ entries:
 		Expect(headerValue(resp.GetOkResponse().GetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
 	})
 
+	It("exchanges bearer tokens from Envoy header map raw values", func() {
+		exchanger := &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}}
+		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: primary
+      resources:
+        - https://orders.example.com/api/
+`)), exchanger)
+
+		resp, err := srv.Check(context.Background(), rawHeaderMapCheckRequest("GET", "orders.example.com", "/api/orders/1", []*envoy_config_core_v3.HeaderValue{
+			{Key: "authorization", RawValue: []byte("Bearer subject")},
+		}))
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.GetOkResponse()).NotTo(BeNil())
+		Expect(headerValue(resp.GetOkResponse().GetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
+		Expect(exchanger.calls).To(Equal(1))
+	})
+
 	It("preserves raw OAuth error bodies and authenticate challenges from token exchange", func() {
 		srv := server.NewAuthzGRPCServer(cfg, policy.NewStaticStore(indexFor(`
 version: v1
@@ -625,6 +655,105 @@ entries:
 			"result":   "system_error",
 		})).To(BeNumerically(">=", 1))
 	})
+
+	It("ext_proc overwrites authorization with the exchanged bearer token", func() {
+		exchanger := &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}}
+		srv := server.NewExtProcGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: primary
+      resources:
+        - https://orders.example.com/api/
+`)), exchanger)
+		stream := newFakeExtProcStream(extProcHeaderRequest(map[string]string{
+			":method":       "GET",
+			":scheme":       "https",
+			":authority":    "orders.example.com",
+			":path":         "/api/orders/1",
+			"authorization": "Bearer subject",
+		}))
+
+		Expect(srv.Process(stream)).To(Succeed())
+
+		Expect(stream.sent).To(HaveLen(1))
+		headers := stream.sent[0].GetRequestHeaders()
+		Expect(headers).NotTo(BeNil())
+		Expect(headerValue(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
+		Expect(headers.GetResponse().GetClearRouteCache()).To(BeTrue())
+		Expect(exchanger.calls).To(Equal(1))
+	})
+
+	It("ext_proc evaluates request attributes when forwarded headers are explicit", func() {
+		exchanger := &fakeExchanger{result: exchange.Result{AccessToken: "exchanged"}}
+		srv := server.NewExtProcGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: primary
+      resources:
+        - https://orders.example.com/api/
+`)), exchanger)
+		req := extProcHeaderRequest(map[string]string{
+			"authorization": "Bearer subject",
+			"cookie":        "session=abc",
+		})
+		req.Attributes = extProcAttributes(map[string]string{
+			"request.method": "GET",
+			"request.scheme": "https",
+			"request.host":   "orders.example.com",
+			"request.path":   "/api/orders/1",
+		})
+		stream := newFakeExtProcStream(req)
+
+		Expect(srv.Process(stream)).To(Succeed())
+
+		Expect(stream.sent).To(HaveLen(1))
+		headers := stream.sent[0].GetRequestHeaders()
+		Expect(headers).NotTo(BeNil())
+		Expect(headerValue(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
+		Expect(exchanger.calls).To(Equal(1))
+	})
+
+	It("ext_proc returns immediate deny responses", func() {
+		srv := server.NewExtProcGRPCServer(cfg, policy.NewStaticStore(indexFor(`
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: primary
+      scope: read:orders
+`)), &fakeExchanger{})
+		stream := newFakeExtProcStream(extProcHeaderRequest(map[string]string{
+			":method":    "GET",
+			":scheme":    "https",
+			":authority": "orders.example.com",
+			":path":      "/api/orders/1",
+		}))
+
+		Expect(srv.Process(stream)).To(Succeed())
+
+		Expect(stream.sent).To(HaveLen(1))
+		immediate := stream.sent[0].GetImmediateResponse()
+		Expect(immediate).NotTo(BeNil())
+		Expect(immediate.GetStatus().GetCode().String()).To(Equal("Unauthorized"))
+		Expect(string(immediate.GetBody())).To(MatchJSON(`{"error":"bearer_token_required"}`))
+		Expect(headerValue(immediate.GetHeaders().GetSetHeaders(), "WWW-Authenticate")).To(Equal(`Bearer realm="example", scope="read:orders"`))
+	})
 })
 
 type fakeExchanger struct {
@@ -682,13 +811,87 @@ func checkRequest(method, host, path string, headers map[string]string) *envoy_s
 	}
 }
 
+func rawHeaderMapCheckRequest(method, host, path string, headers []*envoy_config_core_v3.HeaderValue) *envoy_service_auth_v3.CheckRequest {
+	headers = append(headers, &envoy_config_core_v3.HeaderValue{Key: ":authority", Value: host})
+	return &envoy_service_auth_v3.CheckRequest{
+		Attributes: &envoy_service_auth_v3.AttributeContext{
+			Request: &envoy_service_auth_v3.AttributeContext_Request{
+				Http: &envoy_service_auth_v3.AttributeContext_HttpRequest{
+					Method: method,
+					Host:   host,
+					Path:   path,
+					HeaderMap: &envoy_config_core_v3.HeaderMap{
+						Headers: headers,
+					},
+				},
+			},
+		},
+	}
+}
+
 func headerValue(headers []*envoy_config_core_v3.HeaderValueOption, name string) string {
 	for _, header := range headers {
 		if header.GetHeader().GetKey() == name {
+			if rawValue := header.GetHeader().GetRawValue(); len(rawValue) > 0 {
+				return string(rawValue)
+			}
 			return header.GetHeader().GetValue()
 		}
 	}
 	return ""
+}
+
+type fakeExtProcStream struct {
+	grpc.ServerStream
+	ctx  context.Context
+	recv []*envoy_service_ext_proc_v3.ProcessingRequest
+	sent []*envoy_service_ext_proc_v3.ProcessingResponse
+}
+
+func newFakeExtProcStream(requests ...*envoy_service_ext_proc_v3.ProcessingRequest) *fakeExtProcStream {
+	return &fakeExtProcStream{ctx: context.Background(), recv: requests}
+}
+
+func (s *fakeExtProcStream) Context() context.Context {
+	return s.ctx
+}
+
+func (s *fakeExtProcStream) Send(resp *envoy_service_ext_proc_v3.ProcessingResponse) error {
+	s.sent = append(s.sent, resp)
+	return nil
+}
+
+func (s *fakeExtProcStream) Recv() (*envoy_service_ext_proc_v3.ProcessingRequest, error) {
+	if len(s.recv) == 0 {
+		return nil, io.EOF
+	}
+	req := s.recv[0]
+	s.recv = s.recv[1:]
+	return req, nil
+}
+
+func extProcHeaderRequest(headers map[string]string) *envoy_service_ext_proc_v3.ProcessingRequest {
+	values := make([]*envoy_config_core_v3.HeaderValue, 0, len(headers))
+	for key, value := range headers {
+		values = append(values, &envoy_config_core_v3.HeaderValue{Key: key, RawValue: []byte(value)})
+	}
+	return &envoy_service_ext_proc_v3.ProcessingRequest{
+		Request: &envoy_service_ext_proc_v3.ProcessingRequest_RequestHeaders{
+			RequestHeaders: &envoy_service_ext_proc_v3.HttpHeaders{
+				Headers: &envoy_config_core_v3.HeaderMap{Headers: values},
+			},
+		},
+	}
+}
+
+func extProcAttributes(values map[string]string) map[string]*structpb.Struct {
+	attributes := make(map[string]*structpb.Struct, len(values))
+	for key, value := range values {
+		attributes[key] = &structpb.Struct{Fields: map[string]*structpb.Value{
+			"value": structpb.NewStringValue(value),
+		}}
+	}
+	return attributes
 }
 
 func serverMetricWithLabels(name string, labels map[string]string) float64 {
