@@ -279,7 +279,7 @@ scenarios:
     exchange: Keycloak token exchange endpoint
     behavior:
       summary: Keycloak receives a token exchange request with resource and audience parameters.
-      detail: The plugin policy requests resource=https://httpbin.int.kube/anything/keycloak-resource and audience=tx-audience-client; Keycloak returns a signed access token for the configured audience.
+      detail: The plugin policy requests resource={{ .BaseURL }}/anything/keycloak-resource and audience=tx-audience-client; Keycloak returns a signed access token for the configured audience.
     expect:
       status: 200
 

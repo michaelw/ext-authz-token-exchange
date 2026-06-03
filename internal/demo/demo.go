@@ -20,8 +20,6 @@ import (
 )
 
 const (
-	// DefaultBaseURL is the local-test Gateway API host used by demo tooling.
-	DefaultBaseURL = "https://httpbin.int.kube"
 	// DefaultNamespacePrefix is the namespace prefix used by the e2e Helm chart.
 	DefaultNamespacePrefix = "service"
 	// DefaultSystemNamespace is the namespace used by demo/e2e support resources.
@@ -50,7 +48,7 @@ type Options struct {
 // LoadOptionsFromEnv returns demo options from environment variables.
 func LoadOptionsFromEnv() Options {
 	return Options{
-		BaseURL:          strings.TrimRight(envDefault("DEMO_BASE_URL", DefaultBaseURL), "/"),
+		BaseURL:          strings.TrimRight(envDefault("DEMO_BASE_URL", ""), "/"),
 		ConfigPath:       envDefault("DEMO_SCENARIO_CONFIG", DefaultConfigPath),
 		NamespacePrefix:  envDefault("DEMO_NAMESPACE_PREFIX", DefaultNamespacePrefix),
 		SystemNamespace:  envDefault("DEMO_SYSTEM_NAMESPACE", DefaultSystemNamespace),
@@ -307,7 +305,7 @@ func WithBearer(value string) RequestToken {
 // WithDefaults fills derived defaults for demo options.
 func (opts Options) WithDefaults() Options {
 	if opts.BaseURL == "" {
-		opts.BaseURL = DefaultBaseURL
+		opts.BaseURL = strings.TrimRight(os.Getenv("DEMO_BASE_URL"), "/")
 	}
 	opts.BaseURL = strings.TrimRight(opts.BaseURL, "/")
 	if opts.ConfigPath == "" {

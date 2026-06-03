@@ -33,7 +33,6 @@ import (
 var staticFiles embed.FS
 
 const defaultAddr = "127.0.0.1:8088"
-const defaultKeycloakBaseURL = "https://keycloak.int.kube"
 const defaultKeycloakRealm = "token-exchange-e2e"
 const defaultKeycloakClientID = "tx-exchanger-client"
 const defaultSubjectClientID = "tx-subject-client"
@@ -70,6 +69,9 @@ func main() {
 	opts := demo.LoadOptionsFromEnv()
 	issuer := configuredIssuers()
 	opts = issuer.apply(opts)
+	if opts.WithDefaults().BaseURL == "" {
+		log.Fatal("DEMO_BASE_URL is required; use devspace run demo-dashboard or set it explicitly")
+	}
 	addr := envDefault("DEMO_DASHBOARD_ADDR", defaultAddr)
 
 	s := &server{opts: opts, issuer: issuer}
@@ -199,8 +201,14 @@ func (s *server) scenarios(w http.ResponseWriter, _ *http.Request) {
 		}
 		scenarios = append(scenarios, view)
 	}
+	baseURL := s.opts.WithDefaults().BaseURL
+	baseURLHost := ""
+	if parsed, err := url.Parse(baseURL); err == nil {
+		baseURLHost = parsed.Hostname()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"baseURL":          s.opts.WithDefaults().BaseURL,
+		"baseURL":          baseURL,
+		"baseURLHost":      baseURLHost,
 		"namespacePrefix":  s.opts.WithDefaults().NamespacePrefix,
 		"systemNamespace":  s.opts.WithDefaults().SystemNamespace,
 		"pluginNamespace":  s.opts.WithDefaults().PluginNamespace,
@@ -505,7 +513,10 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
-	baseURL := strings.TrimRight(envDefault("DEMO_KEYCLOAK_BASE_URL", defaultKeycloakBaseURL), "/")
+	baseURL := strings.TrimRight(os.Getenv("DEMO_KEYCLOAK_BASE_URL"), "/")
+	if baseURL == "" {
+		return "", fmt.Errorf("fetch Keycloak demo subject token: DEMO_KEYCLOAK_BASE_URL is required")
+	}
 	realm := envDefault("DEMO_KEYCLOAK_REALM", defaultKeycloakRealm)
 	form := url.Values{}
 	form.Set("grant_type", "password")
@@ -524,7 +535,7 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if opts.WithDefaults().InsecureTLS {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // local demo uses self-signed int.kube certs.
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // demo clusters may use self-signed certificates.
 	}
 	client := &http.Client{Transport: transport}
 	resp, err := client.Do(req)
@@ -561,7 +572,7 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 func unsignedKeycloakSubjectToken() string {
 	header := map[string]any{"alg": "none", "typ": "JWT"}
 	payload := map[string]any{
-		"iss": envDefault("DEMO_KEYCLOAK_BASE_URL", defaultKeycloakBaseURL) + "/realms/" + envDefault("DEMO_KEYCLOAK_REALM", defaultKeycloakRealm),
+		"iss": "https://untrusted.example.test/realms/" + envDefault("DEMO_KEYCLOAK_REALM", defaultKeycloakRealm),
 		"sub": "unsigned-demo-subject",
 		"aud": envDefault("DEMO_KEYCLOAK_CLIENT_ID", defaultKeycloakClientID),
 		"azp": defaultSubjectClientID,

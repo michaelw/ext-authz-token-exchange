@@ -54,6 +54,7 @@ async function load() {
     }
   }
   $("gateway-chip").textContent = `Gateway: ${data.baseURL}`;
+  $("gateway-detail").textContent = data.baseURLHost || data.baseURL || "-";
   $("scenario-config-chip").textContent = `Scenarios: ${state.issuer.name || "unknown"}`;
   $("scenario-config-chip").title = data.issuer?.scenarioConfig || "";
   $("issuer-node-label").textContent = state.issuer.label || "Issuer";
