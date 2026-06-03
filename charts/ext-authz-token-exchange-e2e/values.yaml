@@ -1,4 +1,5 @@
 host: httpbin.int.kube
+gatewayProvider: local-istio
 namespacePrefix: service
 systemNamespace: ext-authz-token-exchange-e2e
 
@@ -23,7 +24,7 @@ fakeTokenEndpoint:
   routes:
     - name: invalid-target
       match:
-        resource: https://httpbin.int.kube/anything/error-invalid-target
+        resourcePath: /anything/error-invalid-target
       response:
         type: oauth_error
         status: 400
@@ -31,7 +32,7 @@ fakeTokenEndpoint:
         errorDescription: resource or audience is invalid
     - name: invalid-grant
       match:
-        resource: https://httpbin.int.kube/anything/error-invalid-grant
+        resourcePath: /anything/error-invalid-grant
       response:
         type: oauth_error
         status: 400
@@ -39,7 +40,7 @@ fakeTokenEndpoint:
         errorDescription: subject token is invalid
     - name: expired-subject-token
       match:
-        resource: https://httpbin.int.kube/anything/error-expired-subject-token
+        resourcePath: /anything/error-expired-subject-token
       response:
         type: oauth_error
         status: 400
@@ -47,7 +48,7 @@ fakeTokenEndpoint:
         errorDescription: subject_token_expired
     - name: unauthorized
       match:
-        resource: https://httpbin.int.kube/anything/error-unauthorized
+        resourcePath: /anything/error-unauthorized
       response:
         type: oauth_error
         status: 401
@@ -56,7 +57,7 @@ fakeTokenEndpoint:
         wwwAuthenticate: Bearer realm="issuer", error="invalid_token"
     - name: forbidden
       match:
-        resource: https://httpbin.int.kube/anything/error-forbidden
+        resourcePath: /anything/error-forbidden
       response:
         type: oauth_error
         status: 403
@@ -64,7 +65,7 @@ fakeTokenEndpoint:
         errorDescription: target rejected
     - name: malformed
       match:
-        resource: https://httpbin.int.kube/anything/error-malformed
+        resourcePath: /anything/error-malformed
       response:
         type: malformed
         scenario: malformed
@@ -123,3 +124,5 @@ teams:
         action: deny
         pathPrefix: /anything/denied
         methods: ["*"]
+
+additionalScenarios: []

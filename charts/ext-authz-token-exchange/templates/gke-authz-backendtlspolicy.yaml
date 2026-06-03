@@ -1,0 +1,21 @@
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+      sectionName: grpc-authz-tls
+  validation:
+    hostname: {{ first .Values.gkeAuthz.callout.tls.certificate.dnsNames | quote }}
+    caCertificateRefs:
+      - group: ""
+        kind: Secret
+        name: {{ .Values.gkeAuthz.callout.tls.secretName | quote }}
+{{- end }}

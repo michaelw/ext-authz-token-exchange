@@ -10,7 +10,7 @@ metadata:
 data:
   config.yaml: |
     routes:
-{{ toYaml .Values.fakeTokenEndpoint.routes | indent 6 }}
+{{ include "ext-authz-token-exchange-e2e.fakeTokenEndpointRoutes" . | indent 6 }}
 {{- with .Values.fakeTokenEndpoint.defaultResponse }}
     defaultResponse:
 {{ toYaml . | indent 6 }}
@@ -41,7 +41,7 @@ spec:
       containers:
         - name: {{ .Values.fakeTokenEndpoint.name | quote }}
           image: {{ .Values.fakeTokenEndpoint.image | quote }}
-          imagePullPolicy: {{ .Values.fakeTokenEndpoint.imagePullPolicy }}
+          imagePullPolicy: {{ include "ext-authz-token-exchange-e2e.fakeTokenEndpointImagePullPolicy" . }}
           ports:
             - name: http
               containerPort: {{ .Values.fakeTokenEndpoint.port }}
@@ -51,11 +51,13 @@ spec:
             - name: "FAKE_TOKEN_ENDPOINT_CONFIG"
               value: "/etc/fake-token-endpoint/config.yaml"
 {{- end }}
-{{- with .Values.fakeTokenEndpoint.env }}
-{{- range $name, $value := . }}
+{{- $env := deepCopy (.Values.fakeTokenEndpoint.env | default dict) }}
+{{- if not (hasKey $env "OTEL_RESOURCE_ATTRIBUTES") }}
+{{- $_ := set $env "OTEL_RESOURCE_ATTRIBUTES" (printf "deployment.environment=%s" (include "ext-authz-token-exchange-e2e.otelEnvironment" .)) }}
+{{- end }}
+{{- range $name, $value := $env }}
             - name: {{ $name | quote }}
               value: {{ $value | quote }}
-{{- end }}
 {{- end }}
 {{- end }}
 {{- if .Values.fakeTokenEndpoint.routes }}

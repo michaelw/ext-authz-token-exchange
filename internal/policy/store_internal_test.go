@@ -66,6 +66,51 @@ entries:
 	}
 }
 
+func TestConfigMapStoreStartLoadsInitialPoliciesBeforeReturning(t *testing.T) {
+	cfg := testRuntimeConfig()
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: "orders",
+			Labels: map[string]string{
+				"ext-authz-token-exchange.magneticflux.net/policy": "enabled",
+			},
+		}},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "orders",
+				Name:      "token-exchange",
+				Labels: map[string]string{
+					"ext-authz-token-exchange.magneticflux.net/enabled": "true",
+				},
+			},
+			Data: map[string]string{
+				"config.yaml": `
+version: v1
+entries:
+  - match:
+      host: orders.example.com
+      pathPrefix: /api/orders
+      methods: ["GET"]
+    action: exchange
+    exchange:
+      issuerRef: primary
+      scope: read:orders
+`,
+			},
+		},
+	)
+	store := NewConfigMapStoreWithClient(client, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := store.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !store.Index().Match("orders.example.com", "/api/orders/1", "GET").Matched {
+		t.Fatal("expected initial policy to be loaded before Start returns")
+	}
+}
+
 func TestConfigMapStoreNamespaceLabelTransitionsEnableAndDisablePolicies(t *testing.T) {
 	cfg := testRuntimeConfig()
 	client := fake.NewSimpleClientset(&corev1.ConfigMap{

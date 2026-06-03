@@ -24,7 +24,7 @@ const (
 )
 
 var _ = Describe("gateway stress", Label("stress"), func() {
-	It("drives mixed local-test traffic through the gateway authz path", func(ctx SpecContext) {
+	It("drives mixed with-test traffic through the gateway authz path", func(ctx SpecContext) {
 		profile := loadStressProfile()
 		client := stressHTTPClient(profile.RequestTimeout)
 		cases := stressCases(ctx)

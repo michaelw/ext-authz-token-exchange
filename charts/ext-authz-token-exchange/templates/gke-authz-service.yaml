@@ -1,0 +1,27 @@
+{{- if eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+{{ include "ext-authz-token-exchange.selectorLabels" . | indent 4 }}
+    app.kubernetes.io/component: default
+  ports:
+    - name: grpc-authz-tls
+      port: {{ .Values.gkeAuthz.callout.service.port }}
+      targetPort: {{ .Values.gkeAuthz.callout.service.targetPort | quote }}
+      appProtocol: {{ .Values.gkeAuthz.callout.service.appProtocol | quote }}
+{{- with .Values.gkeAuthz.callout.healthCheck.port }}
+{{- if ne (int .) (int $.Values.gkeAuthz.callout.service.port) }}
+    - name: grpc-health
+      port: {{ . }}
+      targetPort: "grpc-authz"
+      appProtocol: "grpc"
+{{- end }}
+{{- end }}
+{{- end }}

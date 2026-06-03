@@ -525,6 +525,34 @@ scenarios:
 	}
 }
 
+func TestScenarioTokenKeycloakErrorIncludesBaseURL(t *testing.T) {
+	withKeycloakIssuerKubectl(t)
+	keycloak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":             "iap_required",
+			"error_description": "IAP denied the request",
+		})
+	}))
+	defer keycloak.Close()
+	t.Setenv("DEMO_KEYCLOAK_BASE_URL", keycloak.URL)
+
+	_, err := (&server{opts: demoOptions(), issuer: keycloakIssuer()}).tokenForScenario(context.Background(), demo.Scenario{
+		Name: "keycloak-audience",
+		Request: demo.Request{
+			Path:  "/anything/keycloak-audience",
+			Token: demo.RequestToken{Prefill: "keycloak-subject"},
+		},
+	}.WithDefaults())
+
+	if err == nil {
+		t.Fatal("tokenForScenario error = nil, want Keycloak fetch error")
+	}
+	if !strings.Contains(err.Error(), keycloak.URL) {
+		t.Fatalf("error = %q, want configured Keycloak base URL %q", err.Error(), keycloak.URL)
+	}
+}
+
 func TestScenarioTokenUsesExplicitInvalidTokenPrefills(t *testing.T) {
 	withKeycloakIssuerKubectl(t)
 	tests := []struct {

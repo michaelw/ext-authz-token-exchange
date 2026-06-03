@@ -38,54 +38,39 @@ This will take some time, you can follow progress in another terminal:
 devspace logs -f
 ```
 
-### Production Deployment
+### Default Test Deployment
 
-Deploy to production:
+Deploy the provider-selected demo/e2e stack:
 
 ```bash
 devspace deploy
 ```
 
-The default deploy path is production-like and deploys only the plugin chart.
-
-### Local Test Deployment
-
-Deploy the full local demo/e2e stack:
-
-```bash
-devspace deploy -p local-test
-```
-
-The `local-test` profile assumes infrastructure already provides Istio/Gateway
-and `https://httpbin.int.kube/` through the Gateway API gateway. It deploys the
-plugin chart as release `ext-authz-token-exchange` in namespace
-`ext-authz-token-exchange`, and the demo/e2e chart as release
-`ext-authz-token-exchange-e2e` in namespace `ext-authz-token-exchange-e2e`.
+The auto-activated `with-test` profile assumes starter-pack already provides
+httpbin and provider-appropriate routes through the active Gateway. It deploys
+the plugin chart as release `ext-authz-token-exchange`, and the demo/e2e chart
+as release `ext-authz-token-exchange-e2e`.
 The demo/e2e chart owns the fake token endpoint, color team namespaces, and
 app-owned policy ConfigMaps. The fake token endpoint response behavior is
-configured by `fakeTokenEndpoint.routes` in the e2e chart values; the plugin
-still uses the single `fake-issuer` issuer profile endpoint.
+configured by the required `fakeTokenEndpoint.routes` e2e chart value. The
+chart renders those routes into a ConfigMap and sets
+`FAKE_TOKEN_ENDPOINT_CONFIG`; the binary does not carry fallback routes. The
+plugin still uses the single `fake-issuer` issuer profile endpoint.
 
 Profiles are composable:
 
 ```bash
-# plugin only, assumes infrastructure exists
+# plugin and demo/e2e resources, assumes starter-pack httpbin/routes exist
 devspace deploy
 
-# plugin plus required infrastructure from scratch
+# same, plus required starter-pack infrastructure and httpbin/routes
 devspace deploy -p with-infra
 
-# plugin plus demo/e2e resources, assumes infrastructure exists
-devspace deploy -p local-test
+# plugin plus demo/e2e resources and a real Keycloak issuer
+devspace deploy -p with-keycloak
 
-# plugin plus demo/e2e resources and required infrastructure from scratch
-devspace deploy -p with-infra -p local-test
-
-# plugin plus demo/e2e resources and a real local Keycloak issuer
-devspace deploy -p local-test -p with-keycloak
-
-# same Keycloak stack, plus Gateway/DNS/certificate infrastructure
-devspace deploy -p with-infra -p local-test -p with-keycloak
+# same Keycloak stack, plus starter-pack infrastructure and httpbin/routes
+devspace deploy -p with-infra -p with-keycloak
 ```
 
 After deployment, run the e2e assertions against the already deployed releases:
@@ -94,7 +79,7 @@ After deployment, run the e2e assertions against the already deployed releases:
 devspace run test-e2e
 ```
 
-`devspace run test-e2e` runs the fake baseline for the default `local-test`
+`devspace run test-e2e` runs the fake baseline for the default `with-test`
 stack. Keycloak-gated specs skip when Keycloak is unavailable and execute when
 the `with-keycloak` profile is deployed.
 
@@ -121,6 +106,12 @@ profile defaults for its `Fetch` action. Those defaults can be adjusted with
 `DEMO_KEYCLOAK_BASE_URL`, `DEMO_KEYCLOAK_REALM`,
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.
+
+On GKE, `keycloak.${DEPLOYMENT_DOMAIN}` is IAP-protected by design. If
+`DEMO_KEYCLOAK_BASE_URL` is not set, `devspace run demo-dashboard` opens a
+temporary local port-forward to `svc/keycloak` and uses that URL for dashboard
+subject-token fetches. This does not change the plugin issuer profile, which
+continues to use the in-cluster Keycloak Service.
 
 The `keycloak-audience` scenario should reach httpbin with an upstream
 Keycloak-issued bearer token. The `keycloak-resource` scenario keeps resource

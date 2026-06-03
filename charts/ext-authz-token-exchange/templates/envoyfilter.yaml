@@ -1,4 +1,4 @@
-{{- if .Values.envoyFilter.enabled }}
+{{- if and .Values.envoyFilter.enabled (eq (include "ext-authz-token-exchange.extensionMode" .) "ext_authz") }}
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -35,4 +35,49 @@ spec:
               envoy_grpc:
                 cluster_name: outbound|3001||{{ include "ext-authz-token-exchange.serviceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
               timeout: {{ .Values.envoyFilter.timeout | quote }}
+{{- else if and .Values.envoyFilter.enabled (eq (include "ext-authz-token-exchange.extensionMode" .) "ext_proc") }}
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}-ext-proc
+  namespace: {{ .Values.envoyFilter.namespace | quote }}
+spec:
+  workloadSelector:
+    labels:
+{{- if .Values.envoyFilter.workloadSelectorLabelsOverride }}
+{{ toYaml .Values.envoyFilter.workloadSelectorLabelsOverride | indent 6 }}
+{{- else }}
+{{ toYaml .Values.envoyFilter.workloadSelectorLabels | indent 6 }}
+{{- end }}
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.ext_proc
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+            failure_mode_allow: {{ .Values.envoyFilter.extProc.failureModeAllow }}
+            message_timeout: {{ .Values.envoyFilter.timeout | quote }}
+            allow_mode_override: true
+            route_cache_action: CLEAR
+            grpc_service:
+              envoy_grpc:
+                cluster_name: outbound|3001||{{ include "ext-authz-token-exchange.serviceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+              timeout: {{ .Values.envoyFilter.timeout | quote }}
+            processing_mode:
+              request_header_mode: SEND
+              response_header_mode: SKIP
+              request_body_mode: NONE
+              response_body_mode: NONE
+              request_trailer_mode: SKIP
+              response_trailer_mode: SKIP
 {{- end }}

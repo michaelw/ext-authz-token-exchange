@@ -52,10 +52,8 @@ const (
 	defaultOAuthClientID       = "e2e-client"
 	defaultOAuthClientSecret   = "e2e-secret"
 	defaultBearerRealm         = "ext-authz-token-exchange-e2e"
-	defaultHTTPBinResourceBase = "https://httpbin.int.kube"
 	defaultKeycloakName        = "keycloak"
 	defaultKeycloakRealm       = "token-exchange-e2e"
-	defaultKeycloakBaseURL     = "https://keycloak.int.kube"
 	defaultKeycloakClientID    = "tx-exchanger-client"
 	defaultKeycloakSecret      = "tx-exchanger-secret"
 	defaultSubjectClientID     = "tx-subject-client"
@@ -77,7 +75,7 @@ func TestE2E(t *testing.T) {
 var _ = BeforeSuite(func(ctx SpecContext) {
 	env = loadE2EEnv()
 	if env.baseURL == "" {
-		Skip("set E2E_BASE_URL, for example https://httpbin.int.kube, to run Kubernetes e2e tests")
+		Skip("set E2E_BASE_URL, for example https://httpbin.<deployment-domain>, to run Kubernetes e2e tests")
 	}
 
 	var err error
@@ -90,6 +88,10 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	waitForDeployment(ctx, env.namespace, env.releaseName)
 	waitForDeployment(ctx, env.demoNamespace, tokenEndpointName)
 	env.keycloakAvailable = deploymentReady(ctx, env.demoNamespace, env.keycloakName) && issuerProfileConfigured(ctx, "local-keycloak")
+	if env.keycloakAvailable {
+		Expect(env.keycloakBaseURL).NotTo(BeEmpty(), "E2E_KEYCLOAK_BASE_URL is required when Keycloak e2e resources are deployed")
+		Expect(env.keycloakIssuerURL).NotTo(BeEmpty(), "E2E_KEYCLOAK_ISSUER is required when Keycloak e2e resources are deployed")
+	}
 })
 
 var _ = AfterSuite(func(ctx SpecContext) {
@@ -137,6 +139,7 @@ type e2eEnv struct {
 
 func loadE2EEnv() e2eEnv {
 	base := strings.TrimRight(os.Getenv("E2E_BASE_URL"), "/")
+	httpbinResourceBase := base
 	host := strings.TrimSpace(os.Getenv("E2E_HOST"))
 	if host == "" && base != "" {
 		if parsed, err := url.Parse(base); err == nil {
@@ -155,11 +158,11 @@ func loadE2EEnv() e2eEnv {
 		fakeTokenImage:      envDefault("E2E_FAKE_TOKEN_ENDPOINT_IMAGE", defaultFakeTokenImage),
 		oauthClientID:       envDefault("E2E_OAUTH_CLIENT_ID", defaultOAuthClientID),
 		oauthClientSecret:   envDefault("E2E_OAUTH_CLIENT_SECRET", defaultOAuthClientSecret),
-		httpbinResourceBase: envDefault("E2E_HTTPBIN_RESOURCE_BASE", defaultHTTPBinResourceBase),
+		httpbinResourceBase: httpbinResourceBase,
 		keycloakName:        envDefault("E2E_KEYCLOAK_NAME", defaultKeycloakName),
 		keycloakRealm:       envDefault("E2E_KEYCLOAK_REALM", defaultKeycloakRealm),
-		keycloakBaseURL:     strings.TrimRight(envDefault("E2E_KEYCLOAK_BASE_URL", defaultKeycloakBaseURL), "/"),
-		keycloakIssuerURL:   strings.TrimRight(envDefault("E2E_KEYCLOAK_ISSUER", defaultKeycloakBaseURL+"/realms/"+defaultKeycloakRealm), "/"),
+		keycloakBaseURL:     strings.TrimRight(os.Getenv("E2E_KEYCLOAK_BASE_URL"), "/"),
+		keycloakIssuerURL:   strings.TrimRight(envDefault("E2E_KEYCLOAK_ISSUER", defaultIssuerURL()), "/"),
 		keycloakClientID:    envDefault("E2E_KEYCLOAK_CLIENT_ID", defaultKeycloakClientID),
 		keycloakSecret:      envDefault("E2E_KEYCLOAK_CLIENT_SECRET", defaultKeycloakSecret),
 		subjectClientID:     envDefault("E2E_KEYCLOAK_SUBJECT_CLIENT_ID", defaultSubjectClientID),
@@ -172,6 +175,23 @@ func loadE2EEnv() e2eEnv {
 		skipInstall:         envBool("E2E_SKIP_INSTALL", false),
 		skipCleanup:         envBool("E2E_SKIP_CLEANUP", false),
 		insecureTLS:         envBool("E2E_INSECURE_SKIP_VERIFY", true),
+	}
+}
+
+func TestLoadE2EEnvUsesBaseURLForHTTPBinResourceBase(t *testing.T) {
+	t.Setenv("E2E_BASE_URL", "https://httpbin.gcp.kube/")
+	t.Setenv("E2E_HOST", "")
+
+	got := loadE2EEnv()
+
+	if got.baseURL != "https://httpbin.gcp.kube" {
+		t.Fatalf("baseURL = %q, want https://httpbin.gcp.kube", got.baseURL)
+	}
+	if got.httpbinResourceBase != "https://httpbin.gcp.kube" {
+		t.Fatalf("httpbinResourceBase = %q, want https://httpbin.gcp.kube", got.httpbinResourceBase)
+	}
+	if got.host != "httpbin.gcp.kube" {
+		t.Fatalf("host = %q, want httpbin.gcp.kube", got.host)
 	}
 }
 
@@ -753,6 +773,14 @@ func envDefault(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func defaultIssuerURL() string {
+	base := strings.TrimRight(os.Getenv("E2E_KEYCLOAK_BASE_URL"), "/")
+	if base == "" {
+		return ""
+	}
+	return base + "/realms/" + defaultKeycloakRealm
 }
 
 func envBool(name string, fallback bool) bool {

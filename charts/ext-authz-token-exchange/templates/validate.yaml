@@ -19,6 +19,19 @@
 {{- if hasKey $env "TOKEN_EXCHANGE_ISSUER_PROFILES_FILE" }}
 {{- fail "env.TOKEN_EXCHANGE_ISSUER_PROFILES_FILE is chart-managed; use issuerProfiles.mountPath and issuerProfiles.fileName" }}
 {{- end }}
-{{- if and .Values.envoyFilter.enabled .Values.authorizationPolicy.enabled }}
+{{- $extensionMode := include "ext-authz-token-exchange.extensionMode" . }}
+{{- if and .Values.envoyFilter.enabled (eq (include "ext-authz-token-exchange.authorizationPolicyEnabled" .) "true") }}
 {{- fail "envoyFilter.enabled and authorizationPolicy.enabled are mutually exclusive gateway authz modes" }}
+{{- end }}
+{{- if not (has $extensionMode (list "ext_authz" "ext_proc")) }}
+{{- fail "extensionMode must be one of: ext_authz, ext_proc" }}
+{{- end }}
+{{- if and (eq (include "ext-authz-token-exchange.authorizationPolicyEnabled" .) "true") (ne $extensionMode "ext_authz") }}
+{{- fail "authorizationPolicy.enabled requires extensionMode=ext_authz" }}
+{{- end }}
+{{- if and .Values.gkeAuthz.enabled (ne $extensionMode "ext_authz") }}
+{{- fail "gkeAuthz.enabled requires extensionMode=ext_authz" }}
+{{- end }}
+{{- if and (eq (include "ext-authz-token-exchange.gkeExtProcEnabled" .) "true") (ne $extensionMode "ext_proc") }}
+{{- fail "gkeExtProc.enabled requires extensionMode=ext_proc" }}
 {{- end }}

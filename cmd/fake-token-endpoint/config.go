@@ -50,8 +50,7 @@ type fakeResponse struct {
 
 func loadFakeConfig(path string) (fakeConfig, error) {
 	if strings.TrimSpace(path) == "" {
-		cfg := defaultFakeConfig()
-		return cfg, (&cfg).validate()
+		return fakeConfig{}, fmt.Errorf("FAKE_TOKEN_ENDPOINT_CONFIG is required")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -184,144 +183,11 @@ func (route fakeRoute) scenario() string {
 	return ""
 }
 
-func defaultFakeConfig() fakeConfig {
-	return fakeConfig{
-		Routes: []fakeRoute{
-			successPathRoute("yellow"),
-			successPathRoute("red"),
-			successPathRoute("blue"),
-			oauthErrorPathRoute("invalid-request", http.StatusBadRequest, "invalid_request", "invalid token exchange request"),
-			oauthErrorPathRoute("invalid-target", http.StatusBadRequest, "invalid_target", "resource or audience is invalid"),
-			oauthErrorPathRoute("invalid-grant", http.StatusBadRequest, "invalid_grant", "subject token is invalid"),
-			oauthErrorPathRoute("expired-subject-token", http.StatusBadRequest, "invalid_grant", "subject_token_expired"),
-			{
-				Name:  "unauthorized",
-				Match: fakeMatch{Path: "/token/unauthorized"},
-				Response: fakeResponse{
-					Type:             responseOAuthError,
-					Status:           http.StatusUnauthorized,
-					Error:            "invalid_client",
-					ErrorDescription: "client rejected",
-					WWWAuthenticate:  `Bearer realm="issuer", error="invalid_token"`,
-				},
-			},
-			oauthErrorPathRoute("forbidden", http.StatusForbidden, "invalid_target", "target rejected"),
-			jsonErrorPathRoute("server-error", http.StatusInternalServerError, "temporarily_unavailable"),
-			typedPathRoute("malformed", responseMalformed),
-			typedPathRoute("missing-access-token", responseMissingAccessToken),
-			typedPathRoute("wrong-token-type", responseWrongTokenType),
-			typedPathRoute("wrong-issued-token-type", responseWrongIssuedTokenType),
-			typedPathRoute("delay", responseDelay),
-			oauthErrorResourceRoute("resource-invalid-target", "https://httpbin.int.kube/anything/error-invalid-target", "invalid_target", "resource or audience is invalid"),
-			oauthErrorResourceRoute("resource-invalid-grant", "https://httpbin.int.kube/anything/error-invalid-grant", "invalid_grant", "subject token is invalid"),
-			oauthErrorResourceRoute("resource-expired-subject-token", "https://httpbin.int.kube/anything/error-expired-subject-token", "invalid_grant", "subject_token_expired"),
-			successAudienceRoute("yellow", "httpbin-yellow"),
-			successAudienceRoute("red", "httpbin-red"),
-			successAudienceRoute("blue", "httpbin-blue"),
-			successResourceRoute("resource-yellow", "yellow", "https://httpbin.int.kube/anything/yellow"),
-			successResourceRoute("resource-red", "red", "https://httpbin.int.kube/anything/red"),
-			successResourceRoute("resource-blue", "blue", "https://httpbin.int.kube/anything/blue"),
-			successScopeRoute("scope-yellow", "yellow", "yellow"),
-			successScopeRoute("scope-red", "red", "red"),
-			successScopeRoute("scope-blue", "blue", "blue"),
-			{
-				Name:     "success",
-				Match:    fakeMatch{Path: "/token/success"},
-				Response: fakeResponse{Type: responseSuccess, Scenario: "success"},
-			},
-		},
-		DefaultResponse: fakeResponse{
-			Type:             defaultUnknownResponse().Type,
-			Status:           defaultUnknownResponse().Status,
-			Error:            defaultUnknownResponse().Error,
-			ErrorDescription: defaultUnknownResponse().ErrorDescription,
-		},
-	}
-}
-
 func defaultUnknownResponse() fakeResponse {
 	return fakeResponse{
 		Type:             responseOAuthError,
 		Status:           http.StatusBadRequest,
 		Error:            "invalid_request",
 		ErrorDescription: "unknown fake token scenario",
-	}
-}
-
-func successPathRoute(scenario string) fakeRoute {
-	return fakeRoute{
-		Name:     scenario,
-		Match:    fakeMatch{Path: "/token/" + scenario},
-		Response: fakeResponse{Type: responseSuccess, Scenario: scenario},
-	}
-}
-
-func successAudienceRoute(name, audience string) fakeRoute {
-	return fakeRoute{
-		Name:     "audience-" + name,
-		Match:    fakeMatch{Audience: audience},
-		Response: fakeResponse{Type: responseSuccess, Scenario: name},
-	}
-}
-
-func successResourceRoute(name, scenario, resource string) fakeRoute {
-	return fakeRoute{
-		Name:     name,
-		Match:    fakeMatch{Resource: resource},
-		Response: fakeResponse{Type: responseSuccess, Scenario: scenario},
-	}
-}
-
-func successScopeRoute(name, scenario, scope string) fakeRoute {
-	return fakeRoute{
-		Name:     name,
-		Match:    fakeMatch{Scope: scope},
-		Response: fakeResponse{Type: responseSuccess, Scenario: scenario},
-	}
-}
-
-func oauthErrorPathRoute(name string, status int, code, description string) fakeRoute {
-	return fakeRoute{
-		Name:  name,
-		Match: fakeMatch{Path: "/token/" + name},
-		Response: fakeResponse{
-			Type:             responseOAuthError,
-			Status:           status,
-			Error:            code,
-			ErrorDescription: description,
-		},
-	}
-}
-
-func oauthErrorResourceRoute(name, resource, code, description string) fakeRoute {
-	return fakeRoute{
-		Name:  name,
-		Match: fakeMatch{Resource: resource},
-		Response: fakeResponse{
-			Type:             responseOAuthError,
-			Status:           http.StatusBadRequest,
-			Error:            code,
-			ErrorDescription: description,
-		},
-	}
-}
-
-func jsonErrorPathRoute(name string, status int, code string) fakeRoute {
-	return fakeRoute{
-		Name:  name,
-		Match: fakeMatch{Path: "/token/" + name},
-		Response: fakeResponse{
-			Type:   responseJSONError,
-			Status: status,
-			Error:  code,
-		},
-	}
-}
-
-func typedPathRoute(name, responseType string) fakeRoute {
-	return fakeRoute{
-		Name:     name,
-		Match:    fakeMatch{Path: "/token/" + name},
-		Response: fakeResponse{Type: responseType, Scenario: name},
 	}
 }

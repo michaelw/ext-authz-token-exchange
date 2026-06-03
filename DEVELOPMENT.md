@@ -122,8 +122,8 @@ devspace run coverage
 
 ## End-to-End Testing
 
-The e2e suite expects local cluster infrastructure and a deployed demo stack.
-For the common local-test flow:
+The e2e suite expects starter-pack httpbin/routes and this repo's deployed demo
+stack. For the common `with-test` flow:
 
 ```sh
 devspace run smoke
@@ -132,7 +132,7 @@ devspace run smoke
 For a fresh cluster that also needs the supporting infrastructure:
 
 ```sh
-devspace deploy -p with-infra -p local-test
+devspace deploy -p with-infra
 devspace run test-e2e
 ```
 
@@ -141,31 +141,23 @@ need explicit image, namespace, or base URL overrides.
 
 ## Helm and DevSpace Checks
 
-Preview the production chart deployment:
+Preview the default test deployment:
 
 ```sh
 devspace deploy --render --skip-build
 ```
 
-Deploy the production chart through DevSpace:
+Deploy the default test stack through DevSpace:
 
 ```sh
 devspace deploy
-```
-
-Deploy the local demo stack. This installs the plugin chart and demo/e2e chart
-as separate Helm releases:
-
-```sh
-devspace deploy -p local-test
 ```
 
 Purge deployments:
 
 ```sh
 devspace purge
-devspace purge -p local-test
-devspace purge -p with-infra -p local-test
+devspace purge -p with-infra
 ```
 
 When changing chart templates, verify the affected deployment profile by
@@ -200,7 +192,7 @@ helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e -
 Go coverage is uploaded to Codecov and `coverage.out` remains available as a
 workflow artifact for local debugging or fallback. Rendered Helm manifests are
 uploaded as workflow artifacts. Cluster-backed e2e remains optional because it
-requires local-test Gateway/Istio infrastructure; use
+requires with-test Gateway/Istio infrastructure; use
 `devspace run smoke` for that smoke path.
 
 DevSpace is the repository command runner for local validation. If it becomes

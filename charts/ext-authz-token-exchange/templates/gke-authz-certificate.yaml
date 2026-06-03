@@ -1,0 +1,28 @@
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled .Values.gkeAuthz.callout.tls.certificate.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ .Values.gkeAuthz.callout.tls.certificate.issuerName | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gkeAuthz.callout.tls.secretName | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  secretName: {{ .Values.gkeAuthz.callout.tls.secretName | quote }}
+  issuerRef:
+    name: {{ .Values.gkeAuthz.callout.tls.certificate.issuerName | quote }}
+    kind: {{ .Values.gkeAuthz.callout.tls.certificate.issuerKind | default "Issuer" | quote }}
+  dnsNames:
+{{ toYaml .Values.gkeAuthz.callout.tls.certificate.dnsNames | indent 4 }}
+  usages:
+    - server auth
+{{- end }}

@@ -1,0 +1,17 @@
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.backendPolicy.enabled }}
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+  default:
+    connectionDraining:
+      drainingTimeoutSec: {{ .Values.gkeAuthz.callout.backendPolicy.connectionDraining.drainingTimeoutSec }}
+{{- end }}

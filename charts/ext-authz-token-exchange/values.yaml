@@ -5,6 +5,10 @@ image:
   # use locally built images if available
   pullPolicy: IfNotPresent
 
+gatewayProvider: local-istio
+
+extensionMode: ext_authz
+
 deployments:
   default:
     enabled: true
@@ -27,6 +31,9 @@ securityContext:
       - ALL
 
 ports:
+  grpc-authz-tls:
+    enabled: false
+    containerPort: 3000
   grpc-authz:
     containerPort: 3001
   http-metrics:
@@ -66,6 +73,90 @@ service:
       targetPort: http-metrics
       appProtocol: http
 
+gkeAuthz:
+  enabled: false
+  gateway:
+    name: gateway
+    namespace: gke-gateway
+    sectionName: https
+  host: httpbin.gcp.kube
+  callout:
+    service:
+      name: gateway-ext-authz
+      port: 3000
+      targetPort: grpc-authz-tls
+      appProtocol: HTTP2
+    tls:
+      enabled: true
+      port: 3000
+      secretName: gateway-ext-authz-tls
+      mountPath: /etc/ext-authz-token-exchange/tls
+      certificate:
+        enabled: true
+        issuerName: gateway-ext-authz-selfsigned
+        issuerKind: Issuer
+        dnsNames:
+          - gateway-ext-authz.ext-authz-token-exchange.svc.cluster.local
+    healthCheck:
+      enabled: true
+      port: 3001
+      portSpecification: USE_FIXED_PORT
+      checkIntervalSec: 5
+      timeoutSec: 3
+      healthyThreshold: 1
+      unhealthyThreshold: 2
+      logConfig:
+        enabled: true
+    backendPolicy:
+      enabled: true
+      connectionDraining:
+        drainingTimeoutSec: 30
+
+gkeExtProc:
+  enabled: false
+  name: ext-authz-token-exchange
+  chainName: token-exchange
+  extensionName: token-exchange
+  timeout: 1s
+  failOpen: false
+  host: httpbin.gcp.kube
+  gateway:
+    name: gateway
+  supportedEvents:
+    - RequestHeaders
+  # Omit forwardHeaders and forwardAttributes on current GKE Gateway CRDs.
+  # Live validation on GKE 1.35.3-gke.2190000 showed that omitting
+  # forwardHeaders forwards all headers, including :method, :scheme,
+  # :authority, and :path. Uncomment explicit forwarding only after:
+  #   kubectl explain gcptrafficextension.spec.extensionChains.extensions --recursive
+  # shows forwardAttributes.
+  # forwardHeaders:
+  #   - authorization
+  #   - cookie
+  #   - origin
+  #   - access-control-request-method
+  #   - access-control-request-headers
+  #   - x-request-id
+  #   - traceparent
+  #   - tracestate
+  #   - cf-connecting-ip
+  #   - cf-connecting-ipv6
+  #   - cf-ipcountry
+  #   - cf-pseudo-ipv4
+  #   - cf-ray
+  #   - cf-visitor
+  #   - cf-worker
+  #   - cdn-loop
+  #   - true-client-ip
+  #   - x-forwarded-for
+  #   - x-forwarded-proto
+  # forwardAttributes:
+  #   - request.method
+  #   - request.scheme
+  #   - request.host
+  #   - request.path
+  #   - request.query
+
 oauth:
   createSecret: false
   secretName: ext-authz-token-exchange-oauth
@@ -81,6 +172,7 @@ issuerProfiles:
   mountPath: /etc/ext-authz-token-exchange
   fileName: issuers.yaml
   profiles: []
+  extraProfiles: []
 
 env:
   GRPC_LOG_HEALTH_CHECKS: "true"
@@ -122,6 +214,8 @@ env:
 rbac:
   create: true
   serviceAccountName: ext-authz-token-exchange
+  clusterRoleName: ""
+  clusterRoleBindingName: ""
 
 envoyFilter:
   enabled: false
@@ -130,6 +224,9 @@ envoyFilter:
     gateway.networking.k8s.io/gateway-name: gateway
   workloadSelectorLabelsOverride: {}
   timeout: 1s
+  extProc:
+    failureModeAllow: false
+    clearRouteCache: true
 
 authorizationPolicy:
   enabled: false

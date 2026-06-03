@@ -30,6 +30,105 @@ func TestGRPCPortFromEnv(t *testing.T) {
 	})
 }
 
+func TestGRPCTLSPortFromEnv(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		t.Setenv("GRPC_TLS_PORT", "")
+		if got := grpcTLSPortFromEnv(); got != "3000" {
+			t.Fatalf("grpcTLSPortFromEnv() = %q, want 3000", got)
+		}
+	})
+
+	t.Run("configured", func(t *testing.T) {
+		t.Setenv("GRPC_TLS_PORT", "4000")
+		if got := grpcTLSPortFromEnv(); got != "4000" {
+			t.Fatalf("grpcTLSPortFromEnv() = %q, want 4000", got)
+		}
+	})
+}
+
+func TestGRPCTLSConfigFromEnv(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		t.Setenv("GRPC_TLS_CERT_FILE", "")
+		t.Setenv("GRPC_TLS_KEY_FILE", "")
+		cfg, ok, err := grpcTLSConfigFromEnv()
+		if err != nil {
+			t.Fatalf("grpcTLSConfigFromEnv() error = %v", err)
+		}
+		if ok || cfg != nil {
+			t.Fatalf("expected TLS config to be disabled, got ok=%v cfg=%#v", ok, cfg)
+		}
+	})
+
+	t.Run("enabled", func(t *testing.T) {
+		t.Setenv("GRPC_TLS_CERT_FILE", "/tls/tls.crt")
+		t.Setenv("GRPC_TLS_KEY_FILE", "/tls/tls.key")
+		cfg, ok, err := grpcTLSConfigFromEnv()
+		if err != nil {
+			t.Fatalf("grpcTLSConfigFromEnv() error = %v", err)
+		}
+		if !ok || cfg == nil {
+			t.Fatalf("expected TLS config to be enabled, got ok=%v cfg=%#v", ok, cfg)
+		}
+		if cfg.certFile != "/tls/tls.crt" || cfg.keyFile != "/tls/tls.key" {
+			t.Fatalf("unexpected TLS config: %#v", cfg)
+		}
+	})
+
+	t.Run("missing cert", func(t *testing.T) {
+		t.Setenv("GRPC_TLS_CERT_FILE", "")
+		t.Setenv("GRPC_TLS_KEY_FILE", "/tls/tls.key")
+		if _, _, err := grpcTLSConfigFromEnv(); err == nil {
+			t.Fatalf("expected missing certificate error")
+		}
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		t.Setenv("GRPC_TLS_CERT_FILE", "/tls/tls.crt")
+		t.Setenv("GRPC_TLS_KEY_FILE", "")
+		if _, _, err := grpcTLSConfigFromEnv(); err == nil {
+			t.Fatalf("expected missing key error")
+		}
+	})
+}
+
+func TestPreStopSleepDuration(t *testing.T) {
+	t.Run("not requested", func(t *testing.T) {
+		duration, ok, err := preStopSleepDuration([]string{"service"})
+		if err != nil {
+			t.Fatalf("preStopSleepDuration() error = %v", err)
+		}
+		if ok || duration != 0 {
+			t.Fatalf("expected pre-stop sleep to be disabled, got ok=%v duration=%s", ok, duration)
+		}
+	})
+
+	t.Run("default", func(t *testing.T) {
+		duration, ok, err := preStopSleepDuration([]string{"service", "pre-stop-sleep"})
+		if err != nil {
+			t.Fatalf("preStopSleepDuration() error = %v", err)
+		}
+		if !ok || duration != 30*time.Second {
+			t.Fatalf("preStopSleepDuration() = %s, %v; want 30s, true", duration, ok)
+		}
+	})
+
+	t.Run("configured", func(t *testing.T) {
+		duration, ok, err := preStopSleepDuration([]string{"service", "pre-stop-sleep", "5s"})
+		if err != nil {
+			t.Fatalf("preStopSleepDuration() error = %v", err)
+		}
+		if !ok || duration != 5*time.Second {
+			t.Fatalf("preStopSleepDuration() = %s, %v; want 5s, true", duration, ok)
+		}
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		if _, ok, err := preStopSleepDuration([]string{"service", "pre-stop-sleep", "soon"}); !ok || err == nil {
+			t.Fatalf("expected invalid pre-stop duration error, got ok=%v err=%v", ok, err)
+		}
+	})
+}
+
 func TestLoggingOptionsIncludesHealthMethod(t *testing.T) {
 	opts := loggingOptions(config.RuntimeConfig{LogHealthChecks: false})
 	method, ok := opts.Methods[healthCheckMethod]

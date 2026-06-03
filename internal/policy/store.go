@@ -94,8 +94,10 @@ func (s *ConfigMapStore) Index() *Index {
 	return value.(*Index)
 }
 
-// Run starts namespace-scoped ConfigMap watch loops and blocks until ctx is canceled.
-func (s *ConfigMapStore) Run(ctx context.Context) error {
+// Start performs the initial policy load and starts namespace-scoped ConfigMap
+// watch loops. It returns after the initial namespace and ConfigMap lists have
+// completed so callers can safely mark the service ready.
+func (s *ConfigMapStore) Start(ctx context.Context) error {
 	namespaces := s.client.CoreV1().Namespaces()
 	initial, err := namespaces.List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -138,6 +140,14 @@ func (s *ConfigMapStore) Run(ctx context.Context) error {
 	})
 
 	go controller.Run(ctx.Done())
+	return nil
+}
+
+// Run starts namespace-scoped ConfigMap watch loops and blocks until ctx is canceled.
+func (s *ConfigMapStore) Run(ctx context.Context) error {
+	if err := s.Start(ctx); err != nil {
+		return err
+	}
 	<-ctx.Done()
 	return nil
 }

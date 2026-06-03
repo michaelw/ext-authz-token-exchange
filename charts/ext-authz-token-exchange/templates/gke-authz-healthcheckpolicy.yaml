@@ -1,0 +1,30 @@
+{{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.healthCheck.enabled }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: {{ .Values.gkeAuthz.callout.service.name | quote }}
+  default:
+    checkIntervalSec: {{ .Values.gkeAuthz.callout.healthCheck.checkIntervalSec }}
+    timeoutSec: {{ .Values.gkeAuthz.callout.healthCheck.timeoutSec }}
+    healthyThreshold: {{ .Values.gkeAuthz.callout.healthCheck.healthyThreshold }}
+    unhealthyThreshold: {{ .Values.gkeAuthz.callout.healthCheck.unhealthyThreshold }}
+{{- with .Values.gkeAuthz.callout.healthCheck.logConfig }}
+    logConfig:
+{{ toYaml . | indent 6 }}
+{{- end }}
+    config:
+      type: GRPC
+      grpcHealthCheck:
+        portSpecification: {{ .Values.gkeAuthz.callout.healthCheck.portSpecification | default "USE_SERVING_PORT" }}
+{{- with .Values.gkeAuthz.callout.healthCheck.port }}
+        port: {{ . }}
+{{- end }}
+{{- end }}
