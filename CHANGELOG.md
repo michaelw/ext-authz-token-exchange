@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.4.1...v0.5.0) (2026-06-03)
+
+
+### Features
+
+* **plugin:** add GKE Service Extensions gateway mode ([7fbc829](https://github.com/michaelw/ext-authz-token-exchange/commit/7fbc82919159ebaed720366e82675804b6b11827))
+
+
+### Bug Fixes
+
+* **deps:** update opentelemetry-go monorepo to v1.44.0 ([#105](https://github.com/michaelw/ext-authz-token-exchange/issues/105)) ([4d94cdd](https://github.com/michaelw/ext-authz-token-exchange/commit/4d94cddb363f78f3e229a9dd343d38bfdee3313c))
+
 ## [0.4.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.4.0...v0.4.1) (2026-05-19)
 
 
