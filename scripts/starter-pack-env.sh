@@ -87,10 +87,14 @@ init_cache() {
 }
 
 json_value() {
-  local path expr
+  local path expr value
   path="$1"
   expr="$2"
-  yq -r "$expr // \"\"" "$path"
+  value="$(yq -r "$expr // \"\"" "$path")"
+  case "$value" in
+    "<nil>") printf '\n' ;;
+    *) printf '%s\n' "$value" ;;
+  esac
 }
 
 validate_configmap_version() {
