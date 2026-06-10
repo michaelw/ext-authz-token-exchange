@@ -574,6 +574,12 @@ commands:
         export E2E_NAMESPACE
       fi
       KEYCLOAK_PORT_FORWARD_PID=""
+      if [ -z "${E2E_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" = "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
+        E2E_KEYCLOAK_BASE_URL="https://keycloak.$DEPLOYMENT_DOMAIN"
+        E2E_KEYCLOAK_ISSUER="${E2E_KEYCLOAK_ISSUER:-${E2E_KEYCLOAK_BASE_URL}/realms/token-exchange-e2e}"
+        export E2E_KEYCLOAK_BASE_URL E2E_KEYCLOAK_ISSUER
+        echo "I: using Keycloak route at ${E2E_KEYCLOAK_BASE_URL}"
+      fi
       if [ -z "${E2E_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" != "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
         for port in 18080 18081 18082 18083 18084 18085 18086 18087 18088 18089; do
           if ! nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then

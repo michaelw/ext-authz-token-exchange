@@ -290,7 +290,7 @@ Useful overrides:
 - `E2E_SKIP_CLEANUP=true`: Keep test namespaces for inspection.
 - `E2E_SKIP_INSTALL=true`: Test an already deployed with-test chart release.
 - `E2E_INSECURE_SKIP_VERIFY=false`: Enforce TLS verification for the gateway URL.
-- `E2E_KEYCLOAK_BASE_URL`: External Keycloak base URL. Required when Keycloak e2e resources are deployed unless `devspace run test-e2e` sets up the GKE port-forward.
+- `E2E_KEYCLOAK_BASE_URL`: External Keycloak base URL. When Keycloak e2e resources are deployed, `devspace run test-e2e` defaults this to `https://keycloak.${DEPLOYMENT_DOMAIN}` on non-GKE contexts and uses the existing GKE port-forward workaround on GKE.
 - `E2E_KEYCLOAK_ISSUER`: Expected issuer claim for exchanged tokens. Required when it differs from `E2E_KEYCLOAK_BASE_URL` plus the test realm.
 
 ## Manual Keycloak Demo

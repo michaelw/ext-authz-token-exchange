@@ -81,7 +81,9 @@ devspace run test-e2e
 
 `devspace run test-e2e` runs the fake baseline for the default `with-test`
 stack. Keycloak-gated specs skip when Keycloak is unavailable and execute when
-the `with-keycloak` profile is deployed.
+the `with-keycloak` profile is deployed. On non-GKE contexts, the command uses
+`https://keycloak.${DEPLOYMENT_DOMAIN}` as the Keycloak base URL when the
+Keycloak Service is present and no explicit `E2E_KEYCLOAK_BASE_URL` is set.
 
 For manual Keycloak testing, start the dashboard. Each scenario declares its
 input token shape in the scenario YAML, and the token tab's `Fetch` button
