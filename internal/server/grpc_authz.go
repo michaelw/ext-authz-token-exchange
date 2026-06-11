@@ -460,6 +460,20 @@ func headerOptions(headers []headerPair) []*envoy_config_core_v3.HeaderValueOpti
 	return options
 }
 
+func rawHeaderOptions(headers []headerPair) []*envoy_config_core_v3.HeaderValueOption {
+	options := make([]*envoy_config_core_v3.HeaderValueOption, 0, len(headers))
+	for _, h := range headers {
+		if h.Name == "" {
+			continue
+		}
+		options = append(options, &envoy_config_core_v3.HeaderValueOption{
+			Header: &envoy_config_core_v3.HeaderValue{Key: h.Name, RawValue: []byte(h.Value)},
+			Append: wrapperspb.Bool(false),
+		})
+	}
+	return options
+}
+
 func envoyStatus(status int) envoy_type_v3.StatusCode {
 	switch status {
 	case http.StatusBadRequest:

@@ -687,7 +687,7 @@ entries:
 		headers := stream.sent[0].GetRequestHeaders()
 		Expect(headers).NotTo(BeNil())
 		Expect(headerValue(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
-		Expect(headerOption(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization").GetHeader().GetValue()).To(Equal("Bearer exchanged"))
+		Expect(string(headerOption(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization").GetHeader().GetRawValue())).To(Equal("Bearer exchanged"))
 		Expect(headers.GetResponse().GetClearRouteCache()).To(BeTrue())
 		Expect(stream.sent[0].GetModeOverride().GetRequestHeaderMode()).To(Equal(envoy_ext_proc_config_v3.ProcessingMode_SEND))
 		Expect(stream.sent[0].GetModeOverride().GetRequestBodyMode()).To(Equal(envoy_ext_proc_config_v3.ProcessingMode_NONE))

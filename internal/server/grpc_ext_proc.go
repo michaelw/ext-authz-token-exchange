@@ -219,7 +219,7 @@ func extProcHeaderMutation(headers []headerPair) *envoy_service_ext_proc_v3.Head
 	if len(headers) == 0 {
 		return nil
 	}
-	return &envoy_service_ext_proc_v3.HeaderMutation{SetHeaders: headerOptions(headers)}
+	return &envoy_service_ext_proc_v3.HeaderMutation{SetHeaders: rawHeaderOptions(headers)}
 }
 
 func continueProcessingResponse(req *envoy_service_ext_proc_v3.ProcessingRequest) *envoy_service_ext_proc_v3.ProcessingResponse {
