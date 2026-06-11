@@ -453,7 +453,7 @@ func headerOptions(headers []headerPair) []*envoy_config_core_v3.HeaderValueOpti
 			continue
 		}
 		options = append(options, &envoy_config_core_v3.HeaderValueOption{
-			Header: &envoy_config_core_v3.HeaderValue{Key: h.Name, RawValue: []byte(h.Value)},
+			Header: &envoy_config_core_v3.HeaderValue{Key: h.Name, Value: h.Value},
 			Append: wrapperspb.Bool(false),
 		})
 	}

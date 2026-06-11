@@ -362,6 +362,7 @@ entries:
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resp.GetOkResponse()).NotTo(BeNil())
 		Expect(headerValue(resp.GetOkResponse().GetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
+		Expect(headerOption(resp.GetOkResponse().GetHeaders(), "authorization").GetHeader().GetValue()).To(Equal("Bearer exchanged"))
 	})
 
 	It("exchanges bearer tokens from Envoy header map raw values", func() {
@@ -686,6 +687,7 @@ entries:
 		headers := stream.sent[0].GetRequestHeaders()
 		Expect(headers).NotTo(BeNil())
 		Expect(headerValue(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization")).To(Equal("Bearer exchanged"))
+		Expect(headerOption(headers.GetResponse().GetHeaderMutation().GetSetHeaders(), "authorization").GetHeader().GetValue()).To(Equal("Bearer exchanged"))
 		Expect(headers.GetResponse().GetClearRouteCache()).To(BeTrue())
 		Expect(stream.sent[0].GetModeOverride().GetRequestHeaderMode()).To(Equal(envoy_ext_proc_config_v3.ProcessingMode_SEND))
 		Expect(stream.sent[0].GetModeOverride().GetRequestBodyMode()).To(Equal(envoy_ext_proc_config_v3.ProcessingMode_NONE))
@@ -1017,15 +1019,23 @@ func rawHeaderMapCheckRequest(method, host, path string, headers []*envoy_config
 }
 
 func headerValue(headers []*envoy_config_core_v3.HeaderValueOption, name string) string {
+	option := headerOption(headers, name)
+	if option == nil {
+		return ""
+	}
+	if rawValue := option.GetHeader().GetRawValue(); len(rawValue) > 0 {
+		return string(rawValue)
+	}
+	return option.GetHeader().GetValue()
+}
+
+func headerOption(headers []*envoy_config_core_v3.HeaderValueOption, name string) *envoy_config_core_v3.HeaderValueOption {
 	for _, header := range headers {
 		if header.GetHeader().GetKey() == name {
-			if rawValue := header.GetHeader().GetRawValue(); len(rawValue) > 0 {
-				return string(rawValue)
-			}
-			return header.GetHeader().GetValue()
+			return header
 		}
 	}
-	return ""
+	return nil
 }
 
 type fakeExtProcStream struct {
