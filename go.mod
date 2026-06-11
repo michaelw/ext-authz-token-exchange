@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.30.0
 	github.com/onsi/gomega v1.41.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/prometheus/client_golang v1.23.2
