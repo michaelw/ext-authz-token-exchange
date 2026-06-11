@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ca-certificates curl iproute2 make openssl tar
+          sudo apt-get install -y ca-certificates curl iproute2 jq make openssl tar
 
           mkdir -p "${RUNNER_TEMP}/bin"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
@@ -88,6 +88,26 @@ jobs:
             fi
             echo "Waiting for pods to become Ready:"
             printf '%s\n' "$not_ready"
+            sleep 10
+          done
+
+          smoke_url="https://httpbin.int.kube/anything/yellow"
+          deadline=$((SECONDS + 600))
+          while true; do
+            allow_body="$(mktemp)"
+            allow_code="$(curl -ksS -o "$allow_body" -w '%{http_code}' -H 'Authorization: Bearer readiness-yellow' "$smoke_url" 2>/dev/null || true)"
+            allow_auth="$(jq -r '.headers | to_entries[] | select(.key | ascii_downcase == "authorization") | .value[0] // empty' "$allow_body" 2>/dev/null || true)"
+            rm -f "$allow_body"
+            deny_code="$(curl -ksS -o /dev/null -w '%{http_code}' "$smoke_url" 2>/dev/null || true)"
+            if [ "$allow_code" = "200" ] && [[ "$allow_auth" == Bearer\ * ]] && [ "$allow_auth" != "Bearer readiness-yellow" ] && [ "$deny_code" = "401" ]; then
+              echo "Token exchange is enforcing at $smoke_url."
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out waiting for token exchange enforcement at $smoke_url (allow=$allow_code deny=$deny_code exchanged_auth=$([ -n "$allow_auth" ] && echo present || echo missing))." >&2
+              exit 1
+            fi
+            echo "Waiting for token exchange enforcement at $smoke_url (allow=$allow_code deny=$deny_code exchanged_auth=$([ -n "$allow_auth" ] && echo present || echo missing))..."
             sleep 10
           done
 
