@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +48,8 @@ type tokenProbeResult struct {
 	allowCode int
 	denyCode  int
 	allowAuth string
+	allowBody string
+	denyBody  string
 }
 
 func main() {
@@ -108,7 +111,11 @@ func run() error {
 		return err
 	}
 
-	testEnv := append(env, "E2E_BASE_URL="+strings.TrimRight(cfg.baseURL, "/"))
+	testEnv := append(env,
+		"E2E_BASE_URL="+strings.TrimRight(cfg.baseURL, "/"),
+		"E2E_KEYCLOAK_BASE_URL="+keycloakBaseURL(cfg.baseURL),
+		"E2E_KEYCLOAK_ISSUER="+keycloakIssuerURL(cfg.baseURL),
+	)
 	if err := runStep(ctx, testEnv, "devspace", "run", "test-e2e"); err != nil {
 		collectDiagnostics(env, cfg.diagnosticTimeout)
 		return err
@@ -270,11 +277,13 @@ func waitForTokenExchange(ctx context.Context, cfg config) error {
 
 func probeTokenExchange(ctx context.Context, client *http.Client, url string) (tokenProbeResult, error) {
 	allowCode, allowBody, allowErr := request(ctx, client, url, "readiness-yellow")
-	denyCode, _, denyErr := request(ctx, client, url, "")
+	denyCode, denyBody, denyErr := request(ctx, client, url, "")
 	result := tokenProbeResult{
 		allowCode: allowCode,
 		denyCode:  denyCode,
 		allowAuth: exchangedAuthorization(allowBody),
+		allowBody: bodySnippet(allowBody),
+		denyBody:  bodySnippet(denyBody),
 	}
 	return result, errors.Join(allowErr, denyErr)
 }
@@ -308,10 +317,23 @@ func tokenProbeStatus(result tokenProbeResult, err error) string {
 	if result.allowAuth != "" {
 		exchanged = "present"
 	}
-	if err != nil {
-		return fmt.Sprintf("allow=%d deny=%d exchanged_auth=%s err=%v", result.allowCode, result.denyCode, exchanged, err)
+	body := ""
+	if result.allowBody != "" || result.denyBody != "" {
+		body = fmt.Sprintf(" allow_body=%q deny_body=%q", result.allowBody, result.denyBody)
 	}
-	return fmt.Sprintf("allow=%d deny=%d exchanged_auth=%s", result.allowCode, result.denyCode, exchanged)
+	if err != nil {
+		return fmt.Sprintf("allow=%d deny=%d exchanged_auth=%s%s err=%v", result.allowCode, result.denyCode, exchanged, body, err)
+	}
+	return fmt.Sprintf("allow=%d deny=%d exchanged_auth=%s%s", result.allowCode, result.denyCode, exchanged, body)
+}
+
+func bodySnippet(body []byte) string {
+	const limit = 240
+	trimmed := strings.TrimSpace(string(body))
+	if len(trimmed) <= limit {
+		return trimmed
+	}
+	return trimmed[:limit] + "..."
 }
 
 func exchangedAuthorization(body []byte) string {
@@ -362,6 +384,34 @@ func collectDiagnostics(env []string, timeout time.Duration) {
 		_ = runStep(ctx, env, step[0], step[1:]...)
 		cancel()
 	}
+}
+
+func keycloakBaseURL(baseURL string) string {
+	if value := os.Getenv("E2E_KEYCLOAK_BASE_URL"); value != "" {
+		return value
+	}
+	return keycloakExternalURL(baseURL)
+}
+
+func keycloakIssuerURL(baseURL string) string {
+	if value := os.Getenv("E2E_KEYCLOAK_ISSUER"); value != "" {
+		return value
+	}
+	return keycloakExternalURL(baseURL) + "/realms/token-exchange-e2e"
+}
+
+func keycloakExternalURL(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" {
+		return "https://keycloak.int.kube"
+	}
+	host := parsed.Host
+	if strings.HasPrefix(host, "httpbin.") {
+		host = "keycloak." + strings.TrimPrefix(host, "httpbin.")
+	} else {
+		host = "keycloak." + host
+	}
+	return "https://" + host
 }
 
 func runStep(ctx context.Context, env []string, name string, args ...string) error {

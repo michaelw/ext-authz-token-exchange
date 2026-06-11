@@ -101,3 +101,19 @@ func TestTokenProbeReady(t *testing.T) {
 		t.Fatal("original bearer token should not count as exchanged")
 	}
 }
+
+func TestKeycloakIssuerURL(t *testing.T) {
+	t.Setenv("E2E_KEYCLOAK_ISSUER", "")
+	got := keycloakIssuerURL("https://httpbin.int.kube")
+	want := "https://keycloak.int.kube/realms/token-exchange-e2e"
+	if got != want {
+		t.Fatalf("keycloakIssuerURL() = %q, want %q", got, want)
+	}
+}
+
+func TestKeycloakBaseURLPrefersEnv(t *testing.T) {
+	t.Setenv("E2E_KEYCLOAK_BASE_URL", "https://issuer.example.test")
+	if got := keycloakBaseURL("https://httpbin.int.kube"); got != "https://issuer.example.test" {
+		t.Fatalf("keycloakBaseURL() = %q, want env override", got)
+	}
+}
