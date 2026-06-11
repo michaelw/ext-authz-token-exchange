@@ -79,9 +79,6 @@ profiles:
               gatewayProvider: ${GATEWAY_PROVIDER}
               envoyFilter:
                 enabled: false
-              gatewayExtAuthzService:
-                serviceEntry:
-                  enabled: false
               gkeAuthz:
                 gateway:
                   namespace: ${GATEWAY_NAMESPACE}

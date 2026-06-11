@@ -84,9 +84,8 @@ devspace run test-e2e
 
 `devspace run test-e2e` runs the fake baseline for the default `with-test`
 stack. Keycloak-gated specs skip when Keycloak is unavailable and execute when
-the `with-keycloak` profile is deployed. The default local `ext_authz` profile
-uses the starter-pack `gateway-ext-authz` Service alias contract; add `-p
-ext-proc` when testing the Envoy external processor path instead.
+the `with-keycloak` profile is deployed. Add `-p ext-proc` when testing the
+Envoy external processor path instead of the default local `ext_authz` path.
 
 For manual Keycloak testing, start the dashboard. Each scenario declares its
 input token shape in the scenario YAML, and the token tab's `Fetch` button

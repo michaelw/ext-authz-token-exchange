@@ -201,9 +201,7 @@ fresh kind cluster for each local gateway mode. The workflow uses the Go smoke
 helper under `test/e2e/cmd/smoke` to deploy `with-infra` and `with-keycloak`
 for the Istio `ext_authz` path, deploy the same profiles plus `ext-proc` for
 the EnvoyFilter `ext_proc` path, wait for pods and token exchange readiness, and
-then run `devspace run test-e2e`. The local `ext_authz` profile renders the
-starter-pack provider host as a Kubernetes Service alias in `istio-ingress` so
-Istio can forward allowed `authorization` response headers upstream.
+then run `devspace run test-e2e`.
 
 DevSpace is the repository command runner for local validation. If it becomes
 awkward for non-cluster checks, Taskfile is the next preferred option.
