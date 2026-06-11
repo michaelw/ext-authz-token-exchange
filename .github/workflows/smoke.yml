@@ -64,6 +64,33 @@ jobs:
         run: |
           set -euo pipefail
           devspace deploy -p with-infra -p with-keycloak
+
+          deadline=$((SECONDS + 600))
+          while true; do
+            not_ready="$(
+              kubectl get pods --all-namespaces --no-headers | awk '
+                $4 != "Completed" && $4 != "Succeeded" {
+                  split($3, ready, "/")
+                  if (ready[1] != ready[2] || $4 != "Running") {
+                    print
+                  }
+                }
+              '
+            )"
+            if [ -z "$not_ready" ]; then
+              echo "All pods are Ready."
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out waiting for pods to become Ready." >&2
+              printf '%s\n' "$not_ready" >&2
+              exit 1
+            fi
+            echo "Waiting for pods to become Ready:"
+            printf '%s\n' "$not_ready"
+            sleep 10
+          done
+
           devspace run test-e2e
 
       - name: Collect Kubernetes diagnostics
