@@ -71,6 +71,9 @@ devspace deploy -p with-keycloak
 
 # same Keycloak stack, plus starter-pack infrastructure and httpbin/routes
 devspace deploy -p with-infra -p with-keycloak
+
+# same e2e stack through the local Envoy ext_proc filter path
+devspace deploy -p with-infra -p with-keycloak -p ext-proc
 ```
 
 After deployment, run the e2e assertions against the already deployed releases:
@@ -81,7 +84,9 @@ devspace run test-e2e
 
 `devspace run test-e2e` runs the fake baseline for the default `with-test`
 stack. Keycloak-gated specs skip when Keycloak is unavailable and execute when
-the `with-keycloak` profile is deployed.
+the `with-keycloak` profile is deployed. The default local `ext_authz` profile
+uses the starter-pack `gateway-ext-authz` Service alias contract; add `-p
+ext-proc` when testing the Envoy external processor path instead.
 
 For manual Keycloak testing, start the dashboard. Each scenario declares its
 input token shape in the scenario YAML, and the token tab's `Fetch` button

@@ -16,13 +16,18 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  SMOKE_CLUSTER_NAME: ext-authz-token-exchange-smoke
 
 jobs:
   smoke:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - ext-authz
+          - ext-proc
 
     steps:
       - name: Checkout
@@ -37,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ca-certificates curl iproute2 jq make openssl tar
+          sudo apt-get install -y ca-certificates curl iproute2 make openssl tar
 
           mkdir -p "${RUNNER_TEMP}/bin"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
@@ -57,69 +62,8 @@ jobs:
           curl -fsSL -o "${RUNNER_TEMP}/bin/devspace" "https://github.com/loft-sh/devspace/releases/download/v6.3.15/devspace-linux-amd64"
           chmod +x "${RUNNER_TEMP}/bin/devspace"
 
-      - name: Create kind cluster
-        run: kind create cluster --name "${SMOKE_CLUSTER_NAME}" --wait 5m
-
-      - name: Run smoke
-        run: |
-          set -euo pipefail
-          devspace deploy -p with-infra -p with-keycloak -p ext-proc
-
-          deadline=$((SECONDS + 600))
-          while true; do
-            not_ready="$(
-              kubectl get pods --all-namespaces --no-headers | awk '
-                $4 != "Completed" && $4 != "Succeeded" {
-                  split($3, ready, "/")
-                  if (ready[1] != ready[2] || $4 != "Running") {
-                    print
-                  }
-                }
-              '
-            )"
-            if [ -z "$not_ready" ]; then
-              echo "All pods are Ready."
-              break
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "Timed out waiting for pods to become Ready." >&2
-              printf '%s\n' "$not_ready" >&2
-              exit 1
-            fi
-            echo "Waiting for pods to become Ready:"
-            printf '%s\n' "$not_ready"
-            sleep 10
-          done
-
-          smoke_url="https://httpbin.int.kube/anything/yellow"
-          deadline=$((SECONDS + 600))
-          while true; do
-            allow_body="$(mktemp)"
-            allow_code="$(curl -ksS -o "$allow_body" -w '%{http_code}' -H 'Authorization: Bearer readiness-yellow' "$smoke_url" 2>/dev/null || true)"
-            allow_auth="$(jq -r '.headers | to_entries[] | select(.key | ascii_downcase == "authorization") | .value[0] // empty' "$allow_body" 2>/dev/null || true)"
-            rm -f "$allow_body"
-            deny_code="$(curl -ksS -o /dev/null -w '%{http_code}' "$smoke_url" 2>/dev/null || true)"
-            if [ "$allow_code" = "200" ] && [[ "$allow_auth" == Bearer\ * ]] && [ "$allow_auth" != "Bearer readiness-yellow" ] && [ "$deny_code" = "401" ]; then
-              echo "Token exchange is enforcing at $smoke_url."
-              break
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "Timed out waiting for token exchange enforcement at $smoke_url (allow=$allow_code deny=$deny_code exchanged_auth=$([ -n "$allow_auth" ] && echo present || echo missing))." >&2
-              exit 1
-            fi
-            echo "Waiting for token exchange enforcement at $smoke_url (allow=$allow_code deny=$deny_code exchanged_auth=$([ -n "$allow_auth" ] && echo present || echo missing))..."
-            sleep 10
-          done
-
-          devspace run test-e2e
-
-      - name: Collect Kubernetes diagnostics
-        if: failure()
-        run: |
-          kubectl get pods --all-namespaces -o wide || true
-          kubectl get events --all-namespaces --sort-by=.lastTimestamp || true
-          kubectl describe pods --all-namespaces || true
-
-      - name: Delete kind cluster
-        if: always()
-        run: kind delete cluster --name "${SMOKE_CLUSTER_NAME}"
+      - name: Run smoke (${{ matrix.mode }})
+        env:
+          SMOKE_MODE: ${{ matrix.mode }}
+          SMOKE_CLUSTER_NAME: ext-authz-token-exchange-smoke-${{ matrix.mode }}
+        run: go run ./test/e2e/cmd/smoke
