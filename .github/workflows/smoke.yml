@@ -63,7 +63,7 @@ jobs:
       - name: Run smoke
         run: |
           set -euo pipefail
-          devspace deploy -p with-infra -p with-keycloak
+          devspace deploy -p with-infra -p with-keycloak -p ext-proc
 
           deadline=$((SECONDS + 600))
           while true; do
