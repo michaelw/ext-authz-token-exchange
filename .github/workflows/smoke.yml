@@ -1,0 +1,78 @@
+name: smoke
+
+on:
+  schedule:
+    - cron: "29 8 * * *"
+  workflow_dispatch:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  SMOKE_CLUSTER_NAME: ext-authz-token-exchange-smoke
+
+jobs:
+  smoke:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install smoke tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl iproute2 make openssl tar
+
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kind" "https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-amd64"
+          chmod +x "${RUNNER_TEMP}/bin/kind"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/v1.33.2/bin/linux/amd64/kubectl"
+          chmod +x "${RUNNER_TEMP}/bin/kubectl"
+
+          curl -fsSL "https://get.helm.sh/helm-v3.18.3-linux-amd64.tar.gz" | tar -xz -C "${RUNNER_TEMP}"
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/bin/helm"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/yq" "https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64"
+          chmod +x "${RUNNER_TEMP}/bin/yq"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/devspace" "https://github.com/loft-sh/devspace/releases/download/v6.3.15/devspace-linux-amd64"
+          chmod +x "${RUNNER_TEMP}/bin/devspace"
+
+      - name: Create kind cluster
+        run: kind create cluster --name "${SMOKE_CLUSTER_NAME}" --wait 5m
+
+      - name: Run smoke
+        run: |
+          set -euo pipefail
+          devspace deploy -p with-infra -p with-keycloak
+          devspace run test-e2e
+
+      - name: Collect Kubernetes diagnostics
+        if: failure()
+        run: |
+          kubectl get pods --all-namespaces -o wide || true
+          kubectl get events --all-namespaces --sort-by=.lastTimestamp || true
+          kubectl describe pods --all-namespaces || true
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name "${SMOKE_CLUSTER_NAME}"
