@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.0...v0.5.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.30.0 ([#133](https://github.com/michaelw/ext-authz-token-exchange/issues/133)) ([c9aca88](https://github.com/michaelw/ext-authz-token-exchange/commit/c9aca8817bca128451fbbc975087d611db475980))
+* **deps:** update opentelemetry-go-contrib monorepo to v0.69.0 ([#107](https://github.com/michaelw/ext-authz-token-exchange/issues/107)) ([0e0f94f](https://github.com/michaelw/ext-authz-token-exchange/commit/0e0f94fe812635f43e787827c4130bac166d5af1))
+* **devspace:** ignore nil starter-pack values ([#128](https://github.com/michaelw/ext-authz-token-exchange/issues/128)) ([69da433](https://github.com/michaelw/ext-authz-token-exchange/commit/69da43352e03bd4f3602402587f161d69bd3b400))
+* **e2e:** default local keycloak route ([#129](https://github.com/michaelw/ext-authz-token-exchange/issues/129)) ([82ed719](https://github.com/michaelw/ext-authz-token-exchange/commit/82ed71972dc8abbde56a6cfa2a13361ecee1fe0f))
+* **server:** preserve ext-proc raw header mutations ([00b810c](https://github.com/michaelw/ext-authz-token-exchange/commit/00b810cbafdef2b819147ecbaa4a702adb5cd62f))
+* **server:** use string header values for authz mutations ([00b810c](https://github.com/michaelw/ext-authz-token-exchange/commit/00b810cbafdef2b819147ecbaa4a702adb5cd62f))
+
 ## [0.5.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.4.1...v0.5.0) (2026-06-03)
 
 
