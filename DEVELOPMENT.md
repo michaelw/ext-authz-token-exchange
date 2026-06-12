@@ -195,6 +195,14 @@ uploaded as workflow artifacts. Cluster-backed e2e remains optional because it
 requires with-test Gateway/Istio infrastructure; use
 `devspace run smoke` for that smoke path.
 
+The `smoke` workflow runs the cluster-backed e2e path nightly and on manual
+dispatch. Pull requests can opt in by adding the `smoke` label, which creates a
+fresh kind cluster for each local gateway mode. The workflow uses the Go smoke
+helper under `test/e2e/cmd/smoke` to deploy `with-infra` and `with-keycloak`
+for the Istio `ext_authz` path, deploy the same profiles plus `ext-proc` for
+the EnvoyFilter `ext_proc` path, wait for pods and token exchange readiness, and
+then run `devspace run test-e2e`.
+
 DevSpace is the repository command runner for local validation. If it becomes
 awkward for non-cluster checks, Taskfile is the next preferred option.
 
