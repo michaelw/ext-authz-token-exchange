@@ -86,6 +86,9 @@ devspace run test-e2e
 stack. Keycloak-gated specs skip when Keycloak is unavailable and execute when
 the `with-keycloak` profile is deployed. Add `-p ext-proc` when testing the
 Envoy external processor path instead of the default local `ext_authz` path.
+On non-GKE contexts, the command uses
+`https://keycloak.${DEPLOYMENT_DOMAIN}` as the Keycloak base URL when the
+Keycloak Service is present and no explicit `E2E_KEYCLOAK_BASE_URL` is set.
 
 For manual Keycloak testing, start the dashboard. Each scenario declares its
 input token shape in the scenario YAML, and the token tab's `Fetch` button
