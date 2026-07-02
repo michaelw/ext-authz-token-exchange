@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.2](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.1...v0.5.2) (2026-07-02)
+
+
+### Bug Fixes
+
+* **deps:** update kubernetes monorepo to v0.36.2 ([#134](https://github.com/michaelw/ext-authz-token-exchange/issues/134)) ([d66fb4b](https://github.com/michaelw/ext-authz-token-exchange/commit/d66fb4be3bf54fcfb6c8792be91c3c2474cf8e6d))
+* **deps:** update module github.com/coreos/go-oidc/v3 to v3.19.0 ([#141](https://github.com/michaelw/ext-authz-token-exchange/issues/141)) ([c1307fa](https://github.com/michaelw/ext-authz-token-exchange/commit/c1307fa42a104c867c7cdc19b2924879a956ddaa))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.31.0 ([#136](https://github.com/michaelw/ext-authz-token-exchange/issues/136)) ([c75c779](https://github.com/michaelw/ext-authz-token-exchange/commit/c75c7797c43a39f3cf67bdaa89aaa944e2617bdb))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.32.0 ([#144](https://github.com/michaelw/ext-authz-token-exchange/issues/144)) ([a9bec74](https://github.com/michaelw/ext-authz-token-exchange/commit/a9bec74eeb03b418d6a9334e8a60447b57443bc4))
+* **deps:** update module github.com/onsi/gomega to v1.42.0 ([#137](https://github.com/michaelw/ext-authz-token-exchange/issues/137)) ([ca3b361](https://github.com/michaelw/ext-authz-token-exchange/commit/ca3b36152f626c72d38e1cc1117f713819499ea7))
+* **deps:** update module github.com/onsi/gomega to v1.42.1 ([#146](https://github.com/michaelw/ext-authz-token-exchange/issues/146)) ([9120e12](https://github.com/michaelw/ext-authz-token-exchange/commit/9120e12ad7bd2764d5125cf0d6e0fe014443d394))
+* **deps:** update module google.golang.org/grpc to v1.82.0 ([#155](https://github.com/michaelw/ext-authz-token-exchange/issues/155)) ([7ddc1ba](https://github.com/michaelw/ext-authz-token-exchange/commit/7ddc1ba5f00c3ef251d7e2a35e74dac440ad14a8))
+
 ## [0.5.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.0...v0.5.1) (2026-06-12)
 
 
