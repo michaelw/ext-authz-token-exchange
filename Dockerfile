@@ -7,7 +7,7 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 
 # Base stage
-FROM golang:1.26.4-bookworm AS base
+FROM golang:1.26.5-bookworm AS base
 ARG WORKSPACE
 ARG USER
 ARG USER_ID
