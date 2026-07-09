@@ -3,7 +3,7 @@ module github.com/michaelw/ext-authz-token-exchange
 go 1.26.2
 
 require (
-	github.com/coreos/go-oidc/v3 v3.19.0
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
