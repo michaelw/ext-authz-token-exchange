@@ -1,7 +1,7 @@
 {{- range $team := .Values.teams }}
-{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color) }}
+{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color "namespace" $team.namespace) }}
 {{- $audience := printf "httpbin-%s" $team.color }}
-{{- $baseScenario := mergeOverwrite (dict "scope" $team.color "pathPrefix" (printf "/anything/%s" $team.color) "audience" $audience) (omit $team "color" "scenarios") }}
+{{- $baseScenario := mergeOverwrite (dict "scope" $team.color "pathPrefix" (include "ext-authz-token-exchange-e2e.teamPathPrefix" $team) "audience" $audience) (omit $team "color" "namespace" "scenarios") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,7 +31,7 @@ data:
 {{- end }}
 {{- end }}
 {{- range $group := .Values.additionalScenarios }}
-{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $group.color) }}
+{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $group.color "namespace" $group.namespace) }}
 {{- $audience := printf "httpbin-%s" $group.color }}
 {{- range $scenario := $group.scenarios }}
 {{- $scenarioConfig := merge (dict "audience" $audience) $scenario }}

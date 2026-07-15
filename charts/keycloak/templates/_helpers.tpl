@@ -41,7 +41,7 @@ https
 {{- end }}
 
 {{- define "keycloak.httpRedirectEnabled" -}}
-{{- or .Values.gateway.httpRedirect.enabled (eq (include "keycloak.isGKEGateway" .) "true") -}}
+{{- and (not .Values.gateway.httpRedirect.forceDisabled) (or .Values.gateway.httpRedirect.enabled (eq (include "keycloak.isGKEGateway" .) "true")) -}}
 {{- end }}
 
 {{- define "keycloak.httpRedirectSectionName" -}}
@@ -53,7 +53,11 @@ http
 {{- end }}
 
 {{- define "keycloak.gkeIapEnabled" -}}
-{{- or .Values.gkeIap.enabled (eq (include "keycloak.isGKEGateway" .) "true") -}}
+{{- and (not .Values.gkeIap.forceDisabled) (or .Values.gkeIap.enabled (eq (include "keycloak.isGKEGateway" .) "true")) -}}
+{{- end }}
+
+{{- define "keycloak.routeNamespace" -}}
+{{- .Values.gateway.routeNamespace | default .Values.namespace -}}
 {{- end }}
 
 {{- define "keycloak.gkeHealthCheckEnabled" -}}

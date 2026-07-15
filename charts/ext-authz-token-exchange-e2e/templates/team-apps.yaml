@@ -1,0 +1,72 @@
+{{- if .Values.teamApp.enabled }}
+{{- range $team := .Values.teams }}
+{{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color "namespace" $team.namespace) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Values.teamApp.name | quote }}
+  namespace: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
+  template:
+    metadata:
+      labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 8 }}
+        app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
+    spec:
+      containers:
+        - name: httpbin
+          image: {{ $.Values.teamApp.image | quote }}
+          imagePullPolicy: {{ $.Values.teamApp.imagePullPolicy | quote }}
+          ports:
+            - name: http
+              containerPort: {{ $.Values.teamApp.port }}
+          readinessProbe:
+            httpGet:
+              path: /status/204
+              port: http
+          resources:
+{{ toYaml $.Values.teamApp.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.teamApp.name | quote }}
+  namespace: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
+  ports:
+    - name: http
+      port: {{ $.Values.teamApp.port }}
+      targetPort: http
+      appProtocol: http
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ printf "%s-from-%s" $.Values.teamApp.name $.Values.teamApp.gatewayNamespace | trunc 63 | trimSuffix "-" | quote }}
+  namespace: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ $.Values.teamApp.gatewayNamespace | quote }}
+  to:
+    - group: ""
+      kind: Service
+      name: {{ $.Values.teamApp.name | quote }}
+---
+{{- end }}
+{{- end }}

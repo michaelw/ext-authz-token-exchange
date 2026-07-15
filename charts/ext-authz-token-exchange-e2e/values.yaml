@@ -16,6 +16,7 @@ policy:
   httpbinResourceBase: https://httpbin.int.kube
 
 fakeTokenEndpoint:
+  enabled: true
   name: fake-token-endpoint
   image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:latest
   imagePullPolicy: IfNotPresent
@@ -96,6 +97,30 @@ fakeTokenEndpoint:
     requests:
       cpu: 10m
       memory: 32Mi
+
+teamApp:
+  enabled: false
+  name: httpbin
+  image: mccutchen/go-httpbin:2.23.1
+  imagePullPolicy: IfNotPresent
+  port: 8080
+  gatewayNamespace: gke-gateway
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+platformRoutes:
+  enabled: false
+  gatewayNamespace: gke-gateway
+  gatewayName: gateway
+  gatewaySectionName: https
+  host: httpbin.int.kube
+  teamNames: yellow,red,blue,green
+  teamNamespacePrefix: txe-team
+  teamPathRoot: /anything/txe
+  serviceName: httpbin
+  servicePort: 8080
 
 teams:
   - color: blue

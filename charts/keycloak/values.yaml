@@ -51,13 +51,18 @@ gateway:
   enabled: true
   name: gateway
   namespace: istio-ingress
+  # Keep empty to render the route in the Keycloak namespace.
+  routeNamespace: ""
+  createReferenceGrant: false
   sectionName: ""
   httpRedirect:
     enabled: false
+    forceDisabled: false
     sectionName: http
 
 gkeIap:
   enabled: false
+  forceDisabled: false
   protection: iap
   policyName: keycloak-iap
   oauthClientID: ""

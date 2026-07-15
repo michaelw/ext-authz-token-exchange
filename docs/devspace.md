@@ -76,6 +76,61 @@ devspace deploy -p with-infra -p with-keycloak
 devspace deploy -p with-infra -p with-keycloak -p ext-proc
 ```
 
+### Existing-Gateway GKE deployment
+
+The opt-in `gke-platform` and `gke-app` profiles target an existing GKE
+Gateway without using starter-pack discovery, DNS, Terraform, registry login,
+image builds, or IAP. They do not change the default deployment or the
+auto-activated legacy `gke` profile.
+
+The platform team deploys the plugin, issuers, platform-owned routes, and the
+yellow reference application:
+
+```sh
+devspace deploy -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test
+```
+
+An application team then deploys only its namespace, httpbin application,
+policy ConfigMaps, and the `ReferenceGrant` for its reserved route:
+
+```sh
+devspace deploy -p gke-app \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_TEAM_NAME=red \
+  --var GKE_TEAM_NAMESPACE=txe-team-red
+```
+
+The Gateway must already exist and its selected listener must allow wildcard
+hostnames and routes from the Gateway namespace. The default contract is:
+
+- Gateway `gke-gateway/gateway`, listener `https`, port `443`.
+- Platform namespace `txe-platform`.
+- Team namespaces `txe-team-<team>` and paths `/anything/txe/<team>`.
+- Application host `httpbin.<GKE_DEPLOYMENT_DOMAIN>`.
+- Keycloak host `keycloak.<GKE_DEPLOYMENT_DOMAIN>`.
+- Reserved teams `yellow,red,blue,green`.
+
+Override the corresponding `GKE_*` variable when the cluster uses a different
+name. `GKE_HTTPBIN_HOST` and `GKE_KEYCLOAK_HOST` can be overridden
+independently. The platform route reservation uses the
+`GKE_TEAM_NAMESPACE_PREFIX-<team>` convention, so an app deployment's
+`GKE_TEAM_NAMESPACE` must match the namespace reserved by its route.
+
+Both profiles run end-to-end fake-issuer and Keycloak exchanges. After those
+checks pass, DevSpace reads the Gateway address and the platform route hosts and
+prints a copy-ready `/etc/hosts` entry. It never edits `/etc/hosts`.
+
+To remove one app without affecting the platform or other teams, repeat its
+variables on purge:
+
+```sh
+devspace purge -p gke-app \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_TEAM_NAME=red \
+  --var GKE_TEAM_NAMESPACE=txe-team-red
+```
+
 After deployment, run the e2e assertions against the already deployed releases:
 
 ```bash

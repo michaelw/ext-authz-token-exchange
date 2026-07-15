@@ -28,6 +28,37 @@ vars:
   GKE_REGION:
     command: ./scripts/starter-pack-env.sh
     args: ["get", "GKE_REGION", "", "${DEVSPACE_CONTEXT}"]
+  GKE_GATEWAY_NAMESPACE:
+    value: gke-gateway
+  GKE_GATEWAY_NAME:
+    value: gateway
+  GKE_GATEWAY_SECTION_NAME:
+    value: https
+  GKE_GATEWAY_SCHEME:
+    value: https
+  GKE_GATEWAY_PORT:
+    value: "443"
+  GKE_DEPLOYMENT_DOMAIN:
+    value: ""
+  GKE_HTTPBIN_HOST:
+    value: httpbin.${GKE_DEPLOYMENT_DOMAIN}
+  GKE_KEYCLOAK_HOST:
+    value: keycloak.${GKE_DEPLOYMENT_DOMAIN}
+  GKE_PLATFORM_NAMESPACE:
+    value: txe-platform
+  GKE_PLATFORM_TEAMS:
+    value: yellow,red,blue,green
+  GKE_TEAM_NAMESPACE_PREFIX:
+    value: txe-team
+  GKE_TEAM_PATH_ROOT:
+    value: /anything/txe
+  GKE_TEAM_NAME:
+    value: yellow
+  GKE_TEAM_NAMESPACE:
+    value: ${GKE_TEAM_NAMESPACE_PREFIX}-${GKE_TEAM_NAME}
+  GKE_IMAGE_TAG:
+    command: yq
+    args: ["-r", ".appVersion", "charts/ext-authz-token-exchange/Chart.yaml"]
   DNS_NAMESERVERS:
     value: ""
   HOST_INTEGRATION:
@@ -288,6 +319,242 @@ profiles:
       - op: replace
         path: images.fake-token-endpoint.image
         value: ${REGISTRY}/${FAKE_TOKEN_ENDPOINT_IMAGE_NAME}
+  - name: gke-platform
+    merge:
+      deployments:
+        ext-authz-token-exchange:
+          namespace: ${GKE_GATEWAY_NAMESPACE}
+          updateImageTags: false
+          helm:
+            values:
+              image:
+                repository: ghcr.io/michaelw/ext-authz-token-exchange
+                tag: ${GKE_IMAGE_TAG}
+              gatewayProvider: gke-gateway
+              extensionMode: ext_proc
+              gkeExtProc:
+                name: ext-authz-token-exchange
+                host: ${GKE_HTTPBIN_HOST}
+                failOpen: false
+                gateway:
+                  name: ${GKE_GATEWAY_NAME}
+              gkeAuthz:
+                callout:
+                  service:
+                    name: gateway-ext-authz
+                    port: 3001
+                    targetPort: grpc-authz
+                    appProtocol: HTTP2
+                  tls:
+                    enabled: false
+                    certificate:
+                      enabled: false
+                  healthCheck:
+                    enabled: true
+                    port: 3001
+                    portSpecification: USE_FIXED_PORT
+                  backendPolicy:
+                    enabled: false
+              oauth:
+                createSecret: true
+                secretName: ext-authz-token-exchange-fake-issuer-oauth
+                clientID: e2e-client
+                clientSecret: e2e-secret
+                existingSecret:
+                  name: ext-authz-token-exchange-fake-issuer-oauth
+                  clientIDKey: client_id
+                  clientSecretKey: client_secret
+              issuerProfiles:
+                profiles:
+                  - name: fake-issuer
+                    tokenEndpoint: http://fake-token-endpoint.${GKE_PLATFORM_NAMESPACE}.svc.cluster.local:8080/token/success
+                    bearerRealm: ext-authz-token-exchange-e2e
+                    tokenEndpointAuthMethod: client_secret_basic
+                    clientIDSecretRef:
+                      name: ext-authz-token-exchange-fake-issuer-oauth
+                      key: client_id
+                    clientSecretSecretRef:
+                      name: ext-authz-token-exchange-fake-issuer-oauth
+                      key: client_secret
+                  - name: local-keycloak
+                    tokenEndpoint: http://keycloak.${GKE_PLATFORM_NAMESPACE}.svc.cluster.local:8080/realms/token-exchange-e2e/protocol/openid-connect/token
+                    bearerRealm: token-exchange-e2e
+                    tokenEndpointAuthMethod: client_secret_basic
+                    clientIDSecretRef:
+                      name: ext-authz-token-exchange-keycloak-oauth
+                      key: client_id
+                    clientSecretSecretRef:
+                      name: ext-authz-token-exchange-keycloak-oauth
+                      key: client_secret
+              env:
+                TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
+                TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
+                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "false"
+                TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED: "false"
+                GRPC_LOG_HEALTH_CHECKS: "false"
+        gke-platform-resources:
+          namespace: ${GKE_PLATFORM_NAMESPACE}
+          helm:
+            releaseName: txe-platform
+            chart:
+              name: ./charts/ext-authz-token-exchange-e2e
+            values:
+              gatewayProvider: gke-gateway
+              host: ${GKE_HTTPBIN_HOST}
+              namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
+              systemNamespace: ${GKE_PLATFORM_NAMESPACE}
+              policy:
+                httpbinResourceBase: ${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}
+              fakeTokenEndpoint:
+                enabled: true
+                image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:${GKE_IMAGE_TAG}
+                routes:
+                  - name: yellow-success
+                    match:
+                      audience: httpbin-yellow
+                    response:
+                      type: success
+                      scenario: yellow
+                  - name: red-success
+                    match:
+                      audience: httpbin-red
+                    response:
+                      type: success
+                      scenario: red
+                  - name: blue-success
+                    match:
+                      audience: httpbin-blue
+                    response:
+                      type: success
+                      scenario: blue
+                  - name: green-success
+                    match:
+                      audience: httpbin-green
+                    response:
+                      type: success
+                      scenario: green
+              teamApp:
+                enabled: false
+              platformRoutes:
+                enabled: true
+                gatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
+                gatewayName: ${GKE_GATEWAY_NAME}
+                gatewaySectionName: ${GKE_GATEWAY_SECTION_NAME}
+                host: ${GKE_HTTPBIN_HOST}
+                teamNames: ${GKE_PLATFORM_TEAMS}
+                teamNamespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
+                teamPathRoot: ${GKE_TEAM_PATH_ROOT}
+              teams: []
+        gke-platform-keycloak:
+          namespace: ${GKE_PLATFORM_NAMESPACE}
+          helm:
+            releaseName: keycloak
+            chart:
+              name: ./charts/keycloak
+            values:
+              gatewayProvider: gke-gateway
+              gkeGatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
+              namespace: ${GKE_PLATFORM_NAMESPACE}
+              pluginNamespace: ${GKE_GATEWAY_NAMESPACE}
+              keycloak:
+                externalHost: ${GKE_KEYCLOAK_HOST}
+                externalURL: ${GKE_GATEWAY_SCHEME}://${GKE_KEYCLOAK_HOST}
+              gateway:
+                name: ${GKE_GATEWAY_NAME}
+                sectionName: ${GKE_GATEWAY_SECTION_NAME}
+                routeNamespace: ${GKE_GATEWAY_NAMESPACE}
+                createReferenceGrant: true
+                httpRedirect:
+                  forceDisabled: true
+              gkeIap:
+                forceDisabled: true
+        gke-platform-yellow:
+          namespace: ${GKE_TEAM_NAMESPACE_PREFIX}-yellow
+          helm:
+            releaseName: txe-team-yellow
+            chart:
+              name: ./charts/ext-authz-token-exchange-e2e
+            values:
+              gatewayProvider: gke-gateway
+              host: ${GKE_HTTPBIN_HOST}
+              namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
+              systemNamespace: ${GKE_PLATFORM_NAMESPACE}
+              policy:
+                httpbinResourceBase: ${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}
+              fakeTokenEndpoint:
+                enabled: false
+              teamApp:
+                enabled: true
+                gatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
+              platformRoutes:
+                enabled: false
+              teams:
+                - color: yellow
+                  namespace: ${GKE_TEAM_NAMESPACE_PREFIX}-yellow
+                  scope: yellow
+                  pathPrefix: "${GKE_TEAM_PATH_ROOT}/yellow"
+                  audiences: ["httpbin-yellow"]
+                  scenarios:
+                    - name: keycloak-audience
+                      scope: profile
+                      pathPrefix: "${GKE_TEAM_PATH_ROOT}/yellow/keycloak"
+                      issuerRef: local-keycloak
+                      resources: []
+                      audiences: ["tx-audience-client"]
+    patches:
+      - op: remove
+        path: deployments.ext-authz-token-exchange-e2e
+      - op: replace
+        path: pipelines.deploy.run
+        value: |-
+          source ./scripts/devspace-pipeline.sh
+          devspace_pipeline_deploy_gke_platform
+  - name: gke-app
+    merge:
+      deployments:
+        gke-team-app:
+          namespace: ${GKE_TEAM_NAMESPACE}
+          helm:
+            releaseName: txe-team-${GKE_TEAM_NAME}
+            chart:
+              name: ./charts/ext-authz-token-exchange-e2e
+            values:
+              gatewayProvider: gke-gateway
+              host: ${GKE_HTTPBIN_HOST}
+              namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
+              systemNamespace: ${GKE_PLATFORM_NAMESPACE}
+              policy:
+                httpbinResourceBase: ${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}
+              fakeTokenEndpoint:
+                enabled: false
+              teamApp:
+                enabled: true
+                gatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
+              platformRoutes:
+                enabled: false
+              teams:
+                - color: ${GKE_TEAM_NAME}
+                  namespace: ${GKE_TEAM_NAMESPACE}
+                  scope: ${GKE_TEAM_NAME}
+                  pathPrefix: "${GKE_TEAM_PATH_ROOT}/${GKE_TEAM_NAME}"
+                  audiences: ["httpbin-${GKE_TEAM_NAME}"]
+                  scenarios:
+                    - name: keycloak-audience
+                      scope: profile
+                      pathPrefix: "${GKE_TEAM_PATH_ROOT}/${GKE_TEAM_NAME}/keycloak"
+                      issuerRef: local-keycloak
+                      resources: []
+                      audiences: ["tx-audience-client"]
+    patches:
+      - op: remove
+        path: deployments.ext-authz-token-exchange
+      - op: remove
+        path: deployments.ext-authz-token-exchange-e2e
+      - op: replace
+        path: pipelines.deploy.run
+        value: |-
+          source ./scripts/devspace-pipeline.sh
+          devspace_pipeline_deploy_gke_app
 # Images to build and push
 images:
   # Development image - not pushed to production registry
@@ -514,14 +781,17 @@ commands:
     command: |
       echo "I: target=helm-verify"
       helm dependency build charts/ext-authz-token-exchange
+      helm dependency build charts/keycloak
       helm lint charts/ext-authz-token-exchange
       helm lint charts/ext-authz-token-exchange-e2e
+      helm lint charts/keycloak
       helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
         --namespace ext-authz-token-exchange \
         > /tmp/ext-authz-token-exchange-rendered.yaml
       helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e \
         --namespace ext-authz-token-exchange-e2e \
         > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
+      ./scripts/verify-gke-deployment-model.sh
 
   verify:
     description: "Run CI-equivalent local validation without a Kubernetes cluster"
@@ -542,14 +812,17 @@ commands:
       go build ./cmd/...
       echo "I: target=helm-verify"
       helm dependency build charts/ext-authz-token-exchange
+      helm dependency build charts/keycloak
       helm lint charts/ext-authz-token-exchange
       helm lint charts/ext-authz-token-exchange-e2e
+      helm lint charts/keycloak
       helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
         --namespace ext-authz-token-exchange \
         > /tmp/ext-authz-token-exchange-rendered.yaml
       helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e \
         --namespace ext-authz-token-exchange-e2e \
         > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
+      ./scripts/verify-gke-deployment-model.sh
 
   smoke:
     description: "Deploy the selected provider test stack and run Kubernetes e2e smoke tests"

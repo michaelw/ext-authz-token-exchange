@@ -1,0 +1,33 @@
+{{- if .Values.platformRoutes.enabled }}
+{{- $root := trimSuffix "/" .Values.platformRoutes.teamPathRoot }}
+{{- range $rawTeam := splitList "," .Values.platformRoutes.teamNames }}
+{{- $team := trim $rawTeam }}
+{{- if $team }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ printf "txe-team-%s" $team | trunc 63 | trimSuffix "-" | quote }}
+  namespace: {{ $.Values.platformRoutes.gatewayNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+    ext-authz-token-exchange.magneticflux.net/deployment-model: gke-platform
+    ext-authz-token-exchange.magneticflux.net/team: {{ $team | quote }}
+spec:
+  parentRefs:
+    - name: {{ $.Values.platformRoutes.gatewayName | quote }}
+      sectionName: {{ $.Values.platformRoutes.gatewaySectionName | quote }}
+  hostnames:
+    - {{ $.Values.platformRoutes.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ printf "%s/%s" $root $team | quote }}
+      backendRefs:
+        - name: {{ $.Values.platformRoutes.serviceName | quote }}
+          namespace: {{ printf "%s-%s" $.Values.platformRoutes.teamNamespacePrefix $team | quote }}
+          port: {{ $.Values.platformRoutes.servicePort }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

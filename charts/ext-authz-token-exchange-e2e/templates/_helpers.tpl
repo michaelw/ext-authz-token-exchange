@@ -5,7 +5,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end }}
 
 {{- define "ext-authz-token-exchange-e2e.teamNamespace" -}}
-{{- printf "%s-%s" $.Values.namespacePrefix .color -}}
+{{- .namespace | default (printf "%s-%s" $.Values.namespacePrefix .color) -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange-e2e.teamPathPrefix" -}}
+{{- .pathPrefix | default (printf "/anything/%s" .color) -}}
 {{- end }}
 
 {{- define "ext-authz-token-exchange-e2e.fakeTokenEndpointConfigMapName" -}}

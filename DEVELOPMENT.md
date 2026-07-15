@@ -183,10 +183,13 @@ go test ./...
 go test -coverprofile=coverage.out ./...
 go build ./cmd/...
 helm dependency build charts/ext-authz-token-exchange
+helm dependency build charts/keycloak
 helm lint charts/ext-authz-token-exchange
 helm lint charts/ext-authz-token-exchange-e2e
+helm lint charts/keycloak
 helm template ext-authz-token-exchange charts/ext-authz-token-exchange --namespace ext-authz-token-exchange
 helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e --namespace ext-authz-token-exchange-e2e
+./scripts/verify-gke-deployment-model.sh
 ```
 
 Go coverage is uploaded to Codecov and `coverage.out` remains available as a

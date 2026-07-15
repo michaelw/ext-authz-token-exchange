@@ -5,6 +5,13 @@ This runbook tests the plugin on a GKE Gateway target that uses
 Gateway, DNS, certificate, forwarding rule, or callout backend prerequisites
 belong in `devspace-starter-pack`.
 
+For a cluster-admin-only deployment into an existing wildcard-capable Gateway,
+use the separate `gke-platform` and `gke-app` model documented in
+[DevSpace Configuration](devspace.md#existing-gateway-gke-deployment). That
+model uses public release images, creates no external infrastructure, keeps the
+callout on plaintext HTTP/2 port `3001`, and disables Keycloak IAP. The legacy
+GKE model described below remains unchanged.
+
 ## Deploy
 
 Use the provider-aware smoke command on the selected GKE context:
