@@ -108,6 +108,30 @@ require_gke_model_value() {
   fi
 }
 
+gke_external_port() {
+  case "$GKE_EXTERNAL_SCHEME" in
+    https) printf '443\n' ;;
+    http) printf '80\n' ;;
+    *)
+      echo "E: GKE_EXTERNAL_SCHEME must be http or https (got ${GKE_EXTERNAL_SCHEME:-<empty>})" >&2
+      return 1
+      ;;
+  esac
+}
+
+gke_uses_direct_gateway() {
+  external_port="$(gke_external_port)" || return 1
+  [ "${GKE_SELECTED_LISTENER_SCHEME:-}" = "$GKE_EXTERNAL_SCHEME" ] \
+    && [ "${GKE_SELECTED_LISTENER_PORT:-}" = "$external_port" ]
+}
+
+validate_gke_gateway_ip() {
+  if [ -n "${GKE_GATEWAY_IP:-}" ] && ! is_ip_address "$GKE_GATEWAY_IP"; then
+    echo "E: GKE_GATEWAY_IP must be a valid IPv4 or IPv6 address (got $GKE_GATEWAY_IP)" >&2
+    return 1
+  fi
+}
+
 require_api_resource() {
   resource="$1"
   if ! kubectl api-resources -o name | grep -qx "$resource"; then
@@ -144,10 +168,11 @@ preflight_gke_gateway() {
   require_gke_model_value GKE_GATEWAY_NAMESPACE
   require_gke_model_value GKE_GATEWAY_NAME
   require_gke_model_value GKE_GATEWAY_SECTION_NAME
-  require_gke_model_value GKE_GATEWAY_SCHEME
-  require_gke_model_value GKE_GATEWAY_PORT
+  require_gke_model_value GKE_EXTERNAL_SCHEME
   require_gke_model_value GKE_HTTPBIN_HOST
   require_gke_model_value GKE_KEYCLOAK_HOST
+  gke_external_port >/dev/null || return 1
+  validate_gke_gateway_ip || return 1
 
   require_api_resource gateways.gateway.networking.k8s.io
   require_api_resource httproutes.gateway.networking.k8s.io
@@ -195,17 +220,14 @@ preflight_gke_gateway() {
   listener_port="$(printf '%s\n' "$listener_json" | yq -r '.port')"
   listener_protocol="$(printf '%s\n' "$listener_json" | yq -r '.protocol')"
   case "$listener_protocol" in
-    HTTPS) expected_scheme=https ;;
-    HTTP) expected_scheme=http ;;
-    *) expected_scheme="" ;;
+    HTTPS) GKE_SELECTED_LISTENER_SCHEME=https ;;
+    HTTP) GKE_SELECTED_LISTENER_SCHEME=http ;;
+    *)
+      echo "E: listener $GKE_GATEWAY_SECTION_NAME uses unsupported protocol=$listener_protocol" >&2
+      return 1
+      ;;
   esac
-  if [ "$listener_port" != "$GKE_GATEWAY_PORT" ] || [ "$expected_scheme" != "$GKE_GATEWAY_SCHEME" ]; then
-    echo "E: listener $GKE_GATEWAY_SECTION_NAME uses protocol=$listener_protocol port=$listener_port, but GKE_GATEWAY_SCHEME=$GKE_GATEWAY_SCHEME and GKE_GATEWAY_PORT=$GKE_GATEWAY_PORT" >&2
-    if [ -n "$expected_scheme" ]; then
-      echo "E: use --var GKE_GATEWAY_SECTION_NAME=$GKE_GATEWAY_SECTION_NAME --var GKE_GATEWAY_SCHEME=$expected_scheme --var GKE_GATEWAY_PORT=$listener_port" >&2
-    fi
-    return 1
-  fi
+  GKE_SELECTED_LISTENER_PORT="$listener_port"
 
   allowed_from="$(printf '%s\n' "$listener_json" | yq -r '.allowedRoutes.namespaces.from // "Same"')"
   if [ "$allowed_from" != "Same" ]; then
@@ -364,6 +386,12 @@ wait_for_http_route() {
 }
 
 gateway_ip_address() {
+  if [ -n "${GKE_GATEWAY_IP:-}" ]; then
+    validate_gke_gateway_ip || return 1
+    printf '%s\n' "$GKE_GATEWAY_IP"
+    return 0
+  fi
+
   addresses="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway "$GKE_GATEWAY_NAME" \
     -o jsonpath='{range .status.addresses[*]}{.value}{"\n"}{end}')"
   address="$(printf '%s\n' "$addresses" | awk '/^[0-9]+(\.[0-9]+){3}$/ { print; exit }')"
@@ -399,12 +427,53 @@ gateway_ip_address() {
   printf '%s\n' "$resolved"
 }
 
+is_ipv4_address() {
+  printf '%s\n' "$1" | awk -F. '
+    NF != 4 { exit 1 }
+    {
+      for (i = 1; i <= 4; i++) {
+        if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+      }
+    }
+  '
+}
+
+is_ipv6_address() {
+  printf '%s\n' "$1" | awk '
+    {
+      value = $0
+      if (value !~ /:/ || value ~ /[^0-9A-Fa-f:]/) exit 1
+      compressed = index(value, "::") > 0
+      remainder = value
+      if (compressed) {
+        sub(/::/, "", remainder)
+        if (index(remainder, "::") > 0) exit 1
+      }
+      count = split(value, groups, ":")
+      populated = 0
+      for (i = 1; i <= count; i++) {
+        if (groups[i] == "") continue
+        if (length(groups[i]) > 4 || groups[i] !~ /^[0-9A-Fa-f]+$/) exit 1
+        populated++
+      }
+      if (compressed && populated < 8) exit 0
+      if (!compressed && populated == 8) exit 0
+      exit 1
+    }
+  '
+}
+
+is_ip_address() {
+  is_ipv4_address "$1" || is_ipv6_address "$1"
+}
+
 curl_resolve_value() {
   host="$1"
   ip="$2"
+  port="$3"
   case "$ip" in
-    *:*) printf '%s:%s:[%s]\n' "$host" "$GKE_GATEWAY_PORT" "$ip" ;;
-    *) printf '%s:%s:%s\n' "$host" "$GKE_GATEWAY_PORT" "$ip" ;;
+    *:*) printf '%s:%s:[%s]\n' "$host" "$port" "$ip" ;;
+    *) printf '%s:%s:%s\n' "$host" "$port" "$ip" ;;
   esac
 }
 
@@ -435,13 +504,20 @@ print_probe_file() {
 
 probe_gke_team() {
   team="$1"
-  ip="$(gateway_ip_address)"
-  httpbin_resolve="$(curl_resolve_value "$GKE_HTTPBIN_HOST" "$ip")"
-  keycloak_resolve="$(curl_resolve_value "$GKE_KEYCLOAK_HOST" "$ip")"
-  base_url="${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}:${GKE_GATEWAY_PORT}${GKE_TEAM_PATH_ROOT}/$team"
+  external_port="$(gke_external_port)" || return 1
+  httpbin_curl_args=(--noproxy '*' -ksS)
+  keycloak_curl_args=(--noproxy '*' -ksS)
+  if gke_uses_direct_gateway; then
+    ip="$(gateway_ip_address)" || return 1
+    httpbin_resolve="$(curl_resolve_value "$GKE_HTTPBIN_HOST" "$ip" "$external_port")"
+    keycloak_resolve="$(curl_resolve_value "$GKE_KEYCLOAK_HOST" "$ip" "$external_port")"
+    httpbin_curl_args+=(--resolve "$httpbin_resolve")
+    keycloak_curl_args+=(--resolve "$keycloak_resolve")
+  fi
+  base_url="${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}${GKE_TEAM_PATH_ROOT}/$team"
   tmpdir="$(mktemp -d)"
 
-  deny_code="$(curl --noproxy '*' -ksS --resolve "$httpbin_resolve" -o "$tmpdir/deny.json" \
+  deny_code="$(curl "${httpbin_curl_args[@]}" -o "$tmpdir/deny.json" \
     -w '%{http_code}' "$base_url" 2>"$tmpdir/deny.stderr" || true)"
   if [ "$deny_code" != "401" ] || ! grep -q 'bearer_token_required' "$tmpdir/deny.json"; then
     echo "E: no-token probe failed for team $team (status=$deny_code)" >&2
@@ -452,7 +528,7 @@ probe_gke_team() {
   fi
 
   original="gke-$team-smoke"
-  allow_code="$(curl --noproxy '*' -ksS --resolve "$httpbin_resolve" -H "Authorization: Bearer $original" \
+  allow_code="$(curl "${httpbin_curl_args[@]}" -H "Authorization: Bearer $original" \
     -o "$tmpdir/fake.json" -w '%{http_code}' "$base_url" 2>"$tmpdir/fake.stderr" || true)"
   exchanged="$(httpbin_authorization "$tmpdir/fake.json")"
   if [ "$allow_code" != "200" ] || [ -z "$exchanged" ] || [ "$exchanged" = "Bearer $original" ]; then
@@ -463,14 +539,14 @@ probe_gke_team() {
     return 1
   fi
 
-  subject_code="$(curl --noproxy '*' -ksS --resolve "$keycloak_resolve" \
+  subject_code="$(curl "${keycloak_curl_args[@]}" \
     -d grant_type=password \
     -d client_id=tx-subject-client \
     -d client_secret=tx-subject-secret \
     -d username=token-user \
     -d password=token-user-password \
     -o "$tmpdir/subject.json" -w '%{http_code}' \
-    "${GKE_GATEWAY_SCHEME}://${GKE_KEYCLOAK_HOST}:${GKE_GATEWAY_PORT}/realms/token-exchange-e2e/protocol/openid-connect/token" \
+    "${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}/realms/token-exchange-e2e/protocol/openid-connect/token" \
     2>"$tmpdir/subject.stderr" || true)"
   subject_token="$(yq -p=json -r '.access_token // ""' "$tmpdir/subject.json" 2>/dev/null || true)"
   if [ "$subject_code" != "200" ] || [ -z "$subject_token" ]; then
@@ -481,7 +557,7 @@ probe_gke_team() {
     return 1
   fi
 
-  keycloak_code="$(curl --noproxy '*' -ksS --resolve "$httpbin_resolve" -H "Authorization: Bearer $subject_token" \
+  keycloak_code="$(curl "${httpbin_curl_args[@]}" -H "Authorization: Bearer $subject_token" \
     -o "$tmpdir/keycloak.json" -w '%{http_code}' "$base_url/keycloak" 2>"$tmpdir/keycloak.stderr" || true)"
   keycloak_auth="$(httpbin_authorization "$tmpdir/keycloak.json")"
   if [ "$keycloak_code" != "200" ] || [ -z "$keycloak_auth" ] || [ "$keycloak_auth" = "Bearer $subject_token" ]; then
@@ -494,7 +570,7 @@ probe_gke_team() {
   decode_jwt_payload "${keycloak_auth#Bearer }" > "$tmpdir/keycloak-payload.json"
   issuer="$(yq -p=json -r '.iss // ""' "$tmpdir/keycloak-payload.json")"
   audience_json="$(yq -p=json -o=json '.aud' "$tmpdir/keycloak-payload.json")"
-  expected_issuer="${GKE_GATEWAY_SCHEME}://${GKE_KEYCLOAK_HOST}/realms/token-exchange-e2e"
+  expected_issuer="${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}/realms/token-exchange-e2e"
   if [ "$issuer" != "$expected_issuer" ] || ! printf '%s\n' "$audience_json" | grep -q 'tx-audience-client'; then
     echo "E: exchanged Keycloak token has unexpected issuer or audience (issuer=$issuer audience=$audience_json)" >&2
     rm -rf "$tmpdir"
@@ -519,7 +595,15 @@ wait_for_gke_team_probe() {
 }
 
 print_gke_hosts_entries() {
-  ip="$(gateway_ip_address)"
+  if ! gke_uses_direct_gateway; then
+    echo
+    echo "Deployment succeeded."
+    echo
+    echo "Public DNS was used for $GKE_HTTPBIN_HOST and $GKE_KEYCLOAK_HOST; no /etc/hosts entries are required."
+    return 0
+  fi
+
+  ip="$(gateway_ip_address)" || return 1
   hostnames="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get httproutes \
     -l ext-authz-token-exchange.magneticflux.net/deployment-model=gke-platform \
     -o jsonpath='{range .items[*].spec.hostnames[*]}{.}{"\n"}{end}' | sort -u | tr '\n' ' ')"

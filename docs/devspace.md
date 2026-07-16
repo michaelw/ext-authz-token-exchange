@@ -102,9 +102,11 @@ devspace deploy -p gke-app \
 ```
 
 The Gateway must already exist and its selected listener must allow wildcard
-hostnames and routes from the Gateway namespace. The default contract is:
+hostnames and routes from the Gateway namespace. DevSpace reads the listener's
+protocol and port from the Gateway. The default contract is:
 
-- Gateway `gke-gateway/gateway`, listener `https`, port `443`.
+- Gateway `gke-gateway/gateway`, listener `https`.
+- Public scheme `https` on its standard port `443`.
 - Platform namespace `txe-platform`.
 - Team namespaces `txe-team-<team>` and paths `/anything/txe/<team>`.
 - Application host `httpbin.<GKE_DEPLOYMENT_DOMAIN>`.
@@ -122,24 +124,39 @@ independently. The platform route reservation uses the
 `GKE_TEAM_NAMESPACE_PREFIX-<team>` convention, so an app deployment's
 `GKE_TEAM_NAMESPACE` must match the namespace reserved by its route.
 
-For an HTTP-only Gateway listener, set the listener name, scheme, and port
-together. Keycloak then uses HTTP as its canonical external issuer and does not
-render the legacy HTTP-to-HTTPS redirect route:
+The selected listener and the public endpoint can use different protocols. For
+example, when TLS is terminated before an HTTP Gateway listener, keep the
+default public HTTPS scheme and select the HTTP listener:
+
+```sh
+devspace deploy -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http
+```
+
+The end-to-end probes then use public DNS so HTTPS reaches the external TLS
+terminator. Keycloak keeps `https://keycloak.example.test` as its canonical
+issuer, while the routes attach to the Gateway's `http` section.
+
+For direct access through an HTTP listener, set the public scheme to HTTP:
 
 ```sh
 devspace deploy -p gke-platform \
   --var GKE_DEPLOYMENT_DOMAIN=example.test \
   --var GKE_GATEWAY_SECTION_NAME=http \
-  --var GKE_GATEWAY_SCHEME=http \
-  --var GKE_GATEWAY_PORT=80
+  --var GKE_EXTERNAL_SCHEME=http
 ```
 
-The deployment preflight rejects a scheme or port that does not match the
-selected listener and prints the corresponding variables to use.
+Direct HTTPS uses the defaults. Public endpoints use the standard port for
+`GKE_EXTERNAL_SCHEME`: `443` for HTTPS and `80` for HTTP.
 
 Both profiles run end-to-end fake-issuer and Keycloak exchanges. After those
-checks pass, DevSpace reads the Gateway address and the platform route hosts and
-prints a copy-ready `/etc/hosts` entry. It never edits `/etc/hosts`.
+checks pass, direct-Gateway deployments read the Gateway address and print a
+copy-ready `/etc/hosts` entry. Set `GKE_GATEWAY_IP` to an IPv4 or IPv6 address
+to override `status.addresses` when direct access needs a specific Gateway IP.
+For externally terminated TLS, probes use public DNS and no Gateway
+`/etc/hosts` entry is printed; `GKE_GATEWAY_IP` cannot bypass the external TLS
+terminator. DevSpace never edits `/etc/hosts`.
 
 To remove one app without affecting the platform or other teams, repeat its
 variables on purge:

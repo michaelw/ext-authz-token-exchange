@@ -34,10 +34,10 @@ vars:
     value: gateway
   GKE_GATEWAY_SECTION_NAME:
     value: https
-  GKE_GATEWAY_SCHEME:
+  GKE_EXTERNAL_SCHEME:
     value: https
-  GKE_GATEWAY_PORT:
-    value: "443"
+  GKE_GATEWAY_IP:
+    value: ""
   GKE_DEPLOYMENT_DOMAIN:
     value: ""
   GKE_HTTPBIN_HOST:
@@ -414,7 +414,7 @@ profiles:
               namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
               systemNamespace: ${GKE_PLATFORM_NAMESPACE}
               policy:
-                httpbinResourceBase: ${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}
+                httpbinResourceBase: ${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}
               fakeTokenEndpoint:
                 enabled: true
                 image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:${GKE_IMAGE_TAG}
@@ -468,7 +468,7 @@ profiles:
               pluginNamespace: ${GKE_GATEWAY_NAMESPACE}
               keycloak:
                 externalHost: ${GKE_KEYCLOAK_HOST}
-                externalURL: ${GKE_GATEWAY_SCHEME}://${GKE_KEYCLOAK_HOST}
+                externalURL: ${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}
               gateway:
                 name: ${GKE_GATEWAY_NAME}
                 sectionName: ${GKE_GATEWAY_SECTION_NAME}
@@ -490,7 +490,7 @@ profiles:
               namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
               systemNamespace: ${GKE_PLATFORM_NAMESPACE}
               policy:
-                httpbinResourceBase: ${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}
+                httpbinResourceBase: ${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}
               fakeTokenEndpoint:
                 enabled: false
               teamApp:
@@ -534,7 +534,7 @@ profiles:
               namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
               systemNamespace: ${GKE_PLATFORM_NAMESPACE}
               policy:
-                httpbinResourceBase: ${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}
+                httpbinResourceBase: ${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}
               fakeTokenEndpoint:
                 enabled: false
               teamApp:

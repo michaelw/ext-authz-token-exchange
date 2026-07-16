@@ -62,6 +62,27 @@ assert_no_manifest "$workdir/legacy-gke-plugin.yaml" \
   'the opt-in Helm-managed TLS Secret in the legacy GKE render'
 
 echo "I: rendering platform-owned routes"
+# shellcheck disable=SC2016
+yq -e '
+  .vars.GKE_EXTERNAL_SCHEME.value == "https" and
+  .vars.GKE_GATEWAY_IP.value == "" and
+  (.vars | has("GKE_GATEWAY_SCHEME") | not) and
+  (.vars | has("GKE_GATEWAY_PORT") | not)
+' devspace.yaml >/dev/null
+# shellcheck disable=SC2016
+yq -e '
+  .profiles[] | select(.name == "gke-platform") |
+  select(
+    .merge.deployments."gke-platform-resources".helm.values.policy.httpbinResourceBase == "${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}" and
+    .merge.deployments."gke-platform-keycloak".helm.values.keycloak.externalURL == "${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}" and
+    .merge.deployments."gke-platform-yellow".helm.values.policy.httpbinResourceBase == "${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}"
+  )
+' devspace.yaml >/dev/null
+# shellcheck disable=SC2016
+yq -e '
+  .profiles[] | select(.name == "gke-app") |
+  select(.merge.deployments."gke-team-app".helm.values.policy.httpbinResourceBase == "${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}")
+' devspace.yaml >/dev/null
 helm template gke-platform-plugin charts/ext-authz-token-exchange \
   --namespace gke-gateway \
   --set gatewayProvider=gke-gateway \
@@ -142,7 +163,7 @@ for team in yellow red blue green; do
   ' "$workdir/platform-routes.yaml" >/dev/null
 done
 
-echo "I: rendering Keycloak without GKE IAP"
+echo "I: rendering Keycloak for externally terminated HTTPS without GKE IAP"
 # shellcheck disable=SC2016
 yq -e '
   .profiles[] | select(.name == "gke-platform") |
@@ -281,6 +302,7 @@ echo "I: checking Gateway hostname and /etc/hosts helpers"
   export GKE_GATEWAY_NAME=gateway
   export GKE_HTTPBIN_HOST=httpbin.example.test
   export GKE_KEYCLOAK_HOST=keycloak.example.test
+  export GKE_EXTERNAL_SCHEME=https
   # shellcheck disable=SC2329
   kubectl() {
     case " $* " in
@@ -294,11 +316,50 @@ echo "I: checking Gateway hostname and /etc/hosts helpers"
     esac
   }
   wait_for_gcptrafficextension_refs gke-gateway >/dev/null
+
+  export GKE_SELECTED_LISTENER_SCHEME=https
+  export GKE_SELECTED_LISTENER_PORT=443
+  export GKE_GATEWAY_IP=203.0.113.10
+  gke_uses_direct_gateway
+  [ "$(gke_external_port)" = "443" ]
+  [ "$(gateway_ip_address)" = "203.0.113.10" ]
+  [ "$(curl_resolve_value httpbin.example.test 203.0.113.10 443)" = \
+    "httpbin.example.test:443:203.0.113.10" ]
   hosts_output="$(print_gke_hosts_entries)"
   printf '%s\n' "$hosts_output" | grep -Fqx 'Deployment succeeded.'
   printf '%s\n' "$hosts_output" | grep -Fqx 'Add the following to /etc/hosts:'
   printf '%s\n' "$hosts_output" | \
     grep -Fqx '203.0.113.10 httpbin.example.test keycloak.example.test'
+
+  export GKE_GATEWAY_IP=2001:db8::10
+  [ "$(gateway_ip_address)" = "2001:db8::10" ]
+  [ "$(curl_resolve_value httpbin.example.test 2001:db8::10 443)" = \
+    "httpbin.example.test:443:[2001:db8::10]" ]
+
+  export GKE_GATEWAY_IP=not-an-ip
+  if gateway_ip_address >/dev/null 2>&1; then
+    echo "E: invalid GKE_GATEWAY_IP was accepted" >&2
+    exit 1
+  fi
+
+  export GKE_SELECTED_LISTENER_SCHEME=http
+  export GKE_SELECTED_LISTENER_PORT=80
+  if gke_uses_direct_gateway; then
+    echo "E: public HTTPS was treated as direct access to an HTTP listener" >&2
+    exit 1
+  fi
+  dns_output="$(print_gke_hosts_entries)"
+  printf '%s\n' "$dns_output" | grep -Fqx 'Deployment succeeded.'
+  printf '%s\n' "$dns_output" | grep -Fqx \
+    'Public DNS was used for httpbin.example.test and keycloak.example.test; no /etc/hosts entries are required.'
+  if printf '%s\n' "$dns_output" | grep -Fq 'Add the following to /etc/hosts:'; then
+    echo "E: external TLS output printed a Gateway /etc/hosts mapping" >&2
+    exit 1
+  fi
+
+  export GKE_EXTERNAL_SCHEME=http
+  gke_uses_direct_gateway
+  [ "$(gke_external_port)" = "80" ]
 )
 
 echo "I: GKE platform/app chart render checks passed"
