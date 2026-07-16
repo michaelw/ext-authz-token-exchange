@@ -131,6 +131,14 @@ func TestPreStopSleepDuration(t *testing.T) {
 
 func TestLoggingOptionsIncludesHealthMethod(t *testing.T) {
 	opts := loggingOptions(config.RuntimeConfig{LogHealthChecks: false})
+	extProcMethod, ok := opts.Methods[server.ExtProcProcessMethod]
+	if !ok {
+		t.Fatalf("logging options did not include %s", server.ExtProcProcessMethod)
+	}
+	if !extProcMethod.LogEnabled {
+		t.Fatal("ext_proc Process logging should be enabled")
+	}
+
 	method, ok := opts.Methods[healthCheckMethod]
 	if !ok {
 		t.Fatalf("logging options did not include %s", healthCheckMethod)
