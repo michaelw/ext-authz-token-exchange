@@ -284,12 +284,16 @@ echo "I: checking Gateway hostname and /etc/hosts helpers"
   # shellcheck disable=SC2329
   kubectl() {
     case " $* " in
+      *" get gcptrafficextension "*)
+        printf '%s\n' 'Accepted=True:Accepted' 'Programmed=True:ProgrammingSucceeded'
+        ;;
       *" get gateway "*) printf '%s\n' '203.0.113.10' ;;
       *" get httproutes "*)
         printf '%s\n' keycloak.example.test httpbin.example.test httpbin.example.test
         ;;
     esac
   }
+  wait_for_gcptrafficextension_refs gke-gateway >/dev/null
   hosts_output="$(print_gke_hosts_entries)"
   printf '%s\n' "$hosts_output" | grep -Fqx 'Deployment succeeded.'
   printf '%s\n' "$hosts_output" | grep -Fqx 'Add the following to /etc/hosts:'

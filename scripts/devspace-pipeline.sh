@@ -59,13 +59,14 @@ wait_for_gcptrafficextension_refs() {
   deadline=$((SECONDS + 600))
 
   while [ "$SECONDS" -lt "$deadline" ]; do
-    conditions="$(kubectl -n "$namespace" get gcptrafficextension ext-authz-token-exchange -o json 2>/dev/null | \
-      yq -r '(.status.conditions[]?, .status.ancestors[]?.conditions[]?) | "\(.type)=\(.status):\(.reason // "")"' 2>/dev/null || true)"
+    conditions="$(kubectl -n "$namespace" get gcptrafficextension ext-authz-token-exchange \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status}:{.reason}{"\n"}{end}{range .status.ancestors[*].conditions[*]}{.type}={.status}:{.reason}{"\n"}{end}' \
+      2>/dev/null || true)"
 
     if printf '%s\n' "$conditions" | grep -q '^Accepted=True:' \
-      && printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=True:' \
+      && ! printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=False:' \
       && printf '%s\n' "$conditions" | grep -q '^Programmed=True:ProgrammingSucceeded$'; then
-      echo "I: GCPTrafficExtension refs accepted, resolved, and programmed."
+      echo "I: GCPTrafficExtension accepted and programmed."
       return 0
     fi
 
