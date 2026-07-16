@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -39,15 +40,7 @@ func LoggingInterceptor() grpc.UnaryServerInterceptor {
 // LoggingInterceptorWithOptions creates a gRPC unary interceptor with explicit logging options.
 func LoggingInterceptorWithOptions(opts LoggingOptions) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-
-		// Extract client address
-		clientAddr := "UNKNOWN"
-		if p, ok := peer.FromContext(ctx); ok {
-			clientAddr = p.Addr.String()
-		}
-
 		start := time.Now()
-		// Call the handler
 		resp, err := handler(ctx, req)
 		duration := time.Since(start)
 
@@ -66,23 +59,97 @@ func LoggingInterceptorWithOptions(opts LoggingOptions) grpc.UnaryServerIntercep
 			args += fmt.Sprintf(" | response=%s", responseSummary(resp, methodLogging, hasMethodLogging))
 		}
 
-		if st, ok := status.FromError(err); ok {
-			customLogger.Printf("| %3d | %13v | %15s | %s%s",
-				int(st.Code()),
-				duration,
-				logField(clientAddr),
-				logField(info.FullMethod),
-				args)
-		} else {
-			customLogger.Printf("| ERR | %13v | %15s | %s - %v%s",
-				duration,
-				logField(clientAddr),
-				logField(info.FullMethod),
-				err,
-				args)
-		}
+		logRPC(ctx, info.FullMethod, duration, err, args)
 
 		return resp, err
+	}
+}
+
+// LoggingStreamInterceptorWithOptions creates a streaming gRPC interceptor with
+// the same method summaries and output format as the unary interceptor.
+func LoggingStreamInterceptorWithOptions(opts LoggingOptions) grpc.StreamServerInterceptor {
+	return func(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		methodLogging, hasMethodLogging := opts.Methods[info.FullMethod]
+		if !hasMethodLogging || !methodLogging.LogEnabled {
+			return handler(srv, stream)
+		}
+
+		wrapped := &summaryServerStream{
+			ServerStream: stream,
+			method:       methodLogging,
+		}
+		start := time.Now()
+		err := handler(srv, wrapped)
+		duration := time.Since(start)
+		logRPC(stream.Context(), info.FullMethod, duration, err, wrapped.args())
+		return err
+	}
+}
+
+type summaryServerStream struct {
+	grpc.ServerStream
+	method LoggingMethod
+
+	mu              sync.Mutex
+	requestSummary  string
+	responseSummary string
+}
+
+func (s *summaryServerStream) RecvMsg(message any) error {
+	err := s.ServerStream.RecvMsg(message)
+	if err != nil || s.method.SummarizeRequest == nil {
+		return err
+	}
+	if summary := s.method.SummarizeRequest(message); summary != "" {
+		s.mu.Lock()
+		if s.requestSummary == "" {
+			s.requestSummary = summary
+		}
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+func (s *summaryServerStream) SendMsg(message any) error {
+	if s.method.SummarizeResponse != nil {
+		summary := s.method.SummarizeResponse(message)
+		s.mu.Lock()
+		s.responseSummary = summary
+		s.mu.Unlock()
+	}
+	return s.ServerStream.SendMsg(message)
+}
+
+func (s *summaryServerStream) args() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	args := s.requestSummary
+	if s.responseSummary != "" {
+		args += fmt.Sprintf(" | response=%s", s.responseSummary)
+	}
+	return args
+}
+
+func logRPC(ctx context.Context, method string, duration time.Duration, err error, args string) {
+	clientAddr := "UNKNOWN"
+	if p, ok := peer.FromContext(ctx); ok {
+		clientAddr = p.Addr.String()
+	}
+	if st, ok := status.FromError(err); ok {
+		customLogger.Printf("| %3d | %13v | %15s | %s%s",
+			int(st.Code()),
+			duration,
+			logField(clientAddr),
+			logField(method),
+			args)
+	} else {
+		customLogger.Printf("| ERR | %13v | %15s | %s - %v%s",
+			duration,
+			logField(clientAddr),
+			logField(method),
+			err,
+			args)
 	}
 }
 

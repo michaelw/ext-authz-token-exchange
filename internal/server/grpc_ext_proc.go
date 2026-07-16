@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -28,6 +29,44 @@ type ExtProcGRPCServer struct {
 // NewExtProcGRPCServer creates a gRPC external processing server.
 func NewExtProcGRPCServer(cfg config.RuntimeConfig, store policy.Store, exchanger tokenExchanger) *ExtProcGRPCServer {
 	return &ExtProcGRPCServer{authz: NewAuthzGRPCServer(cfg, store, exchanger)}
+}
+
+// ExtProcLoggingMethods returns gRPC logging rules for the external processor.
+func ExtProcLoggingMethods() map[string]LoggingMethod {
+	return map[string]LoggingMethod{
+		ExtProcProcessMethod: {
+			LogEnabled:        true,
+			SummarizeRequest:  summarizeExtProcRequest,
+			SummarizeResponse: summarizeExtProcResponse,
+		},
+	}
+}
+
+func summarizeExtProcRequest(message any) string {
+	req, ok := message.(*envoy_service_ext_proc_v3.ProcessingRequest)
+	if !ok || req.GetRequestHeaders() == nil {
+		return ""
+	}
+	values := extProcHeaders(req.GetRequestHeaders().GetHeaders())
+	return fmt.Sprintf(" | %s | %s://%s%s",
+		logField(extProcMethod(req, values)),
+		logField(extProcScheme(req, values)),
+		logField(extProcHost(req, values)),
+		logPath(extProcPath(req, values)))
+}
+
+func summarizeExtProcResponse(message any) string {
+	resp, ok := message.(*envoy_service_ext_proc_v3.ProcessingResponse)
+	if !ok {
+		return "unknown"
+	}
+	if resp.GetRequestHeaders() != nil {
+		return "ok"
+	}
+	if immediate := resp.GetImmediateResponse(); immediate != nil && immediate.GetStatus() != nil {
+		return "denied_status=" + logField(immediate.GetStatus().GetCode().String())
+	}
+	return "unknown"
 }
 
 // Process implements Envoy ext_proc request-header processing.

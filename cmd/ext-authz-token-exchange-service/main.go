@@ -115,6 +115,7 @@ func serveGRPC(ctx context.Context, port string, tlsCfg *grpcTLSConfig, cfg conf
 	opts := []grpc.ServerOption{
 		grpc.StatsHandler(grpcStatsHandler()),
 		grpc.UnaryInterceptor(server.LoggingInterceptorWithOptions(loggingOptions(cfg))),
+		grpc.StreamInterceptor(server.LoggingStreamInterceptorWithOptions(loggingOptions(cfg))),
 	}
 	if tlsCfg != nil {
 		creds, err := credentials.NewServerTLSFromFile(tlsCfg.certFile, tlsCfg.keyFile)
@@ -163,6 +164,9 @@ func podNamespaceFromEnv() string {
 
 func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {
 	methods := server.AuthzLoggingMethods()
+	for method, logging := range server.ExtProcLoggingMethods() {
+		methods[method] = logging
+	}
 	methods[healthCheckMethod] = server.LoggingMethod{
 		LogEnabled:        cfg.LogHealthChecks,
 		SummarizeResponse: summarizeHealthResponse,
