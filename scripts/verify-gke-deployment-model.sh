@@ -82,7 +82,7 @@ helm template gke-platform-routes charts/ext-authz-token-exchange-e2e \
   --set platformRoutes.enabled=true \
   --set platformRoutes.gatewayNamespace=gke-gateway \
   --set platformRoutes.gatewayName=gateway \
-  --set platformRoutes.gatewaySectionName=https \
+  --set platformRoutes.gatewaySectionName=custom-listener \
   --set platformRoutes.host=httpbin.example.test \
   --set-string 'platformRoutes.teamNames=yellow\,red\,blue\,green' \
   --set platformRoutes.teamNamespacePrefix=txe-team \
@@ -92,6 +92,7 @@ for team in yellow red blue green; do
   TEAM="$team" yq -e '
     select(.kind == "HTTPRoute" and .metadata.name == ("txe-team-" + strenv(TEAM))) |
     select(.metadata.namespace == "gke-gateway") |
+    select(.spec.parentRefs[0].sectionName == "custom-listener") |
     select(.spec.hostnames[0] == "httpbin.example.test") |
     select(.spec.rules[0].matches[0].path.value == ("/anything/txe/" + strenv(TEAM))) |
     select(.spec.rules[0].backendRefs[0].namespace == ("txe-team-" + strenv(TEAM)))
@@ -113,12 +114,13 @@ helm template gke-platform-keycloak charts/keycloak \
   --set keycloak.externalHost=keycloak.example.test \
   --set keycloak.externalURL=https://keycloak.example.test \
   --set gateway.name=gateway \
+  --set gateway.sectionName=custom-listener \
   --set gateway.routeNamespace=gke-gateway \
   --set gateway.createReferenceGrant=true \
   --set gateway.httpRedirect.forceDisabled=true \
   --set gkeIap.forceDisabled=true > "$workdir/platform-keycloak.yaml"
 assert_manifest "$workdir/platform-keycloak.yaml" \
-  'select(.kind == "HTTPRoute" and .metadata.namespace == "gke-gateway" and .spec.hostnames[0] == "keycloak.example.test" and .spec.rules[0].backendRefs[0].namespace == "txe-platform")' \
+  'select(.kind == "HTTPRoute" and .metadata.namespace == "gke-gateway" and .spec.parentRefs[0].sectionName == "custom-listener" and .spec.hostnames[0] == "keycloak.example.test" and .spec.rules[0].backendRefs[0].namespace == "txe-platform")' \
   'the Gateway-namespace Keycloak route'
 assert_manifest "$workdir/platform-keycloak.yaml" \
   'select(.kind == "ReferenceGrant" and .metadata.namespace == "txe-platform" and .spec.from[0].namespace == "gke-gateway" and .spec.to[0].name == "keycloak")' \

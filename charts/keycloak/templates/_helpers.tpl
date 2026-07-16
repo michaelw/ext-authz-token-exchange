@@ -33,10 +33,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end }}
 
 {{- define "keycloak.gatewaySectionName" -}}
-{{- if eq (include "keycloak.isGKEGateway" .) "true" -}}
-https
-{{- else -}}
+{{- if .Values.gateway.sectionName -}}
 {{- .Values.gateway.sectionName -}}
+{{- else if eq (include "keycloak.isGKEGateway" .) "true" -}}
+https
 {{- end -}}
 {{- end }}
 
