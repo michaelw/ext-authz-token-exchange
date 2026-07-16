@@ -59,16 +59,17 @@ wait_for_gcptrafficextension_refs() {
   deadline=$((SECONDS + 600))
 
   while [ "$SECONDS" -lt "$deadline" ]; do
-    conditions="$(kubectl -n "$namespace" get gcptrafficextension ext-authz-token-exchange \
-      -o jsonpath='{range .status.ancestors[*].conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null || true)"
+    conditions="$(kubectl -n "$namespace" get gcptrafficextension ext-authz-token-exchange -o json 2>/dev/null | \
+      yq -r '(.status.conditions[]?, .status.ancestors[]?.conditions[]?) | "\(.type)=\(.status):\(.reason // "")"' 2>/dev/null || true)"
 
-    if printf '%s\n' "$conditions" | grep -q '^Accepted=True$' \
-      && printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=True$'; then
-      echo "I: GCPTrafficExtension refs accepted and resolved."
+    if printf '%s\n' "$conditions" | grep -q '^Accepted=True:' \
+      && printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=True:' \
+      && printf '%s\n' "$conditions" | grep -q '^Programmed=True:ProgrammingSucceeded$'; then
+      echo "I: GCPTrafficExtension refs accepted, resolved, and programmed."
       return 0
     fi
 
-    echo "I: Waiting for GCPTrafficExtension refs to settle..."
+    echo "I: Waiting for GCPTrafficExtension programming (conditions: $(printf '%s' "$conditions" | tr '\n' ' '))"
     sleep 5
   done
 
@@ -192,17 +193,18 @@ preflight_gke_gateway() {
 
   listener_port="$(printf '%s\n' "$listener_json" | yq -r '.port')"
   listener_protocol="$(printf '%s\n' "$listener_json" | yq -r '.protocol')"
-  if [ "$listener_port" != "$GKE_GATEWAY_PORT" ]; then
-    echo "E: listener $GKE_GATEWAY_SECTION_NAME uses port $listener_port, not $GKE_GATEWAY_PORT" >&2
+  case "$listener_protocol" in
+    HTTPS) expected_scheme=https ;;
+    HTTP) expected_scheme=http ;;
+    *) expected_scheme="" ;;
+  esac
+  if [ "$listener_port" != "$GKE_GATEWAY_PORT" ] || [ "$expected_scheme" != "$GKE_GATEWAY_SCHEME" ]; then
+    echo "E: listener $GKE_GATEWAY_SECTION_NAME uses protocol=$listener_protocol port=$listener_port, but GKE_GATEWAY_SCHEME=$GKE_GATEWAY_SCHEME and GKE_GATEWAY_PORT=$GKE_GATEWAY_PORT" >&2
+    if [ -n "$expected_scheme" ]; then
+      echo "E: use --var GKE_GATEWAY_SECTION_NAME=$GKE_GATEWAY_SECTION_NAME --var GKE_GATEWAY_SCHEME=$expected_scheme --var GKE_GATEWAY_PORT=$listener_port" >&2
+    fi
     return 1
   fi
-  case "$GKE_GATEWAY_SCHEME:$listener_protocol" in
-    https:HTTPS|http:HTTP) ;;
-    *)
-      echo "E: listener protocol $listener_protocol is incompatible with GKE_GATEWAY_SCHEME=$GKE_GATEWAY_SCHEME" >&2
-      return 1
-      ;;
-  esac
 
   allowed_from="$(printf '%s\n' "$listener_json" | yq -r '.allowedRoutes.namespaces.from // "Same"')"
   if [ "$allowed_from" != "Same" ]; then
@@ -423,6 +425,13 @@ decode_jwt_payload() {
   printf '%s' "$payload" | base64 -D
 }
 
+print_probe_file() {
+  file="$1"
+  if [ -s "$file" ]; then
+    cat "$file" >&2
+  fi
+}
+
 probe_gke_team() {
   team="$1"
   ip="$(gateway_ip_address)"
@@ -431,44 +440,53 @@ probe_gke_team() {
   base_url="${GKE_GATEWAY_SCHEME}://${GKE_HTTPBIN_HOST}:${GKE_GATEWAY_PORT}${GKE_TEAM_PATH_ROOT}/$team"
   tmpdir="$(mktemp -d)"
 
-  deny_code="$(curl -ksS --resolve "$httpbin_resolve" -o "$tmpdir/deny.json" -w '%{http_code}' "$base_url")"
+  deny_code="$(curl --noproxy '*' -ksS --resolve "$httpbin_resolve" -o "$tmpdir/deny.json" \
+    -w '%{http_code}' "$base_url" 2>"$tmpdir/deny.stderr" || true)"
   if [ "$deny_code" != "401" ] || ! grep -q 'bearer_token_required' "$tmpdir/deny.json"; then
     echo "E: no-token probe failed for team $team (status=$deny_code)" >&2
-    cat "$tmpdir/deny.json" >&2
+    print_probe_file "$tmpdir/deny.json"
+    print_probe_file "$tmpdir/deny.stderr"
     rm -rf "$tmpdir"
     return 1
   fi
 
   original="gke-$team-smoke"
-  allow_code="$(curl -ksS --resolve "$httpbin_resolve" -H "Authorization: Bearer $original" -o "$tmpdir/fake.json" -w '%{http_code}' "$base_url")"
+  allow_code="$(curl --noproxy '*' -ksS --resolve "$httpbin_resolve" -H "Authorization: Bearer $original" \
+    -o "$tmpdir/fake.json" -w '%{http_code}' "$base_url" 2>"$tmpdir/fake.stderr" || true)"
   exchanged="$(httpbin_authorization "$tmpdir/fake.json")"
   if [ "$allow_code" != "200" ] || [ -z "$exchanged" ] || [ "$exchanged" = "Bearer $original" ]; then
     echo "E: fake issuer exchange probe failed for team $team (status=$allow_code authorization=${exchanged:-missing})" >&2
-    cat "$tmpdir/fake.json" >&2
+    print_probe_file "$tmpdir/fake.json"
+    print_probe_file "$tmpdir/fake.stderr"
     rm -rf "$tmpdir"
     return 1
   fi
 
-  subject_token="$(curl -ksS --resolve "$keycloak_resolve" \
+  subject_code="$(curl --noproxy '*' -ksS --resolve "$keycloak_resolve" \
     -d grant_type=password \
     -d client_id=tx-subject-client \
     -d client_secret=tx-subject-secret \
     -d username=token-user \
     -d password=token-user-password \
-    "${GKE_GATEWAY_SCHEME}://${GKE_KEYCLOAK_HOST}:${GKE_GATEWAY_PORT}/realms/token-exchange-e2e/protocol/openid-connect/token" | \
-    yq -p=json -r '.access_token // ""')"
-  if [ -z "$subject_token" ]; then
-    echo "E: failed to obtain a Keycloak subject token" >&2
+    -o "$tmpdir/subject.json" -w '%{http_code}' \
+    "${GKE_GATEWAY_SCHEME}://${GKE_KEYCLOAK_HOST}:${GKE_GATEWAY_PORT}/realms/token-exchange-e2e/protocol/openid-connect/token" \
+    2>"$tmpdir/subject.stderr" || true)"
+  subject_token="$(yq -p=json -r '.access_token // ""' "$tmpdir/subject.json" 2>/dev/null || true)"
+  if [ "$subject_code" != "200" ] || [ -z "$subject_token" ]; then
+    echo "E: failed to obtain a Keycloak subject token (status=$subject_code)" >&2
+    print_probe_file "$tmpdir/subject.json"
+    print_probe_file "$tmpdir/subject.stderr"
     rm -rf "$tmpdir"
     return 1
   fi
 
-  keycloak_code="$(curl -ksS --resolve "$httpbin_resolve" -H "Authorization: Bearer $subject_token" \
-    -o "$tmpdir/keycloak.json" -w '%{http_code}' "$base_url/keycloak")"
+  keycloak_code="$(curl --noproxy '*' -ksS --resolve "$httpbin_resolve" -H "Authorization: Bearer $subject_token" \
+    -o "$tmpdir/keycloak.json" -w '%{http_code}' "$base_url/keycloak" 2>"$tmpdir/keycloak.stderr" || true)"
   keycloak_auth="$(httpbin_authorization "$tmpdir/keycloak.json")"
   if [ "$keycloak_code" != "200" ] || [ -z "$keycloak_auth" ] || [ "$keycloak_auth" = "Bearer $subject_token" ]; then
     echo "E: Keycloak exchange probe failed for team $team (status=$keycloak_code)" >&2
-    cat "$tmpdir/keycloak.json" >&2
+    print_probe_file "$tmpdir/keycloak.json"
+    print_probe_file "$tmpdir/keycloak.stderr"
     rm -rf "$tmpdir"
     return 1
   fi

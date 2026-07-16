@@ -9,8 +9,9 @@ For a cluster-admin-only deployment into an existing wildcard-capable Gateway,
 use the separate `gke-platform` and `gke-app` model documented in
 [DevSpace Configuration](devspace.md#existing-gateway-gke-deployment). That
 model uses public release images, creates no external infrastructure, keeps the
-callout on plaintext HTTP/2 port `3001`, and disables Keycloak IAP. The legacy
-GKE model described below remains unchanged.
+callout on TLS HTTP/2 port `3000` with a Helm-managed self-signed Secret, keeps
+plaintext port `3001` for health checks, and disables Keycloak IAP. It does not
+require cert-manager. The legacy GKE model described below remains unchanged.
 
 ## Deploy
 

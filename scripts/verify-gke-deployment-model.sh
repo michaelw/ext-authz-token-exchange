@@ -45,6 +45,22 @@ assert_manifest "$workdir/legacy-gke-keycloak.yaml" \
   'select(.kind == "HTTPRoute" and .metadata.name == "keycloak-http-redirect")' \
   'the legacy GKE HTTP redirect route'
 
+helm template legacy-gke-plugin charts/ext-authz-token-exchange \
+  --namespace gke-gateway \
+  --set gatewayProvider=gke-gateway > "$workdir/legacy-gke-plugin.yaml"
+assert_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'select(.kind == "Issuer" and .apiVersion == "cert-manager.io/v1")' \
+  'the legacy cert-manager Issuer'
+assert_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'select(.kind == "Certificate" and .apiVersion == "cert-manager.io/v1")' \
+  'the legacy cert-manager Certificate'
+assert_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'select(.kind == "BackendTLSPolicy")' \
+  'the legacy authenticated backend TLS policy'
+assert_no_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'select(.kind == "Secret" and .metadata.name == "gateway-ext-authz-tls")' \
+  'the opt-in Helm-managed TLS Secret in the legacy GKE render'
+
 echo "I: rendering platform-owned routes"
 helm template gke-platform-plugin charts/ext-authz-token-exchange \
   --namespace gke-gateway \
@@ -53,18 +69,39 @@ helm template gke-platform-plugin charts/ext-authz-token-exchange \
   --set gkeExtProc.enabled=true \
   --set gkeExtProc.failOpen=false \
   --set gkeExtProc.host=httpbin.example.test \
-  --set gkeAuthz.callout.service.port=3001 \
-  --set gkeAuthz.callout.service.targetPort=grpc-authz \
+  --set gkeAuthz.callout.service.port=3000 \
+  --set gkeAuthz.callout.service.targetPort=grpc-authz-tls \
   --set gkeAuthz.callout.service.appProtocol=HTTP2 \
-  --set gkeAuthz.callout.tls.enabled=false \
+  --set gkeAuthz.callout.tls.enabled=true \
+  --set gkeAuthz.callout.tls.port=3000 \
+  --set gkeAuthz.callout.tls.selfSigned.enabled=true \
+  --set gkeAuthz.callout.tls.backendTLSPolicy.enabled=false \
   --set gkeAuthz.callout.tls.certificate.enabled=false \
+  --set-json 'gkeAuthz.callout.tls.certificate.dnsNames=["gateway-ext-authz.gke-gateway.svc.cluster.local"]' \
   --set gkeAuthz.callout.healthCheck.enabled=true \
   --set gkeAuthz.callout.healthCheck.port=3001 \
   --set gkeAuthz.callout.healthCheck.portSpecification=USE_FIXED_PORT \
-  --set gkeAuthz.callout.backendPolicy.enabled=false > "$workdir/platform-plugin.yaml"
+  --set gkeAuthz.callout.backendPolicy.enabled=false \
+  --set env.OTEL_TRACES_EXPORTER=none \
+  --set env.OTEL_METRICS_EXPORTER=none > "$workdir/platform-plugin.yaml"
 assert_manifest "$workdir/platform-plugin.yaml" \
-  'select(.kind == "Service" and .metadata.name == "gateway-ext-authz" and .spec.ports[0].port == 3001 and .spec.ports[0].appProtocol == "HTTP2")' \
-  'the plaintext HTTP/2 GKE callout Service'
+  'select(.kind == "Secret" and .metadata.name == "gateway-ext-authz-tls" and .type == "kubernetes.io/tls" and .data."tls.crt" and .data."tls.key")' \
+  'the Helm-managed GKE callout TLS Secret'
+assert_manifest "$workdir/platform-plugin.yaml" \
+  'select(.kind == "Deployment") | .spec.template.spec.containers[0].ports[] | select(.name == "grpc-authz-tls" and .containerPort == 3000)' \
+  'the TLS listener'
+assert_manifest "$workdir/platform-plugin.yaml" \
+  'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "GRPC_TLS_PORT" and .value == "3000")' \
+  'the TLS listener environment'
+assert_manifest "$workdir/platform-plugin.yaml" \
+  'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "OTEL_TRACES_EXPORTER" and .value == "none")' \
+  'the disabled OTEL trace exporter'
+assert_manifest "$workdir/platform-plugin.yaml" \
+  'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "OTEL_METRICS_EXPORTER" and .value == "none")' \
+  'the disabled OTEL metrics exporter'
+assert_manifest "$workdir/platform-plugin.yaml" \
+  'select(.kind == "Service" and .metadata.name == "gateway-ext-authz" and .spec.ports[0].port == 3000 and .spec.ports[0].targetPort == "grpc-authz-tls" and .spec.ports[0].appProtocol == "HTTP2" and .spec.ports[1].port == 3001 and .spec.ports[1].targetPort == "grpc-authz")' \
+  'the TLS HTTP/2 callout and plaintext gRPC health ports'
 assert_manifest "$workdir/platform-plugin.yaml" \
   'select(.kind == "HealthCheckPolicy" and .spec.default.config.type == "GRPC" and .spec.default.config.grpcHealthCheck.port == 3001)' \
   'the gRPC callout HealthCheckPolicy'
@@ -72,8 +109,14 @@ assert_manifest "$workdir/platform-plugin.yaml" \
   'select(.kind == "GCPTrafficExtension" and .spec.extensionChains[0].extensions[0].failOpen == false)' \
   'the fail-closed GKE traffic extension'
 assert_no_manifest "$workdir/platform-plugin.yaml" \
-  'select(.kind == "BackendTLSPolicy" or .kind == "GCPBackendPolicy")' \
-  'TLS or backend policies for the disposable plaintext callout'
+  'select(.kind == "Issuer" or .kind == "Certificate" or .kind == "BackendTLSPolicy" or .kind == "GCPBackendPolicy")' \
+  'cert-manager or backend policies for the disposable self-signed callout'
+
+yq -r 'select(.kind == "Secret" and .metadata.name == "gateway-ext-authz-tls") | .data."tls.crt"' \
+  "$workdir/platform-plugin.yaml" | base64 --decode > "$workdir/platform-plugin.crt"
+openssl x509 -in "$workdir/platform-plugin.crt" -noout -text > "$workdir/platform-plugin-cert.txt"
+grep -q 'DNS:gateway-ext-authz.gke-gateway.svc.cluster.local' "$workdir/platform-plugin-cert.txt"
+grep -q 'Digital Signature, Key Encipherment' "$workdir/platform-plugin-cert.txt"
 
 helm template gke-platform-routes charts/ext-authz-token-exchange-e2e \
   --namespace txe-platform \
@@ -105,6 +148,19 @@ yq -e '
   .profiles[] | select(.name == "gke-platform") |
   .merge.deployments."gke-platform-keycloak".helm.values.gateway.sectionName == "${GKE_GATEWAY_SECTION_NAME}"
 ' devspace.yaml >/dev/null
+# shellcheck disable=SC2016
+yq -e '
+  .profiles[] | select(.name == "gke-platform") |
+  select(
+    .merge.deployments."ext-authz-token-exchange".helm.values.gkeAuthz.callout.service.port == 3000 and
+    .merge.deployments."ext-authz-token-exchange".helm.values.gkeAuthz.callout.service.targetPort == "grpc-authz-tls" and
+    .merge.deployments."ext-authz-token-exchange".helm.values.gkeAuthz.callout.tls.enabled == true and
+    .merge.deployments."ext-authz-token-exchange".helm.values.gkeAuthz.callout.tls.selfSigned.enabled == true and
+    .merge.deployments."ext-authz-token-exchange".helm.values.gkeAuthz.callout.tls.backendTLSPolicy.enabled == false and
+    .merge.deployments."ext-authz-token-exchange".helm.values.env.OTEL_TRACES_EXPORTER == "none" and
+    .merge.deployments."ext-authz-token-exchange".helm.values.env.OTEL_METRICS_EXPORTER == "none"
+  )
+' devspace.yaml >/dev/null
 helm template gke-platform-keycloak charts/keycloak \
   --namespace txe-platform \
   --set gatewayProvider=gke-gateway \
@@ -131,6 +187,35 @@ assert_no_manifest "$workdir/platform-keycloak.yaml" \
 assert_no_manifest "$workdir/platform-keycloak.yaml" \
   'select(.kind == "HTTPRoute" and .metadata.name == "keycloak-http-redirect")' \
   'an HTTP redirect route in the opt-in platform model'
+
+echo "I: rendering Keycloak for an HTTP-only GKE listener"
+helm template gke-platform-keycloak-http charts/keycloak \
+  --namespace txe-platform \
+  --set gatewayProvider=gke-gateway \
+  --set namespace=txe-platform \
+  --set pluginNamespace=gke-gateway \
+  --set gkeGatewayNamespace=gke-gateway \
+  --set keycloak.externalHost=keycloak.example.test \
+  --set keycloak.externalURL=http://keycloak.example.test \
+  --set gateway.name=gateway \
+  --set gateway.sectionName=http \
+  --set gateway.routeNamespace=gke-gateway \
+  --set gateway.createReferenceGrant=true \
+  --set gateway.httpRedirect.forceDisabled=true \
+  --set gkeIap.forceDisabled=true > "$workdir/platform-keycloak-http.yaml"
+assert_manifest "$workdir/platform-keycloak-http.yaml" \
+  'select(.kind == "Deployment") | .spec.template.spec.containers[0].env[] | select(.name == "KC_HOSTNAME" and .value == "http://keycloak.example.test")' \
+  'the HTTP Keycloak canonical hostname'
+assert_manifest "$workdir/platform-keycloak-http.yaml" \
+  'select(.kind == "HTTPRoute" and .metadata.name == "keycloak" and .spec.parentRefs[0].sectionName == "http")' \
+  'the HTTP-only Keycloak route listener'
+assert_no_manifest "$workdir/platform-keycloak-http.yaml" \
+  'select(.kind == "HTTPRoute" and .metadata.name == "keycloak-http-redirect")' \
+  'an HTTP-to-HTTPS redirect for the HTTP-only platform model'
+if grep -q 'https://keycloak.example.test' "$workdir/platform-keycloak-http.yaml"; then
+  echo "E: HTTP-only Keycloak render contains an HTTPS external URL" >&2
+  exit 1
+fi
 
 echo "I: rendering team-owned applications"
 for team in yellow red blue green; do

@@ -342,13 +342,21 @@ profiles:
                 callout:
                   service:
                     name: gateway-ext-authz
-                    port: 3001
-                    targetPort: grpc-authz
+                    port: 3000
+                    targetPort: grpc-authz-tls
                     appProtocol: HTTP2
                   tls:
-                    enabled: false
+                    enabled: true
+                    port: 3000
+                    secretName: gateway-ext-authz-tls
+                    selfSigned:
+                      enabled: true
+                    backendTLSPolicy:
+                      enabled: false
                     certificate:
                       enabled: false
+                      dnsNames:
+                        - gateway-ext-authz.${GKE_GATEWAY_NAMESPACE}.svc.cluster.local
                   healthCheck:
                     enabled: true
                     port: 3001
@@ -392,6 +400,8 @@ profiles:
                 TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "false"
                 TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED: "false"
                 GRPC_LOG_HEALTH_CHECKS: "false"
+                OTEL_TRACES_EXPORTER: none
+                OTEL_METRICS_EXPORTER: none
         gke-platform-resources:
           namespace: ${GKE_PLATFORM_NAMESPACE}
           helm:

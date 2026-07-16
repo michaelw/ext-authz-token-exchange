@@ -111,11 +111,31 @@ hostnames and routes from the Gateway namespace. The default contract is:
 - Keycloak host `keycloak.<GKE_DEPLOYMENT_DOMAIN>`.
 - Reserved teams `yellow,red,blue,green`.
 
+The platform callout uses HTTP/2 over TLS. The profile creates a Helm-owned,
+self-signed TLS Secret for the internal callout Service; it does not require
+cert-manager or a public certificate. Plaintext port `3001` is used only by the
+gRPC health check.
+
 Override the corresponding `GKE_*` variable when the cluster uses a different
 name. `GKE_HTTPBIN_HOST` and `GKE_KEYCLOAK_HOST` can be overridden
 independently. The platform route reservation uses the
 `GKE_TEAM_NAMESPACE_PREFIX-<team>` convention, so an app deployment's
 `GKE_TEAM_NAMESPACE` must match the namespace reserved by its route.
+
+For an HTTP-only Gateway listener, set the listener name, scheme, and port
+together. Keycloak then uses HTTP as its canonical external issuer and does not
+render the legacy HTTP-to-HTTPS redirect route:
+
+```sh
+devspace deploy -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http \
+  --var GKE_GATEWAY_SCHEME=http \
+  --var GKE_GATEWAY_PORT=80
+```
+
+The deployment preflight rejects a scheme or port that does not match the
+selected listener and prints the corresponding variables to use.
 
 Both profiles run end-to-end fake-issuer and Keycloak exchanges. After those
 checks pass, DevSpace reads the Gateway address and the platform route hosts and
