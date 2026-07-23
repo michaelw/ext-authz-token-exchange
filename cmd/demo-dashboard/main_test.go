@@ -152,6 +152,52 @@ func TestUnavailableRequiredIssuerSkipsScenario(t *testing.T) {
 	}
 }
 
+func TestAvailableIssuersCachesOneConcurrentClusterSnapshot(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "kubectl-calls")
+	t.Setenv("KUBECTL_CALL_LOG", logPath)
+	withKubectl(t, `printf '%s\n' "$*" >> "$KUBECTL_CALL_LOG"
+if [ "$2" = "configmap" ]; then printf 'issuers:\n  - name: "fake-issuer"\n  - name: "local-keycloak"\n'; exit 0; fi
+if [ "$5" = "keycloak" ] || [ "$5" = "fake-token-endpoint" ]; then printf '1/1'; exit 0; fi
+exit 1`)
+
+	s := &server{opts: demoOptions(), issuer: configuredIssuers()}
+	for range 2 {
+		got := s.availableIssuers(context.Background())
+		if !got["fake-issuer"] || !got["local-keycloak"] {
+			t.Fatalf("available issuers = %#v, want both configured issuers", got)
+		}
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read kubectl call log: %v", err)
+	}
+	logged := strings.TrimSpace(string(data))
+	if logged == "" {
+		t.Fatal("kubectl call log is empty")
+	}
+	if got := len(strings.Split(logged, "\n")); got != 3 {
+		t.Fatalf("kubectl calls = %d, want one ConfigMap and two Deployment reads", got)
+	}
+}
+
+func TestDashboardRunAllAvoidsPerScenarioClusterRefreshes(t *testing.T) {
+	source, err := staticFiles.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read dashboard JavaScript: %v", err)
+	}
+	js := string(source)
+	for _, want := range []string{
+		"async function runScenario(name, { refresh = true } = {})",
+		"await runScenario(scenario.name, { refresh: false });",
+		"if (state.runningAll)",
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("dashboard JavaScript does not contain %q", want)
+		}
+	}
+}
+
 func TestScenariosAPIIncludesSkippedUnavailableScenarios(t *testing.T) {
 	withKubectl(t, `if [ "$2" = "configmap" ]; then printf 'issuers:\n  - name: "fake-issuer"\n'; exit 0; fi; if [ "$5" = "fake-token-endpoint" ]; then printf '1/1'; exit 0; fi; echo 'deployment not found' >&2; exit 1`)
 	opts := demoOptions()

@@ -14,6 +14,7 @@ const state = {
   tokenVerifyTimer: null,
   tokenVerifyRequestID: 0,
   tokenVerification: { token: "", pending: false, response: null },
+  runningAll: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -356,8 +357,10 @@ function clearObserved() {
   $("response-format-toggle").hidden = true;
 }
 
-async function runScenario(name) {
-  await refreshStatus();
+async function runScenario(name, { refresh = true } = {}) {
+  if (refresh) {
+    await refreshStatus();
+  }
   const selected = state.scenarios.find((item) => item.name === name);
   if (!selected) {
     return;
@@ -402,16 +405,22 @@ async function runScenario(name) {
 async function runAll() {
   await refreshStatus();
   $("run-all").disabled = true;
+  state.runningAll = true;
   try {
     for (const scenario of state.scenarios) {
-      await runScenario(scenario.name);
+      await runScenario(scenario.name, { refresh: false });
     }
   } finally {
+    state.runningAll = false;
     $("run-all").disabled = false;
+    renderSelected();
   }
 }
 
 async function loadPolicy(scenario = state.selected) {
+  if (state.runningAll) {
+    return;
+  }
   const ref = parsePolicyRef(scenario?.policy);
   if (!ref) {
     $("policy-title").textContent = "Policy";

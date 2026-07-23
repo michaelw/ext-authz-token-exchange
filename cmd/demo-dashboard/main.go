@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -40,10 +41,14 @@ const defaultShortTTLClientID = "tx-short-ttl-subject-client"
 const defaultShortTTLClientSecret = "tx-short-ttl-subject-secret"
 const defaultKeycloakUser = "token-user"
 const defaultKeycloakPassword = "token-user-password"
+const issuerAvailabilityTTL = 30 * time.Second
 
 type server struct {
-	opts   demo.Options
-	issuer issuerSelection
+	opts               demo.Options
+	issuer             issuerSelection
+	issuerMu           sync.Mutex
+	issuerAvailability map[string]bool
+	issuerCheckedAt    time.Time
 }
 
 type issuerSelection struct {
@@ -455,23 +460,61 @@ func (s issuerSelection) apply(opts demo.Options) demo.Options {
 }
 
 func (s *server) availableIssuers(ctx context.Context) map[string]bool {
-	opts := s.opts.WithDefaults()
-	return map[string]bool{
-		"fake-issuer":    deploymentStatus(ctx, opts.SystemNamespace, "fake-token-endpoint").Ready && issuerProfileConfigured(ctx, opts, "fake-issuer"),
-		"local-keycloak": deploymentStatus(ctx, opts.SystemNamespace, "keycloak").Ready && issuerProfileConfigured(ctx, opts, "local-keycloak"),
+	s.issuerMu.Lock()
+	defer s.issuerMu.Unlock()
+	if time.Since(s.issuerCheckedAt) < issuerAvailabilityTTL {
+		return cloneIssuerAvailability(s.issuerAvailability)
 	}
+
+	opts := s.opts.WithDefaults()
+	var fakeReady, keycloakReady bool
+	var profiles map[string]bool
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		fakeReady = deploymentStatus(ctx, opts.SystemNamespace, "fake-token-endpoint").Ready
+	}()
+	go func() {
+		defer wg.Done()
+		keycloakReady = deploymentStatus(ctx, opts.SystemNamespace, "keycloak").Ready
+	}()
+	go func() {
+		defer wg.Done()
+		profiles = configuredIssuerProfiles(ctx, opts)
+	}()
+	wg.Wait()
+
+	s.issuerAvailability = map[string]bool{
+		"fake-issuer":    fakeReady && profiles["fake-issuer"],
+		"local-keycloak": keycloakReady && profiles["local-keycloak"],
+	}
+	s.issuerCheckedAt = time.Now()
+	return cloneIssuerAvailability(s.issuerAvailability)
 }
 
-func issuerProfileConfigured(ctx context.Context, opts demo.Options, name string) bool {
+func configuredIssuerProfiles(ctx context.Context, opts demo.Options) map[string]bool {
 	opts = opts.WithDefaults()
 	configMapName := opts.PluginDeployment + "-issuer-profiles"
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "configmap", "-n", opts.PluginNamespace, configMapName, "-o", "jsonpath={.data.issuers\\.yaml}")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return false
+		return nil
 	}
 	data := string(out)
-	return strings.Contains(data, "name: "+name) || strings.Contains(data, `name: "`+name+`"`)
+	profiles := make(map[string]bool, 2)
+	for _, name := range []string{"fake-issuer", "local-keycloak"} {
+		profiles[name] = strings.Contains(data, "name: "+name) || strings.Contains(data, `name: "`+name+`"`)
+	}
+	return profiles
+}
+
+func cloneIssuerAvailability(available map[string]bool) map[string]bool {
+	cloned := make(map[string]bool, len(available))
+	for name, enabled := range available {
+		cloned[name] = enabled
+	}
+	return cloned
 }
 
 func unavailableScenarioReason(sc demo.Scenario, availableIssuers map[string]bool) string {
