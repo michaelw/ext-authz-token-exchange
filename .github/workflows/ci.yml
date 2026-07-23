@@ -103,13 +103,18 @@ jobs:
         uses: ./.github/actions/setup-helm
 
       - name: Build chart dependencies
-        run: helm dependency build charts/ext-authz-token-exchange
+        run: |
+          helm dependency build charts/ext-authz-token-exchange
+          helm dependency build charts/keycloak
 
       - name: Lint production chart
         run: helm lint charts/ext-authz-token-exchange
 
       - name: Lint e2e chart
         run: helm lint charts/ext-authz-token-exchange-e2e
+
+      - name: Lint Keycloak chart
+        run: helm lint charts/keycloak
 
       - name: Render manifests
         run: |
@@ -120,6 +125,9 @@ jobs:
           helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e \
             --namespace ext-authz-token-exchange-e2e \
             > artifacts/manifests/ext-authz-token-exchange-e2e.yaml
+
+      - name: Verify GKE platform and app renders
+        run: ./scripts/verify-gke-deployment-model.sh
 
       - name: Upload rendered manifests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

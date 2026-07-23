@@ -1,0 +1,60 @@
+additionalScenarios:
+  - color: yellow
+    scenarios:
+      - name: keycloak-audience
+        scope: profile
+        pathPrefix: /anything/keycloak-audience
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-audience-client
+      - name: keycloak-resource
+        scope: profile
+        pathPrefix: /anything/keycloak-resource
+        issuerRef: local-keycloak
+        resourcePaths:
+          - /anything/keycloak-resource
+        audiences:
+          - tx-audience-client
+      - name: keycloak-expired-subject-token
+        scope: profile
+        pathPrefix: /anything/keycloak-expired-subject-token
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-audience-client
+      - name: keycloak-unsigned-subject-token
+        scope: profile
+        pathPrefix: /anything/keycloak-unsigned-subject-token
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-audience-client
+      - name: keycloak-truncated-signature
+        scope: profile
+        pathPrefix: /anything/keycloak-truncated-signature
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-audience-client
+      - name: keycloak-untrusted-issuer
+        scope: profile
+        pathPrefix: /anything/keycloak-untrusted-issuer
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-audience-client
+      - name: keycloak-invalid-audience
+        scope: profile
+        pathPrefix: /anything/keycloak-invalid-audience
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-missing-audience-client
+      - name: keycloak-invalid-scope
+        scope: tx-missing-scope
+        pathPrefix: /anything/keycloak-invalid-scope
+        issuerRef: local-keycloak
+        resources: []
+        audiences:
+          - tx-audience-client

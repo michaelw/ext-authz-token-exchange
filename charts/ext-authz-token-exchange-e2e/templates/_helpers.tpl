@@ -5,7 +5,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end }}
 
 {{- define "ext-authz-token-exchange-e2e.teamNamespace" -}}
-{{- printf "%s-%s" $.Values.namespacePrefix .color -}}
+{{- .namespace | default (printf "%s-%s" $.Values.namespacePrefix .color) -}}
+{{- end }}
+
+{{- define "ext-authz-token-exchange-e2e.teamPathPrefix" -}}
+{{- .pathPrefix | default (printf "/anything/%s" .color) -}}
 {{- end }}
 
 {{- define "ext-authz-token-exchange-e2e.fakeTokenEndpointConfigMapName" -}}
@@ -63,8 +67,16 @@ local
 
 {{- define "ext-authz-token-exchange-e2e.policyConfig" -}}
 {{- $resources := .resources }}
+{{- if .resourcePaths }}
+{{- $resources = list }}
+{{- range $path := .resourcePaths }}
+{{- $resources = append $resources (printf "%s%s" $.Values.policy.httpbinResourceBase $path) }}
+{{- end }}
+{{- end }}
 {{- if not (hasKey . "resources") }}
+{{- if not .resourcePaths }}
 {{- $resources = list (printf "%s%s" $.Values.policy.httpbinResourceBase .pathPrefix) }}
+{{- end }}
 {{- end }}
 {{- $audiences := .audiences }}
 {{- if and (not (hasKey . "audiences")) .audience }}

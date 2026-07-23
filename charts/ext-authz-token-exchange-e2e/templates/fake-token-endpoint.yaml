@@ -1,3 +1,4 @@
+{{- if .Values.fakeTokenEndpoint.enabled }}
 {{- if .Values.fakeTokenEndpoint.routes }}
 apiVersion: v1
 kind: ConfigMap
@@ -94,3 +95,4 @@ spec:
     - name: http
       port: {{ .Values.fakeTokenEndpoint.port }}
       targetPort: http
+{{- end }}

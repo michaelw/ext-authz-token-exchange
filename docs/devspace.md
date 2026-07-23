@@ -76,6 +76,127 @@ devspace deploy -p with-infra -p with-keycloak
 devspace deploy -p with-infra -p with-keycloak -p ext-proc
 ```
 
+### Existing-Gateway GKE deployment
+
+For the shortest platform demo path, use the
+[GKE Platform Demo Quickstart](gke-platform-demo.md).
+
+The opt-in `gke-platform` and `gke-app` profiles target an existing GKE
+Gateway without using starter-pack discovery, DNS, Terraform, registry login,
+image builds, or IAP. They do not change the default deployment or the
+auto-activated `gke` profile.
+
+The platform team deploys the plugin, issuers, platform-owned routes, the
+yellow reference application, and an isolated dashboard/smoke fixture:
+
+```sh
+devspace deploy -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test
+```
+
+An application team then deploys only its namespace, httpbin application,
+policy ConfigMaps, and the `ReferenceGrant` for its reserved route:
+
+```sh
+devspace deploy -p gke-app \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_TEAM_NAME=red \
+  --var GKE_TEAM_NAMESPACE=txe-team-red
+```
+
+The Gateway must already exist and its selected listener must allow wildcard
+hostnames and routes from the Gateway namespace. DevSpace reads the listener's
+protocol and port from the Gateway. The default contract is:
+
+- Gateway `gke-gateway/gateway`, listener `https`.
+- Public scheme `https` on its standard port `443`.
+- Platform namespace `txe-platform`.
+- Team namespaces `txe-team-<team>` and paths `/anything/txe/<team>`.
+- Demo namespaces `txe-demo-yellow`, `txe-demo-red`, `txe-demo-blue`, and the
+  unlabeled selector fixture `txe-demo-black`.
+- Application host `httpbin.<GKE_DEPLOYMENT_DOMAIN>`.
+- Keycloak host `keycloak.<GKE_DEPLOYMENT_DOMAIN>`.
+- Reserved teams `yellow,red,blue,green`.
+
+The platform callout uses HTTP/2 over TLS. The profile creates a Helm-owned,
+self-signed TLS Secret for the internal callout Service; it does not require
+cert-manager or a public certificate. Plaintext port `3001` is used only by the
+gRPC health check.
+
+Override the corresponding `GKE_*` variable when the cluster uses a different
+name. `GKE_HTTPBIN_HOST` and `GKE_KEYCLOAK_HOST` can be overridden
+independently. The platform route reservation uses the
+`GKE_TEAM_NAMESPACE_PREFIX-<team>` convention, so an app deployment's
+`GKE_TEAM_NAMESPACE` must match the namespace reserved by its route.
+
+The selected listener and the public endpoint can use different protocols. For
+example, when TLS is terminated before an HTTP Gateway listener, keep the
+default public HTTPS scheme and select the HTTP listener:
+
+```sh
+devspace deploy -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http
+```
+
+The end-to-end probes then use public DNS so HTTPS reaches the external TLS
+terminator. Keycloak keeps `https://keycloak.example.test` as its canonical
+issuer, while the routes attach to the Gateway's `http` section.
+
+For direct access through an HTTP listener, set the public scheme to HTTP:
+
+```sh
+devspace deploy -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http \
+  --var GKE_EXTERNAL_SCHEME=http
+```
+
+Direct HTTPS uses the defaults. Public endpoints use the standard port for
+`GKE_EXTERNAL_SCHEME`: `443` for HTTPS and `80` for HTTP.
+
+Both profiles run end-to-end fake-issuer and Keycloak exchanges. After those
+checks pass, direct-Gateway deployments read the Gateway address and print a
+copy-ready `/etc/hosts` entry. Set `GKE_GATEWAY_IP` to an IPv4 or IPv6 address
+to override `status.addresses` when direct access needs a specific Gateway IP.
+For externally terminated TLS, probes use public DNS and no Gateway
+`/etc/hosts` entry is printed; `GKE_GATEWAY_IP` cannot bypass the external TLS
+terminator. DevSpace never edits `/etc/hosts`.
+
+After `gke-platform` is deployed, start the local dashboard against the
+platform-owned demo fixture:
+
+```sh
+devspace run demo-dashboard -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http \
+  -- -open
+```
+
+Run the complete non-stress e2e suite against the same resources:
+
+```sh
+devspace run smoke -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http
+```
+
+The smoke command does not install another chart release. It locks the shared
+default-deny mutation with `txe-platform/txe-smoke-lock`, restores the plugin's
+original setting on normal exit or interruption, and rejects concurrent runs.
+If a process is terminated before cleanup completes, inspect the recorded lock
+holder before following the recovery command printed by the failed run.
+
+To remove one app without affecting the platform or other teams, repeat its
+variables on purge:
+
+```sh
+devspace purge -p gke-app \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_TEAM_NAME=red \
+  --var GKE_TEAM_NAMESPACE=txe-team-red
+```
+
 After deployment, run the e2e assertions against the already deployed releases:
 
 ```bash
@@ -114,7 +235,8 @@ profile defaults for its `Fetch` action. Those defaults can be adjusted with
 `DEMO_KEYCLOAK_SUBJECT_CLIENT_ID`, `DEMO_KEYCLOAK_SUBJECT_CLIENT_SECRET`,
 `DEMO_KEYCLOAK_USER`, and `DEMO_KEYCLOAK_PASSWORD`.
 
-On GKE, `keycloak.${DEPLOYMENT_DOMAIN}` is IAP-protected by design. If
+In the auto-activated `gke` profile, `keycloak.${DEPLOYMENT_DOMAIN}` is
+IAP-protected by design. If
 `DEMO_KEYCLOAK_BASE_URL` is not set, `devspace run demo-dashboard` opens a
 temporary local port-forward to `svc/keycloak` and uses that URL for dashboard
 subject-token fetches. This does not change the plugin issuer profile, which

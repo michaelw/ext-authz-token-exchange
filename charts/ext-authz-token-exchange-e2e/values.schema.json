@@ -61,6 +61,9 @@
       "additionalProperties": true,
       "required": ["name", "image", "port", "routes"],
       "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
         "name": {
           "type": "string",
           "minLength": 1
@@ -95,6 +98,57 @@
         }
       }
     },
+    "teamApp": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["enabled", "name", "image", "port", "gatewayNamespace"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "name": { "type": "string", "minLength": 1 },
+        "image": { "type": "string", "minLength": 1 },
+        "imagePullPolicy": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "gatewayNamespace": { "type": "string", "minLength": 1 },
+        "resources": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "platformRoutes": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["enabled", "gatewayNamespace", "gatewayName", "host", "teamNames", "teamNamespacePrefix", "teamPathRoot", "serviceName", "servicePort"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "gatewayNamespace": { "type": "string", "minLength": 1 },
+        "gatewayName": { "type": "string", "minLength": 1 },
+        "gatewaySectionName": { "type": "string", "minLength": 1 },
+        "host": { "type": "string", "minLength": 1 },
+        "teamNames": { "type": "string" },
+        "teamNamespacePrefix": { "type": "string", "minLength": 1 },
+        "teamPathRoot": { "type": "string", "pattern": "^/" },
+        "serviceName": { "type": "string", "minLength": 1 },
+        "servicePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "demoRoute": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["enabled", "gatewayNamespace", "gatewayName", "gatewaySectionName", "host", "pathPrefix", "backendNamespace", "serviceName", "servicePort"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "gatewayNamespace": { "type": "string", "minLength": 1 },
+        "gatewayName": { "type": "string", "minLength": 1 },
+        "gatewaySectionName": { "type": "string", "minLength": 1 },
+        "host": { "type": "string", "minLength": 1 },
+        "pathPrefix": { "type": "string", "pattern": "^/" },
+        "backendNamespace": { "type": "string", "minLength": 1 },
+        "serviceName": { "type": "string", "minLength": 1 },
+        "servicePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "unselectedNamespaces": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "teams": {
       "type": "array",
       "items": {
@@ -103,6 +157,10 @@
         "required": ["color"],
           "properties": {
             "color": {
+              "type": "string",
+              "minLength": 1
+            },
+            "namespace": {
               "type": "string",
               "minLength": 1
             },
@@ -161,6 +219,13 @@
                   "items": {
                     "type": "string",
                     "minLength": 1
+                  }
+                },
+                "resourcePaths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^/"
                   }
                 },
                 "audiences": {

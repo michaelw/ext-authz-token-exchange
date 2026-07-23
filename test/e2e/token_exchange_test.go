@@ -101,6 +101,7 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 
 	It("exchanges bearer tokens on OPTIONS requests that are not CORS preflight", func(ctx SpecContext) {
 		before := tokenEndpointLogs(ctx)
+		pluginBefore := pluginLogs(ctx)
 		resp, body := request(ctx, http.MethodOptions, "/anything/yellow", "options-token", nil)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
 
@@ -111,11 +112,20 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 			g.Expect(after).NotTo(ContainSubstring(`options-token`))
 		}, 30*time.Second, time.Second).Should(Succeed())
 
-		Eventually(func(g Gomega) {
-			after := pluginLogs(ctx)
-			g.Expect(after).To(ContainSubstring(`INSECURE_LOG_TOKENS`))
-			g.Expect(after).To(ContainSubstring(`subject_token=options-token`))
-		}, 30*time.Second, time.Second).Should(Succeed())
+		if env.expectInsecureLogs {
+			Eventually(func(g Gomega) {
+				after := strings.TrimPrefix(pluginLogs(ctx), pluginBefore)
+				g.Expect(after).To(ContainSubstring(`INSECURE_LOG_TOKENS`))
+				g.Expect(after).To(ContainSubstring(`subject_token=options-token`))
+			}, 30*time.Second, time.Second).Should(Succeed())
+		} else {
+			Eventually(func(g Gomega) {
+				after := strings.TrimPrefix(pluginLogs(ctx), pluginBefore)
+				g.Expect(after).To(ContainSubstring(`/envoy.service.ext_proc.v3.ExternalProcessor/Process`))
+				g.Expect(after).NotTo(ContainSubstring(`options-token`))
+				g.Expect(after).NotTo(ContainSubstring(`subject_token=`))
+			}, 30*time.Second, time.Second).Should(Succeed())
+		}
 	})
 
 	It("allows unmatched requests through unchanged", func(ctx SpecContext) {
@@ -125,9 +135,10 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 	})
 
 	It("denies unmatched requests when default deny is enabled", func(ctx SpecContext) {
+		original, present := pluginEnv(ctx, "TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED")
 		setPluginEnv(ctx, "TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", "true")
 		DeferCleanup(func(ctx SpecContext) {
-			setPluginEnv(ctx, "TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", "false")
+			restorePluginEnv(ctx, "TOKEN_EXCHANGE_DEFAULT_DENY_UNMATCHED", original, present)
 		})
 
 		Eventually(func(g Gomega) {

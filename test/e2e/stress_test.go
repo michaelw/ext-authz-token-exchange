@@ -2,7 +2,6 @@ package e2e_test
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/michaelw/ext-authz-token-exchange/internal/directhttp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -241,9 +241,9 @@ func stressRequest(ctx context.Context, client *http.Client, tc stressCase) (int
 }
 
 func stressHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: env.insecureTLS},
-	}}
+	transport, err := directhttp.NewTransport(env.directAddress, env.insecureTLS)
+	Expect(err).NotTo(HaveOccurred())
+	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func envInt(name string, fallback int) int {

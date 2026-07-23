@@ -55,19 +55,22 @@ wait_for_gke_test_stack() {
 }
 
 wait_for_gcptrafficextension_refs() {
+  namespace="${1:-${GATEWAY_NAMESPACE:?GATEWAY_NAMESPACE is required}}"
   deadline=$((SECONDS + 600))
 
   while [ "$SECONDS" -lt "$deadline" ]; do
-    conditions="$(kubectl -n "$GATEWAY_NAMESPACE" get gcptrafficextension ext-authz-token-exchange \
-      -o jsonpath='{range .status.ancestors[*].conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null || true)"
+    conditions="$(kubectl -n "$namespace" get gcptrafficextension ext-authz-token-exchange \
+      -o jsonpath='{range .status.conditions[*]}{.type}={.status}:{.reason}{"\n"}{end}{range .status.ancestors[*].conditions[*]}{.type}={.status}:{.reason}{"\n"}{end}' \
+      2>/dev/null || true)"
 
-    if printf '%s\n' "$conditions" | grep -q '^Accepted=True$' \
-      && printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=True$'; then
-      echo "I: GCPTrafficExtension refs accepted and resolved."
+    if printf '%s\n' "$conditions" | grep -q '^Accepted=True:' \
+      && ! printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=False:' \
+      && printf '%s\n' "$conditions" | grep -q '^Programmed=True:ProgrammingSucceeded$'; then
+      echo "I: GCPTrafficExtension accepted and programmed."
       return 0
     fi
 
-    echo "I: Waiting for GCPTrafficExtension refs to settle..."
+    echo "I: Waiting for GCPTrafficExtension programming (conditions: $(printf '%s' "$conditions" | tr '\n' ' '))"
     sleep 5
   done
 
@@ -94,4 +97,625 @@ wait_for_httpbin_extension() {
 
   echo "E: Timed out waiting for GKE extension enforcement at $url." >&2
   return 1
+}
+
+require_gke_model_value() {
+  name="$1"
+  eval "value=\${$name:-}"
+  if [ -z "$value" ]; then
+    echo "E: $name is required for this deployment model" >&2
+    return 1
+  fi
+}
+
+gke_external_port() {
+  case "$GKE_EXTERNAL_SCHEME" in
+    https) printf '443\n' ;;
+    http) printf '80\n' ;;
+    *)
+      echo "E: GKE_EXTERNAL_SCHEME must be http or https (got ${GKE_EXTERNAL_SCHEME:-<empty>})" >&2
+      return 1
+      ;;
+  esac
+}
+
+gke_uses_direct_gateway() {
+  external_port="$(gke_external_port)" || return 1
+  [ "${GKE_SELECTED_LISTENER_SCHEME:-}" = "$GKE_EXTERNAL_SCHEME" ] \
+    && [ "${GKE_SELECTED_LISTENER_PORT:-}" = "$external_port" ]
+}
+
+validate_gke_gateway_ip() {
+  if [ -n "${GKE_GATEWAY_IP:-}" ] && ! is_ip_address "$GKE_GATEWAY_IP"; then
+    echo "E: GKE_GATEWAY_IP must be a valid IPv4 or IPv6 address (got $GKE_GATEWAY_IP)" >&2
+    return 1
+  fi
+}
+
+require_api_resource() {
+  resource="$1"
+  if ! kubectl api-resources -o name | grep -qx "$resource"; then
+    echo "E: required Kubernetes resource $resource is not available" >&2
+    return 1
+  fi
+}
+
+listener_allows_hostname() {
+  listener_hostname="$1"
+  requested_hostname="$2"
+  if [ -z "$listener_hostname" ] || [ "$listener_hostname" = "$requested_hostname" ]; then
+    return 0
+  fi
+  case "$listener_hostname" in
+    \*.*)
+      suffix="${listener_hostname#\*}"
+      case "$requested_hostname" in
+        *"$suffix")
+          prefix="${requested_hostname%"$suffix"}"
+          case "$prefix" in
+            ""|*.*) ;;
+            *) return 0 ;;
+          esac
+          ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
+preflight_gke_gateway() {
+  require_gke_model_value GKE_DEPLOYMENT_DOMAIN
+  require_gke_model_value GKE_GATEWAY_NAMESPACE
+  require_gke_model_value GKE_GATEWAY_NAME
+  require_gke_model_value GKE_GATEWAY_SECTION_NAME
+  require_gke_model_value GKE_EXTERNAL_SCHEME
+  require_gke_model_value GKE_HTTPBIN_HOST
+  require_gke_model_value GKE_KEYCLOAK_HOST
+  gke_external_port >/dev/null || return 1
+  validate_gke_gateway_ip || return 1
+
+  require_api_resource gateways.gateway.networking.k8s.io
+  require_api_resource httproutes.gateway.networking.k8s.io
+  require_api_resource referencegrants.gateway.networking.k8s.io
+  require_api_resource gcptrafficextensions.networking.gke.io
+  require_api_resource healthcheckpolicies.networking.gke.io
+
+  if ! kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway "$GKE_GATEWAY_NAME" >/dev/null 2>&1; then
+    echo "E: Gateway $GKE_GATEWAY_NAMESPACE/$GKE_GATEWAY_NAME does not exist" >&2
+    return 1
+  fi
+
+  gateway_class="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway "$GKE_GATEWAY_NAME" -o jsonpath='{.spec.gatewayClassName}')"
+  case "$gateway_class" in
+    gke-l7-global-external-managed|gke-l7-regional-external-managed|gke-l7-rilb) ;;
+    *)
+      echo "E: unsupported single-cluster GKE GatewayClass $gateway_class" >&2
+      return 1
+      ;;
+  esac
+  if ! kubectl get gatewayclass "$gateway_class" >/dev/null 2>&1; then
+    echo "E: GatewayClass $gateway_class does not exist" >&2
+    return 1
+  fi
+  class_accepted="$(kubectl get gatewayclass "$gateway_class" \
+    -o jsonpath='{range .status.conditions[?(@.type=="Accepted")]}{.status}{end}')"
+  if [ "$class_accepted" != "True" ]; then
+    echo "E: GatewayClass $gateway_class is not Accepted (status=${class_accepted:-missing})" >&2
+    return 1
+  fi
+  gateway_programmed="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway "$GKE_GATEWAY_NAME" \
+    -o jsonpath='{range .status.conditions[?(@.type=="Programmed")]}{.status}{end}')"
+  if [ "$gateway_programmed" != "True" ]; then
+    echo "E: Gateway $GKE_GATEWAY_NAMESPACE/$GKE_GATEWAY_NAME is not Programmed (status=${gateway_programmed:-missing})" >&2
+    return 1
+  fi
+
+  listener_json="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway "$GKE_GATEWAY_NAME" -o json | \
+    GKE_GATEWAY_SECTION_NAME="$GKE_GATEWAY_SECTION_NAME" yq -o=json '.spec.listeners[] | select(.name == strenv(GKE_GATEWAY_SECTION_NAME))')"
+  if [ -z "$listener_json" ]; then
+    echo "E: listener $GKE_GATEWAY_SECTION_NAME does not exist on Gateway $GKE_GATEWAY_NAMESPACE/$GKE_GATEWAY_NAME" >&2
+    return 1
+  fi
+
+  listener_port="$(printf '%s\n' "$listener_json" | yq -r '.port')"
+  listener_protocol="$(printf '%s\n' "$listener_json" | yq -r '.protocol')"
+  case "$listener_protocol" in
+    HTTPS) GKE_SELECTED_LISTENER_SCHEME=https ;;
+    HTTP) GKE_SELECTED_LISTENER_SCHEME=http ;;
+    *)
+      echo "E: listener $GKE_GATEWAY_SECTION_NAME uses unsupported protocol=$listener_protocol" >&2
+      return 1
+      ;;
+  esac
+  GKE_SELECTED_LISTENER_PORT="$listener_port"
+
+  allowed_from="$(printf '%s\n' "$listener_json" | yq -r '.allowedRoutes.namespaces.from // "Same"')"
+  if [ "$allowed_from" != "Same" ]; then
+    echo "E: listener $GKE_GATEWAY_SECTION_NAME has allowedRoutes.namespaces.from=$allowed_from; expected Same" >&2
+    return 1
+  fi
+
+  listener_hostname="$(printf '%s\n' "$listener_json" | yq -r '.hostname // ""')"
+  for requested_hostname in "$GKE_HTTPBIN_HOST" "$GKE_KEYCLOAK_HOST"; do
+    if ! listener_allows_hostname "$listener_hostname" "$requested_hostname"; then
+      echo "E: listener hostname ${listener_hostname:-<all>} does not allow $requested_hostname" >&2
+      return 1
+    fi
+  done
+}
+
+preflight_gke_platform() {
+  preflight_gke_gateway
+  require_gke_model_value GKE_PLATFORM_NAMESPACE
+  require_gke_model_value GKE_PLATFORM_TEAMS
+  require_gke_model_value GKE_TEAM_NAMESPACE_PREFIX
+  require_gke_model_value GKE_DEMO_NAMESPACE_PREFIX
+  require_gke_model_value GKE_TEAM_PATH_ROOT
+
+  for color in yellow red blue; do
+    for resource in deployments.apps services configmaps referencegrants.gateway.networking.k8s.io; do
+      if ! kubectl auth can-i create "$resource" -n "$GKE_DEMO_NAMESPACE_PREFIX-$color" | grep -qx yes; then
+        echo "E: current identity cannot create $resource in namespace $GKE_DEMO_NAMESPACE_PREFIX-$color" >&2
+        return 1
+      fi
+    done
+  done
+
+  for permission in \
+    "create deployments.apps $GKE_PLATFORM_NAMESPACE" \
+    "create services $GKE_PLATFORM_NAMESPACE" \
+    "create configmaps $GKE_PLATFORM_NAMESPACE" \
+    "create deployments.apps $GKE_TEAM_NAMESPACE_PREFIX-yellow" \
+    "create services $GKE_TEAM_NAMESPACE_PREFIX-yellow" \
+    "create configmaps $GKE_TEAM_NAMESPACE_PREFIX-yellow" \
+    "create referencegrants.gateway.networking.k8s.io $GKE_TEAM_NAMESPACE_PREFIX-yellow" \
+    "create secrets $GKE_GATEWAY_NAMESPACE" \
+    "create referencegrants.gateway.networking.k8s.io $GKE_PLATFORM_NAMESPACE" \
+    "create httproutes.gateway.networking.k8s.io $GKE_GATEWAY_NAMESPACE" \
+    "create healthcheckpolicies.networking.gke.io $GKE_GATEWAY_NAMESPACE" \
+    "create gcptrafficextensions.networking.gke.io $GKE_GATEWAY_NAMESPACE"; do
+    read -r verb resource namespace <<< "$permission"
+    if ! kubectl auth can-i "$verb" "$resource" -n "$namespace" | grep -qx yes; then
+      echo "E: current identity cannot $permission" >&2
+      return 1
+    fi
+  done
+  for permission in \
+    "create namespaces" \
+    "patch namespaces" \
+    "create clusterroles.rbac.authorization.k8s.io" \
+    "create clusterrolebindings.rbac.authorization.k8s.io"; do
+    read -r verb resource <<< "$permission"
+    if ! kubectl auth can-i "$verb" "$resource" | grep -qx yes; then
+      echo "E: current identity cannot $permission" >&2
+      return 1
+    fi
+  done
+
+  conflicts="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get gcptrafficextensions -o json 2>/dev/null | \
+    GKE_GATEWAY_NAME="$GKE_GATEWAY_NAME" yq -r '.items[] | select(.metadata.name != "ext-authz-token-exchange") | select(.spec.targetRefs[]?.name == strenv(GKE_GATEWAY_NAME)) | .metadata.name' 2>/dev/null || true)"
+  if [ -n "$conflicts" ]; then
+    echo "E: another GCPTrafficExtension already targets $GKE_GATEWAY_NAMESPACE/$GKE_GATEWAY_NAME: $conflicts" >&2
+    return 1
+  fi
+}
+
+preflight_gke_app() {
+  preflight_gke_gateway
+  require_gke_model_value GKE_TEAM_NAME
+  require_gke_model_value GKE_TEAM_NAMESPACE
+
+  if ! kubectl get namespace "$GKE_TEAM_NAMESPACE" >/dev/null 2>&1 \
+    && ! kubectl auth can-i create namespaces | grep -qx yes; then
+    echo "E: team namespace $GKE_TEAM_NAMESPACE does not exist and the current identity cannot create it" >&2
+    return 1
+  fi
+  if ! kubectl auth can-i patch namespaces | grep -qx yes; then
+    echo "E: current identity cannot label namespace $GKE_TEAM_NAMESPACE for policy discovery" >&2
+    return 1
+  fi
+
+  for permission in \
+    "create deployments.apps" \
+    "create services" \
+    "create configmaps" \
+    "create referencegrants.gateway.networking.k8s.io"; do
+    read -r verb resource <<< "$permission"
+    if ! kubectl auth can-i "$verb" "$resource" -n "$GKE_TEAM_NAMESPACE" | grep -qx yes; then
+      echo "E: current identity cannot $permission in namespace $GKE_TEAM_NAMESPACE" >&2
+      return 1
+    fi
+  done
+
+  if ! kubectl -n "$GKE_GATEWAY_NAMESPACE" get httproute "txe-team-$GKE_TEAM_NAME" >/dev/null 2>&1; then
+    echo "E: platform route $GKE_GATEWAY_NAMESPACE/txe-team-$GKE_TEAM_NAME is missing" >&2
+    echo "E: ask the platform team to add $GKE_TEAM_NAME to GKE_PLATFORM_TEAMS and redeploy gke-platform" >&2
+    return 1
+  fi
+  reserved_namespace="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get httproute "txe-team-$GKE_TEAM_NAME" \
+    -o jsonpath='{.spec.rules[0].backendRefs[0].namespace}')"
+  if [ "$reserved_namespace" != "$GKE_TEAM_NAMESPACE" ]; then
+    echo "E: platform route txe-team-$GKE_TEAM_NAME reserves namespace $reserved_namespace, not $GKE_TEAM_NAMESPACE" >&2
+    return 1
+  fi
+  reserved_service="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get httproute "txe-team-$GKE_TEAM_NAME" \
+    -o jsonpath='{.spec.rules[0].backendRefs[0].name}')"
+  if [ "$reserved_service" != "httpbin" ]; then
+    echo "E: platform route txe-team-$GKE_TEAM_NAME reserves Service $reserved_service, not httpbin" >&2
+    return 1
+  fi
+  if ! kubectl -n "$GKE_GATEWAY_NAMESPACE" get deployment ext-authz-token-exchange >/dev/null 2>&1; then
+    echo "E: platform plugin deployment $GKE_GATEWAY_NAMESPACE/ext-authz-token-exchange is missing" >&2
+    return 1
+  fi
+  for platform_deployment in fake-token-endpoint keycloak; do
+    if ! kubectl -n "$GKE_PLATFORM_NAMESPACE" get deployment "$platform_deployment" >/dev/null 2>&1; then
+      echo "E: platform deployment $GKE_PLATFORM_NAMESPACE/$platform_deployment is missing" >&2
+      return 1
+    fi
+  done
+  issuer_profiles="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get configmap ext-authz-token-exchange-issuer-profiles -o jsonpath='{.data.issuers\.yaml}' 2>/dev/null || true)"
+  for issuer in fake-issuer local-keycloak; do
+    if ! printf '%s\n' "$issuer_profiles" | grep -q "name:.*$issuer"; then
+      echo "E: platform issuer profile $issuer is not configured" >&2
+      return 1
+    fi
+  done
+}
+
+create_namespace_if_needed() {
+  namespace="$1"
+  kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
+}
+
+prepare_team_namespace() {
+  namespace="$1"
+  create_namespace_if_needed "$namespace"
+  kubectl label namespace "$namespace" \
+    ext-authz-token-exchange.magneticflux.net/policy=enabled --overwrite
+}
+
+wait_for_http_route() {
+  namespace="$1"
+  route="$2"
+  deadline=$((SECONDS + 600))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    conditions="$(kubectl -n "$namespace" get httproute "$route" \
+      -o jsonpath='{range .status.parents[*].conditions[*]}{.type}={.status}{"\n"}{end}' 2>/dev/null || true)"
+    if printf '%s\n' "$conditions" | grep -q '^Accepted=True$' \
+      && printf '%s\n' "$conditions" | grep -q '^ResolvedRefs=True$'; then
+      echo "I: HTTPRoute $namespace/$route is accepted and resolved."
+      return 0
+    fi
+    echo "I: waiting for HTTPRoute $namespace/$route (conditions: $(printf '%s' "$conditions" | tr '\n' ' '))"
+    sleep 5
+  done
+  echo "E: timed out waiting for HTTPRoute $namespace/$route" >&2
+  kubectl -n "$namespace" describe httproute "$route" >&2 || true
+  return 1
+}
+
+gateway_ip_address() {
+  if [ -n "${GKE_GATEWAY_IP:-}" ]; then
+    validate_gke_gateway_ip || return 1
+    printf '%s\n' "$GKE_GATEWAY_IP"
+    return 0
+  fi
+
+  addresses="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway "$GKE_GATEWAY_NAME" \
+    -o jsonpath='{range .status.addresses[*]}{.value}{"\n"}{end}')"
+  address="$(printf '%s\n' "$addresses" | awk '/^[0-9]+(\.[0-9]+){3}$/ { print; exit }')"
+  if [ -z "$address" ]; then
+    address="$(printf '%s\n' "$addresses" | awk '/:/ { print; exit }')"
+  fi
+  if [ -z "$address" ]; then
+    address="$(printf '%s\n' "$addresses" | awk 'NF { print; exit }')"
+  fi
+  if [ -z "$address" ]; then
+    echo "E: Gateway $GKE_GATEWAY_NAMESPACE/$GKE_GATEWAY_NAME has no status address" >&2
+    return 1
+  fi
+  case "$address" in
+    *:*) printf '%s\n' "$address"; return 0 ;;
+    *[!0-9.]* ) ;;
+    *) printf '%s\n' "$address"; return 0 ;;
+  esac
+  if command -v dig >/dev/null 2>&1; then
+    resolved="$(dig +short A "$address" | head -1)"
+    if [ -z "$resolved" ]; then
+      resolved="$(dig +short AAAA "$address" | head -1)"
+    fi
+  elif command -v getent >/dev/null 2>&1; then
+    resolved="$(getent ahostsv4 "$address" | awk 'NR == 1 { print $1 }')"
+  else
+    resolved=""
+  fi
+  if [ -z "$resolved" ]; then
+    echo "E: could not resolve Gateway status hostname $address to an IP address" >&2
+    return 1
+  fi
+  printf '%s\n' "$resolved"
+}
+
+export_gke_command_environment() {
+  preflight_gke_gateway || return 1
+
+  GKE_COMMAND_HTTPBIN_URL="${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}"
+  GKE_COMMAND_KEYCLOAK_URL="${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}"
+  GKE_COMMAND_DIRECT_ADDRESS=""
+  if gke_uses_direct_gateway; then
+    GKE_COMMAND_DIRECT_ADDRESS="$(gateway_ip_address)" || return 1
+  fi
+
+  export GKE_COMMAND_HTTPBIN_URL
+  export GKE_COMMAND_KEYCLOAK_URL
+  export GKE_COMMAND_DIRECT_ADDRESS
+  export GKE_SELECTED_LISTENER_SCHEME
+  export GKE_SELECTED_LISTENER_PORT
+}
+
+is_ipv4_address() {
+  printf '%s\n' "$1" | awk -F. '
+    NF != 4 { exit 1 }
+    {
+      for (i = 1; i <= 4; i++) {
+        if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+      }
+    }
+  '
+}
+
+is_ipv6_address() {
+  printf '%s\n' "$1" | awk '
+    {
+      value = $0
+      if (value !~ /:/ || value ~ /[^0-9A-Fa-f:]/) exit 1
+      compressed = index(value, "::") > 0
+      remainder = value
+      if (compressed) {
+        sub(/::/, "", remainder)
+        if (index(remainder, "::") > 0) exit 1
+      }
+      count = split(value, groups, ":")
+      populated = 0
+      for (i = 1; i <= count; i++) {
+        if (groups[i] == "") continue
+        if (length(groups[i]) > 4 || groups[i] !~ /^[0-9A-Fa-f]+$/) exit 1
+        populated++
+      }
+      if (compressed && populated < 8) exit 0
+      if (!compressed && populated == 8) exit 0
+      exit 1
+    }
+  '
+}
+
+is_ip_address() {
+  is_ipv4_address "$1" || is_ipv6_address "$1"
+}
+
+curl_resolve_value() {
+  host="$1"
+  ip="$2"
+  port="$3"
+  case "$ip" in
+    *:*) printf '%s:%s:[%s]\n' "$host" "$port" "$ip" ;;
+    *) printf '%s:%s:%s\n' "$host" "$port" "$ip" ;;
+  esac
+}
+
+httpbin_authorization() {
+  body_file="$1"
+  yq -p=json -r '.headers.Authorization[0] // .headers.authorization[0] // .headers.Authorization // .headers.authorization // ""' "$body_file"
+}
+
+decode_jwt_payload() {
+  token="$1"
+  payload="$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')"
+  case $((${#payload} % 4)) in
+    2) payload="${payload}==" ;;
+    3) payload="${payload}=" ;;
+  esac
+  if printf '%s' "$payload" | base64 --decode 2>/dev/null; then
+    return 0
+  fi
+  printf '%s' "$payload" | base64 -D
+}
+
+print_probe_file() {
+  file="$1"
+  if [ -s "$file" ]; then
+    cat "$file" >&2
+  fi
+}
+
+probe_gke_team() {
+  team="$1"
+  external_port="$(gke_external_port)" || return 1
+  httpbin_curl_args=(--noproxy '*' -ksS)
+  keycloak_curl_args=(--noproxy '*' -ksS)
+  if gke_uses_direct_gateway; then
+    ip="$(gateway_ip_address)" || return 1
+    httpbin_resolve="$(curl_resolve_value "$GKE_HTTPBIN_HOST" "$ip" "$external_port")"
+    keycloak_resolve="$(curl_resolve_value "$GKE_KEYCLOAK_HOST" "$ip" "$external_port")"
+    httpbin_curl_args+=(--resolve "$httpbin_resolve")
+    keycloak_curl_args+=(--resolve "$keycloak_resolve")
+  fi
+  base_url="${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}${GKE_TEAM_PATH_ROOT}/$team"
+  tmpdir="$(mktemp -d)"
+
+  deny_code="$(curl "${httpbin_curl_args[@]}" -o "$tmpdir/deny.json" \
+    -w '%{http_code}' "$base_url" 2>"$tmpdir/deny.stderr" || true)"
+  if [ "$deny_code" != "401" ] || ! grep -q 'bearer_token_required' "$tmpdir/deny.json"; then
+    echo "E: no-token probe failed for team $team (status=$deny_code)" >&2
+    print_probe_file "$tmpdir/deny.json"
+    print_probe_file "$tmpdir/deny.stderr"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  original="gke-$team-smoke"
+  allow_code="$(curl "${httpbin_curl_args[@]}" -H "Authorization: Bearer $original" \
+    -o "$tmpdir/fake.json" -w '%{http_code}' "$base_url" 2>"$tmpdir/fake.stderr" || true)"
+  exchanged="$(httpbin_authorization "$tmpdir/fake.json")"
+  if [ "$allow_code" != "200" ] || [ -z "$exchanged" ] || [ "$exchanged" = "Bearer $original" ]; then
+    echo "E: fake issuer exchange probe failed for team $team (status=$allow_code authorization=${exchanged:-missing})" >&2
+    print_probe_file "$tmpdir/fake.json"
+    print_probe_file "$tmpdir/fake.stderr"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  subject_code="$(curl "${keycloak_curl_args[@]}" \
+    -d grant_type=password \
+    -d client_id=tx-subject-client \
+    -d client_secret=tx-subject-secret \
+    -d username=token-user \
+    -d password=token-user-password \
+    -o "$tmpdir/subject.json" -w '%{http_code}' \
+    "${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}/realms/token-exchange-e2e/protocol/openid-connect/token" \
+    2>"$tmpdir/subject.stderr" || true)"
+  subject_token="$(yq -p=json -r '.access_token // ""' "$tmpdir/subject.json" 2>/dev/null || true)"
+  if [ "$subject_code" != "200" ] || [ -z "$subject_token" ]; then
+    echo "E: failed to obtain a Keycloak subject token (status=$subject_code)" >&2
+    print_probe_file "$tmpdir/subject.json"
+    print_probe_file "$tmpdir/subject.stderr"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  keycloak_code="$(curl "${httpbin_curl_args[@]}" -H "Authorization: Bearer $subject_token" \
+    -o "$tmpdir/keycloak.json" -w '%{http_code}' "$base_url/keycloak" 2>"$tmpdir/keycloak.stderr" || true)"
+  keycloak_auth="$(httpbin_authorization "$tmpdir/keycloak.json")"
+  if [ "$keycloak_code" != "200" ] || [ -z "$keycloak_auth" ] || [ "$keycloak_auth" = "Bearer $subject_token" ]; then
+    echo "E: Keycloak exchange probe failed for team $team (status=$keycloak_code)" >&2
+    print_probe_file "$tmpdir/keycloak.json"
+    print_probe_file "$tmpdir/keycloak.stderr"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  decode_jwt_payload "${keycloak_auth#Bearer }" > "$tmpdir/keycloak-payload.json"
+  issuer="$(yq -p=json -r '.iss // ""' "$tmpdir/keycloak-payload.json")"
+  audience_json="$(yq -p=json -o=json '.aud' "$tmpdir/keycloak-payload.json")"
+  expected_issuer="${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}/realms/token-exchange-e2e"
+  if [ "$issuer" != "$expected_issuer" ] || ! printf '%s\n' "$audience_json" | grep -q 'tx-audience-client'; then
+    echo "E: exchanged Keycloak token has unexpected issuer or audience (issuer=$issuer audience=$audience_json)" >&2
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  rm -rf "$tmpdir"
+  echo "I: team $team passed bearer denial, fake exchange, and Keycloak exchange probes."
+}
+
+wait_for_gke_team_probe() {
+  team="$1"
+  deadline=$((SECONDS + 600))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if probe_gke_team "$team"; then
+      return 0
+    fi
+    echo "I: waiting for GKE routing and extension propagation for team $team..."
+    sleep 10
+  done
+  echo "E: timed out waiting for end-to-end probes for team $team" >&2
+  return 1
+}
+
+print_gke_hosts_entries() {
+  if ! gke_uses_direct_gateway; then
+    echo
+    echo "Deployment succeeded."
+    echo
+    echo "Public DNS was used for $GKE_HTTPBIN_HOST and $GKE_KEYCLOAK_HOST; no /etc/hosts entries are required."
+    return 0
+  fi
+
+  ip="$(gateway_ip_address)" || return 1
+  hostnames="$(kubectl -n "$GKE_GATEWAY_NAMESPACE" get httproutes \
+    -l ext-authz-token-exchange.magneticflux.net/deployment-model=gke-platform \
+    -o jsonpath='{range .items[*].spec.hostnames[*]}{.}{"\n"}{end}' | sort -u | tr '\n' ' ')"
+  if [ -z "${hostnames// }" ]; then
+    hostnames="$GKE_HTTPBIN_HOST $GKE_KEYCLOAK_HOST"
+  fi
+  echo
+  echo "Deployment succeeded."
+  echo
+  echo "Add the following to /etc/hosts:"
+  echo
+  echo "$ip ${hostnames% }"
+}
+
+collect_gke_model_diagnostics() {
+  kubectl -n "$GKE_GATEWAY_NAMESPACE" get gateway,httproute,gcptrafficextension,healthcheckpolicy -o wide >&2 || true
+  kubectl -n "$GKE_GATEWAY_NAMESPACE" get httproute -o yaml >&2 || true
+  kubectl -n "$GKE_GATEWAY_NAMESPACE" get gcptrafficextension,healthcheckpolicy -o yaml >&2 || true
+  kubectl -n "$GKE_GATEWAY_NAMESPACE" get events --sort-by=.lastTimestamp >&2 || true
+  kubectl -n "$GKE_PLATFORM_NAMESPACE" get pods,svc,referencegrant -o wide >&2 || true
+  for color in yellow red blue black; do
+    kubectl -n "$GKE_DEMO_NAMESPACE_PREFIX-$color" get pods,svc,configmap,referencegrant -o wide >&2 || true
+  done
+  kubectl -n "$GKE_TEAM_NAMESPACE" get pods,svc,configmap,referencegrant -o wide >&2 || true
+  kubectl -n "$GKE_TEAM_NAMESPACE" get configmap \
+    -l ext-authz-token-exchange.magneticflux.net/enabled=true -o yaml >&2 || true
+  kubectl -n "$GKE_GATEWAY_NAMESPACE" logs -l app.kubernetes.io/name=ext-authz-token-exchange --tail=100 >&2 || true
+  kubectl -n "$GKE_PLATFORM_NAMESPACE" logs -l app.kubernetes.io/name=fake-token-endpoint --tail=100 >&2 || true
+  kubectl -n "$GKE_PLATFORM_NAMESPACE" logs -l app.kubernetes.io/name=keycloak --tail=100 >&2 || true
+}
+
+devspace_pipeline_deploy_gke_platform() {
+  echo "I: target=gke-platform"
+  if [ "$(get_flag "render")" = "true" ]; then
+    create_deployments --all
+    return
+  fi
+  preflight_gke_platform || { collect_gke_model_diagnostics; return 1; }
+  create_namespace_if_needed "$GKE_PLATFORM_NAMESPACE" || return 1
+  prepare_team_namespace "$GKE_TEAM_NAMESPACE_PREFIX-yellow" || return 1
+  helm dependency build charts/ext-authz-token-exchange
+  if ! create_deployments --all; then
+    collect_gke_model_diagnostics
+    return 1
+  fi
+  wait_for_rollout_if_present "$GKE_GATEWAY_NAMESPACE" ext-authz-token-exchange || { collect_gke_model_diagnostics; return 1; }
+  wait_for_rollout_if_present "$GKE_PLATFORM_NAMESPACE" fake-token-endpoint || { collect_gke_model_diagnostics; return 1; }
+  wait_for_rollout_if_present "$GKE_PLATFORM_NAMESPACE" keycloak || { collect_gke_model_diagnostics; return 1; }
+  for color in yellow red blue; do
+    wait_for_rollout_if_present "$GKE_DEMO_NAMESPACE_PREFIX-$color" httpbin || { collect_gke_model_diagnostics; return 1; }
+  done
+  wait_for_rollout_if_present "$GKE_TEAM_NAMESPACE_PREFIX-yellow" httpbin || { collect_gke_model_diagnostics; return 1; }
+  wait_for_gcptrafficextension_refs "$GKE_GATEWAY_NAMESPACE" || { collect_gke_model_diagnostics; return 1; }
+  wait_for_http_route "$GKE_GATEWAY_NAMESPACE" keycloak || { collect_gke_model_diagnostics; return 1; }
+  wait_for_http_route "$GKE_GATEWAY_NAMESPACE" txe-demo || { collect_gke_model_diagnostics; return 1; }
+  wait_for_http_route "$GKE_GATEWAY_NAMESPACE" txe-team-yellow || { collect_gke_model_diagnostics; return 1; }
+  if ! wait_for_gke_team_probe yellow; then
+    collect_gke_model_diagnostics
+    return 1
+  fi
+  print_gke_hosts_entries
+}
+
+devspace_pipeline_deploy_gke_app() {
+  echo "I: target=gke-app team=$GKE_TEAM_NAME"
+  if [ "$(get_flag "render")" = "true" ]; then
+    create_deployments --all
+    return
+  fi
+  preflight_gke_app || { collect_gke_model_diagnostics; return 1; }
+  wait_for_rollout_if_present "$GKE_GATEWAY_NAMESPACE" ext-authz-token-exchange || { collect_gke_model_diagnostics; return 1; }
+  wait_for_rollout_if_present "$GKE_PLATFORM_NAMESPACE" fake-token-endpoint || { collect_gke_model_diagnostics; return 1; }
+  wait_for_rollout_if_present "$GKE_PLATFORM_NAMESPACE" keycloak || { collect_gke_model_diagnostics; return 1; }
+  wait_for_gcptrafficextension_refs "$GKE_GATEWAY_NAMESPACE" || { collect_gke_model_diagnostics; return 1; }
+  wait_for_http_route "$GKE_GATEWAY_NAMESPACE" keycloak || { collect_gke_model_diagnostics; return 1; }
+  prepare_team_namespace "$GKE_TEAM_NAMESPACE" || return 1
+  if ! create_deployments --all; then
+    collect_gke_model_diagnostics
+    return 1
+  fi
+  wait_for_rollout_if_present "$GKE_TEAM_NAMESPACE" httpbin || { collect_gke_model_diagnostics; return 1; }
+  wait_for_http_route "$GKE_GATEWAY_NAMESPACE" "txe-team-$GKE_TEAM_NAME" || { collect_gke_model_diagnostics; return 1; }
+  if ! wait_for_gke_team_probe "$GKE_TEAM_NAME"; then
+    collect_gke_model_diagnostics
+    return 1
+  fi
+  print_gke_hosts_entries
 }

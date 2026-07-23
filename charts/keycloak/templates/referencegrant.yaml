@@ -1,0 +1,18 @@
+{{- if and .Values.gateway.enabled .Values.gateway.createReferenceGrant .Values.gateway.routeNamespace }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ printf "%s-from-%s" .Values.keycloak.name (include "keycloak.routeNamespace" .) | trunc 63 | trimSuffix "-" | quote }}
+  namespace: {{ .Values.namespace | quote }}
+  labels:
+{{ include "keycloak.labels" . | indent 4 }}
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ include "keycloak.routeNamespace" . | quote }}
+  to:
+    - group: ""
+      kind: Service
+      name: {{ .Values.keycloak.name | quote }}
+{{- end }}

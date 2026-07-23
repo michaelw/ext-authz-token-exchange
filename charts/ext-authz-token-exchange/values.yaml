@@ -91,6 +91,11 @@ gkeAuthz:
       port: 3000
       secretName: gateway-ext-authz-tls
       mountPath: /etc/ext-authz-token-exchange/tls
+      selfSigned:
+        enabled: false
+        validityDays: 3650
+      backendTLSPolicy:
+        enabled: true
       certificate:
         enabled: true
         issuerName: gateway-ext-authz-selfsigned

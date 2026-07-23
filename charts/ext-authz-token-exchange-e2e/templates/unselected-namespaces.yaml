@@ -1,0 +1,9 @@
+{{- range $namespace := .Values.unselectedNamespaces }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
+---
+{{- end }}
