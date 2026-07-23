@@ -62,6 +62,13 @@ assert_no_manifest "$workdir/current-gke-plugin.yaml" \
   'the opt-in Helm-managed TLS Secret in the current GKE render'
 
 echo "I: rendering platform-owned routes"
+demo_dashboard_command="$(yq -r '.commands."demo-dashboard".command' devspace.yaml)"
+demo_dashboard_forward_count="$(grep -oF '$@' <<<"$demo_dashboard_command" | wc -l | tr -d ' ' || true)"
+if [ "$demo_dashboard_forward_count" -ne 1 ] ||
+  ! grep -qF './scripts/run-demo-dashboard.sh $@' <<<"$demo_dashboard_command"; then
+  echo "E: demo-dashboard must forward arguments through exactly one shared invocation" >&2
+  exit 1
+fi
 # shellcheck disable=SC2016
 yq -e '
   .vars.GKE_EXTERNAL_SCHEME.value == "https" and
