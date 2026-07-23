@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.2...v0.6.0) (2026-07-23)
+
+
+### Features
+
+* **deploy:** add existing-gateway GKE platform and app profiles ([#176](https://github.com/michaelw/ext-authz-token-exchange/issues/176)) ([f15db70](https://github.com/michaelw/ext-authz-token-exchange/commit/f15db706ad056a067c5a1db896063a145101ed92))
+
+
+### Bug Fixes
+
+* **deps:** update kubernetes monorepo to v0.36.3 ([#189](https://github.com/michaelw/ext-authz-token-exchange/issues/189)) ([180f18e](https://github.com/michaelw/ext-authz-token-exchange/commit/180f18e0220713af8496a5884c24c6933aafc91c))
+* **deps:** update module github.com/prometheus/client_golang to v1.24.0 ([#185](https://github.com/michaelw/ext-authz-token-exchange/issues/185)) ([0f3d2cf](https://github.com/michaelw/ext-authz-token-exchange/commit/0f3d2cfb39c91eec640e2aa2c12d73f95ea8c456))
+
 ## [0.5.2](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.1...v0.5.2) (2026-07-16)
 
 
