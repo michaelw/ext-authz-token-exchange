@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -280,7 +279,7 @@ func (s *server) verifyToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode verify request: %w", err))
 		return
 	}
-	resp := verifyDashboardToken(r.Context(), req.Token)
+	resp := verifyDashboardTokenWithOptions(r.Context(), req.Token, s.opts)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -533,12 +532,7 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if opts.WithDefaults().InsecureTLS {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // demo clusters may use self-signed certificates.
-	}
-	client := &http.Client{Transport: transport}
-	resp, err := client.Do(req)
+	resp, err := demo.NewHTTPClient(opts.WithDefaults()).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: %w", baseURL, err)
 	}
@@ -641,6 +635,10 @@ func normalizeBearerInput(value string) string {
 }
 
 func verifyDashboardToken(parent context.Context, raw string) verifyTokenResponse {
+	return verifyDashboardTokenWithOptions(parent, raw, demo.LoadOptionsFromEnv())
+}
+
+func verifyDashboardTokenWithOptions(parent context.Context, raw string, opts demo.Options) verifyTokenResponse {
 	token := normalizeBearerInput(raw)
 	if token == "" {
 		return verifyTokenResponse{Status: "-"}
@@ -681,6 +679,7 @@ func verifyDashboardToken(parent context.Context, raw string) verifyTokenRespons
 
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
+	ctx = oidc.ClientContext(ctx, demo.NewHTTPClient(opts.WithDefaults()))
 	provider, err := oidc.NewProvider(ctx, claims.Issuer)
 	if err != nil {
 		resp.Status = "verification unavailable"

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/michaelw/ext-authz-token-exchange/internal/directhttp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -134,6 +134,8 @@ type e2eEnv struct {
 	skipInstall         bool
 	skipCleanup         bool
 	insecureTLS         bool
+	directAddress       string
+	expectInsecureLogs  bool
 	kube                *kubernetes.Clientset
 }
 
@@ -175,6 +177,8 @@ func loadE2EEnv() e2eEnv {
 		skipInstall:         envBool("E2E_SKIP_INSTALL", false),
 		skipCleanup:         envBool("E2E_SKIP_CLEANUP", false),
 		insecureTLS:         envBool("E2E_INSECURE_SKIP_VERIFY", true),
+		directAddress:       strings.TrimSpace(os.Getenv("E2E_DIRECT_ADDRESS")),
+		expectInsecureLogs:  envBool("E2E_EXPECT_INSECURE_TOKEN_LOGS", true),
 	}
 }
 
@@ -221,21 +225,31 @@ func newKubeClient() (*kubernetes.Clientset, error) {
 func installDemo(ctx context.Context) {
 	pluginValuesPath := filepath.Join(os.TempDir(), env.releaseName+"-plugin-values.yaml")
 	Expect(os.WriteFile(pluginValuesPath, []byte(pluginValues()), 0o600)).To(Succeed())
-	installHelmRelease(ctx, env.releaseName, env.namespace, repoPath("charts", "ext-authz-token-exchange"), pluginValuesPath, true)
+	installHelmRelease(ctx, env.releaseName, env.namespace, repoPath("charts", "ext-authz-token-exchange"), true, pluginValuesPath)
 
 	demoValuesPath := filepath.Join(os.TempDir(), env.demoReleaseName+"-values.yaml")
 	Expect(os.WriteFile(demoValuesPath, []byte(demoValues()), 0o600)).To(Succeed())
-	installHelmRelease(ctx, env.demoReleaseName, env.demoNamespace, repoPath("charts", "ext-authz-token-exchange-e2e"), demoValuesPath, false)
+	installHelmRelease(
+		ctx,
+		env.demoReleaseName,
+		env.demoNamespace,
+		repoPath("charts", "ext-authz-token-exchange-e2e"),
+		false,
+		repoPath("charts", "ext-authz-token-exchange-e2e", "values-keycloak.yaml"),
+		demoValuesPath,
+	)
 }
 
-func installHelmRelease(ctx context.Context, releaseName, namespace, chartPath, valuesPath string, dependencyUpdate bool) {
+func installHelmRelease(ctx context.Context, releaseName, namespace, chartPath string, dependencyUpdate bool, valuesPaths ...string) {
 	args := []string{
 		"upgrade", "--install", releaseName, chartPath,
 		"--namespace", namespace,
 		"--create-namespace",
-		"--values", valuesPath,
 		"--wait",
 		"--timeout", "2m",
+	}
+	for _, valuesPath := range valuesPaths {
+		args = append(args, "--values", valuesPath)
 	}
 	if dependencyUpdate {
 		args = append(args, "--dependency-update")
@@ -314,7 +328,7 @@ issuerProfiles:
 }
 
 func demoValues() string {
-	values := fmt.Sprintf(`host: %q
+	return fmt.Sprintf(`host: %q
 namespacePrefix: %q
 systemNamespace: %q
 policy:
@@ -331,71 +345,6 @@ fakeTokenEndpoint:
 `, env.host, env.namespacePrefix, env.demoNamespace,
 		policyLabelKey, policyLabelValue, policyNamespaceLabelKey, policyNamespaceLabelValue, policyNamespaceSelector, env.httpbinResourceBase,
 		tokenEndpointName, env.fakeTokenImage, tokenEndpointPort)
-	return values + fmt.Sprintf(`teams:
-  - color: yellow
-    scope: profile
-    pathPrefix: /anything/keycloak-audience
-    issuerRef: local-keycloak
-    resources: []
-    audiences:
-      - %q
-    scenarios:
-      - name: keycloak-resource
-        scope: profile
-        pathPrefix: /anything/keycloak-resource
-        issuerRef: local-keycloak
-        resources:
-          - %q
-        audiences:
-          - %q
-      - name: keycloak-expired-subject-token
-        scope: profile
-        pathPrefix: /anything/keycloak-expired-subject-token
-        issuerRef: local-keycloak
-        resources: []
-        audiences:
-          - %q
-      - name: keycloak-unsigned-subject-token
-        scope: profile
-        pathPrefix: /anything/keycloak-unsigned-subject-token
-        issuerRef: local-keycloak
-        resources: []
-        audiences:
-          - %q
-      - name: keycloak-truncated-signature
-        scope: profile
-        pathPrefix: /anything/keycloak-truncated-signature
-        issuerRef: local-keycloak
-        resources: []
-        audiences:
-          - %q
-      - name: keycloak-untrusted-issuer
-        scope: profile
-        pathPrefix: /anything/keycloak-untrusted-issuer
-        issuerRef: local-keycloak
-        resources: []
-        audiences:
-          - %q
-      - name: keycloak-invalid-audience
-        scope: profile
-        pathPrefix: /anything/keycloak-invalid-audience
-        issuerRef: local-keycloak
-        resources: []
-        audiences:
-          - tx-missing-audience-client
-      - name: keycloak-invalid-scope
-        scope: tx-missing-scope
-        pathPrefix: /anything/keycloak-invalid-scope
-        issuerRef: local-keycloak
-        resources: []
-        audiences:
-          - %q
-`, env.audienceClientID, env.httpbinResourceBase+"/anything/keycloak-resource", env.audienceClientID,
-		env.audienceClientID,
-		env.audienceClientID,
-		env.audienceClientID,
-		env.audienceClientID,
-		env.audienceClientID)
 }
 
 func keycloakValues() string {
@@ -615,6 +564,52 @@ func setPluginEnv(ctx context.Context, name, value string) {
 	waitForDeployment(ctx, env.namespace, env.releaseName)
 }
 
+func pluginEnv(ctx context.Context, name string) (string, bool) {
+	deployment, err := env.kube.AppsV1().Deployments(env.namespace).Get(ctx, env.releaseName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	for i := range deployment.Spec.Template.Spec.Containers {
+		container := &deployment.Spec.Template.Spec.Containers[i]
+		if container.Name != "ext-authz-token-exchange" {
+			continue
+		}
+		for _, variable := range container.Env {
+			if variable.Name == name {
+				return variable.Value, true
+			}
+		}
+	}
+	return "", false
+}
+
+func restorePluginEnv(ctx context.Context, name, value string, present bool) {
+	Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		deployment, err := env.kube.AppsV1().Deployments(env.namespace).Get(ctx, env.releaseName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for i := range deployment.Spec.Template.Spec.Containers {
+			container := &deployment.Spec.Template.Spec.Containers[i]
+			if container.Name != "ext-authz-token-exchange" {
+				continue
+			}
+			filtered := container.Env[:0]
+			for _, variable := range container.Env {
+				if variable.Name != name {
+					filtered = append(filtered, variable)
+				}
+			}
+			container.Env = filtered
+			if present {
+				container.Env = append(container.Env, corev1.EnvVar{Name: name, Value: value})
+			}
+			_, err = env.kube.AppsV1().Deployments(env.namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+			return err
+		}
+		return fmt.Errorf("deployment %s/%s does not contain ext-authz-token-exchange", env.namespace, env.releaseName)
+	})).To(Succeed())
+	waitForDeployment(ctx, env.namespace, env.releaseName)
+}
+
 func waitForDeployment(ctx context.Context, namespace, name string) {
 	Eventually(func(g Gomega) {
 		deployment, err := env.kube.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -699,9 +694,9 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 }
 
 func httpClient() *http.Client {
-	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: env.insecureTLS},
-	}}
+	transport, err := directhttp.NewTransport(env.directAddress, env.insecureTLS)
+	Expect(err).NotTo(HaveOccurred())
+	return &http.Client{Timeout: 10 * time.Second, Transport: transport}
 }
 
 func request(ctx context.Context, method, path, bearer string, headers map[string]string) (*http.Response, []byte) {

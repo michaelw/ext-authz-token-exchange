@@ -249,7 +249,17 @@ preflight_gke_platform() {
   require_gke_model_value GKE_PLATFORM_NAMESPACE
   require_gke_model_value GKE_PLATFORM_TEAMS
   require_gke_model_value GKE_TEAM_NAMESPACE_PREFIX
+  require_gke_model_value GKE_DEMO_NAMESPACE_PREFIX
   require_gke_model_value GKE_TEAM_PATH_ROOT
+
+  for color in yellow red blue; do
+    for resource in deployments.apps services configmaps referencegrants.gateway.networking.k8s.io; do
+      if ! kubectl auth can-i create "$resource" -n "$GKE_DEMO_NAMESPACE_PREFIX-$color" | grep -qx yes; then
+        echo "E: current identity cannot create $resource in namespace $GKE_DEMO_NAMESPACE_PREFIX-$color" >&2
+        return 1
+      fi
+    done
+  done
 
   for permission in \
     "create deployments.apps $GKE_PLATFORM_NAMESPACE" \
@@ -425,6 +435,23 @@ gateway_ip_address() {
     return 1
   fi
   printf '%s\n' "$resolved"
+}
+
+export_gke_command_environment() {
+  preflight_gke_gateway || return 1
+
+  GKE_COMMAND_HTTPBIN_URL="${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}"
+  GKE_COMMAND_KEYCLOAK_URL="${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}"
+  GKE_COMMAND_DIRECT_ADDRESS=""
+  if gke_uses_direct_gateway; then
+    GKE_COMMAND_DIRECT_ADDRESS="$(gateway_ip_address)" || return 1
+  fi
+
+  export GKE_COMMAND_HTTPBIN_URL
+  export GKE_COMMAND_KEYCLOAK_URL
+  export GKE_COMMAND_DIRECT_ADDRESS
+  export GKE_SELECTED_LISTENER_SCHEME
+  export GKE_SELECTED_LISTENER_PORT
 }
 
 is_ipv4_address() {
@@ -624,6 +651,9 @@ collect_gke_model_diagnostics() {
   kubectl -n "$GKE_GATEWAY_NAMESPACE" get gcptrafficextension,healthcheckpolicy -o yaml >&2 || true
   kubectl -n "$GKE_GATEWAY_NAMESPACE" get events --sort-by=.lastTimestamp >&2 || true
   kubectl -n "$GKE_PLATFORM_NAMESPACE" get pods,svc,referencegrant -o wide >&2 || true
+  for color in yellow red blue black; do
+    kubectl -n "$GKE_DEMO_NAMESPACE_PREFIX-$color" get pods,svc,configmap,referencegrant -o wide >&2 || true
+  done
   kubectl -n "$GKE_TEAM_NAMESPACE" get pods,svc,configmap,referencegrant -o wide >&2 || true
   kubectl -n "$GKE_TEAM_NAMESPACE" get configmap \
     -l ext-authz-token-exchange.magneticflux.net/enabled=true -o yaml >&2 || true
@@ -649,9 +679,13 @@ devspace_pipeline_deploy_gke_platform() {
   wait_for_rollout_if_present "$GKE_GATEWAY_NAMESPACE" ext-authz-token-exchange || { collect_gke_model_diagnostics; return 1; }
   wait_for_rollout_if_present "$GKE_PLATFORM_NAMESPACE" fake-token-endpoint || { collect_gke_model_diagnostics; return 1; }
   wait_for_rollout_if_present "$GKE_PLATFORM_NAMESPACE" keycloak || { collect_gke_model_diagnostics; return 1; }
+  for color in yellow red blue; do
+    wait_for_rollout_if_present "$GKE_DEMO_NAMESPACE_PREFIX-$color" httpbin || { collect_gke_model_diagnostics; return 1; }
+  done
   wait_for_rollout_if_present "$GKE_TEAM_NAMESPACE_PREFIX-yellow" httpbin || { collect_gke_model_diagnostics; return 1; }
   wait_for_gcptrafficextension_refs "$GKE_GATEWAY_NAMESPACE" || { collect_gke_model_diagnostics; return 1; }
   wait_for_http_route "$GKE_GATEWAY_NAMESPACE" keycloak || { collect_gke_model_diagnostics; return 1; }
+  wait_for_http_route "$GKE_GATEWAY_NAMESPACE" txe-demo || { collect_gke_model_diagnostics; return 1; }
   wait_for_http_route "$GKE_GATEWAY_NAMESPACE" txe-team-yellow || { collect_gke_model_diagnostics; return 1; }
   if ! wait_for_gke_team_probe yellow; then
     collect_gke_model_diagnostics

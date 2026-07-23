@@ -25,54 +25,68 @@ assert_no_manifest() {
   fi
 }
 
-echo "I: rendering legacy chart configurations"
-helm template legacy-default charts/ext-authz-token-exchange-e2e \
-  --namespace ext-authz-token-exchange-e2e > "$workdir/legacy-default.yaml"
-assert_manifest "$workdir/legacy-default.yaml" \
+echo "I: rendering current chart configurations"
+helm template current-default charts/ext-authz-token-exchange-e2e \
+  --namespace ext-authz-token-exchange-e2e > "$workdir/current-default.yaml"
+assert_manifest "$workdir/current-default.yaml" \
   'select(.kind == "Deployment" and .metadata.name == "fake-token-endpoint")' \
-  'the legacy fake token endpoint'
-assert_no_manifest "$workdir/legacy-default.yaml" \
+  'the current fake token endpoint'
+assert_no_manifest "$workdir/current-default.yaml" \
   'select(.kind == "Deployment" and .metadata.name == "httpbin")' \
-  'opt-in team applications in the legacy default render'
+  'opt-in team applications in the current default render'
 
-helm template legacy-gke-keycloak charts/keycloak \
+helm template current-gke-keycloak charts/keycloak \
   --namespace ext-authz-token-exchange-e2e \
-  --set gatewayProvider=gke-gateway > "$workdir/legacy-gke-keycloak.yaml"
-assert_manifest "$workdir/legacy-gke-keycloak.yaml" \
+  --set gatewayProvider=gke-gateway > "$workdir/current-gke-keycloak.yaml"
+assert_manifest "$workdir/current-gke-keycloak.yaml" \
   'select(.kind == "GCPBackendPolicy" and .spec.default.iap.enabled == true)' \
-  'legacy automatic GKE IAP'
-assert_manifest "$workdir/legacy-gke-keycloak.yaml" \
+  'current automatic GKE IAP'
+assert_manifest "$workdir/current-gke-keycloak.yaml" \
   'select(.kind == "HTTPRoute" and .metadata.name == "keycloak-http-redirect")' \
-  'the legacy GKE HTTP redirect route'
+  'the current GKE HTTP redirect route'
 
-helm template legacy-gke-plugin charts/ext-authz-token-exchange \
+helm template current-gke-plugin charts/ext-authz-token-exchange \
   --namespace gke-gateway \
-  --set gatewayProvider=gke-gateway > "$workdir/legacy-gke-plugin.yaml"
-assert_manifest "$workdir/legacy-gke-plugin.yaml" \
+  --set gatewayProvider=gke-gateway > "$workdir/current-gke-plugin.yaml"
+assert_manifest "$workdir/current-gke-plugin.yaml" \
   'select(.kind == "Issuer" and .apiVersion == "cert-manager.io/v1")' \
-  'the legacy cert-manager Issuer'
-assert_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'the current cert-manager Issuer'
+assert_manifest "$workdir/current-gke-plugin.yaml" \
   'select(.kind == "Certificate" and .apiVersion == "cert-manager.io/v1")' \
-  'the legacy cert-manager Certificate'
-assert_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'the current cert-manager Certificate'
+assert_manifest "$workdir/current-gke-plugin.yaml" \
   'select(.kind == "BackendTLSPolicy")' \
-  'the legacy authenticated backend TLS policy'
-assert_no_manifest "$workdir/legacy-gke-plugin.yaml" \
+  'the current authenticated backend TLS policy'
+assert_no_manifest "$workdir/current-gke-plugin.yaml" \
   'select(.kind == "Secret" and .metadata.name == "gateway-ext-authz-tls")' \
-  'the opt-in Helm-managed TLS Secret in the legacy GKE render'
+  'the opt-in Helm-managed TLS Secret in the current GKE render'
 
 echo "I: rendering platform-owned routes"
 # shellcheck disable=SC2016
 yq -e '
   .vars.GKE_EXTERNAL_SCHEME.value == "https" and
   .vars.GKE_GATEWAY_IP.value == "" and
+  .vars.GKE_DEMO_NAMESPACE_PREFIX.value == "txe-demo" and
+  .vars.GKE_IMAGE_TAG.command == "yq" and
+  .vars.GKE_IMAGE_TAG.args[1] == ".appVersion" and
   (.vars | has("GKE_GATEWAY_SCHEME") | not) and
   (.vars | has("GKE_GATEWAY_PORT") | not)
 ' devspace.yaml >/dev/null
 # shellcheck disable=SC2016
 yq -e '
+  .profiles[] | select(.name == "with-keycloak") |
+  .merge.deployments."ext-authz-token-exchange-e2e".helm.valuesFiles[0] ==
+    "./charts/ext-authz-token-exchange-e2e/values-keycloak.yaml"
+' devspace.yaml >/dev/null
+# shellcheck disable=SC2016
+yq -e '
   .profiles[] | select(.name == "gke-platform") |
   select(
+    .merge.deployments."gke-platform-resources".helm.valuesFiles[0] == "./charts/ext-authz-token-exchange-e2e/values-keycloak.yaml" and
+    .merge.deployments."gke-platform-resources".updateImageTags == false and
+    .merge.deployments."gke-platform-resources".helm.values.namespacePrefix == "${GKE_DEMO_NAMESPACE_PREFIX}" and
+    .merge.deployments."gke-platform-resources".helm.values.teamApp.enabled == true and
+    .merge.deployments."gke-platform-resources".helm.values.demoRoute.enabled == true and
     .merge.deployments."gke-platform-resources".helm.values.policy.httpbinResourceBase == "${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}" and
     .merge.deployments."gke-platform-keycloak".helm.values.keycloak.externalURL == "${GKE_EXTERNAL_SCHEME}://${GKE_KEYCLOAK_HOST}" and
     .merge.deployments."gke-platform-yellow".helm.values.policy.httpbinResourceBase == "${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}"
@@ -141,8 +155,12 @@ grep -q 'Digital Signature, Key Encipherment' "$workdir/platform-plugin-cert.txt
 
 helm template gke-platform-routes charts/ext-authz-token-exchange-e2e \
   --namespace txe-platform \
+  --values charts/ext-authz-token-exchange-e2e/values-keycloak.yaml \
+  --set namespacePrefix=txe-demo \
+  --set policy.httpbinResourceBase=https://httpbin.example.test \
   --set fakeTokenEndpoint.enabled=true \
-  --set-json 'teams=[]' \
+  --set teamApp.enabled=true \
+  --set teamApp.gatewayNamespace=gke-gateway \
   --set platformRoutes.enabled=true \
   --set platformRoutes.gatewayNamespace=gke-gateway \
   --set platformRoutes.gatewayName=gateway \
@@ -150,7 +168,14 @@ helm template gke-platform-routes charts/ext-authz-token-exchange-e2e \
   --set platformRoutes.host=httpbin.example.test \
   --set-string 'platformRoutes.teamNames=yellow\,red\,blue\,green' \
   --set platformRoutes.teamNamespacePrefix=txe-team \
-  --set platformRoutes.teamPathRoot=/anything/txe > "$workdir/platform-routes.yaml"
+  --set platformRoutes.teamPathRoot=/anything/txe \
+  --set demoRoute.enabled=true \
+  --set demoRoute.gatewayNamespace=gke-gateway \
+  --set demoRoute.gatewayName=gateway \
+  --set demoRoute.gatewaySectionName=custom-listener \
+  --set demoRoute.host=httpbin.example.test \
+  --set demoRoute.backendNamespace=txe-demo-yellow \
+  --set 'unselectedNamespaces[0]=txe-demo-black' > "$workdir/platform-routes.yaml"
 
 for team in yellow red blue green; do
   TEAM="$team" yq -e '
@@ -162,6 +187,32 @@ for team in yellow red blue green; do
     select(.spec.rules[0].backendRefs[0].namespace == ("txe-team-" + strenv(TEAM)))
   ' "$workdir/platform-routes.yaml" >/dev/null
 done
+
+for team in yellow red blue; do
+  TEAM="$team" yq -e '
+    select(.kind == "Namespace" and .metadata.name == ("txe-demo-" + strenv(TEAM))) |
+    select(.metadata.labels."ext-authz-token-exchange.magneticflux.net/policy" == "enabled")
+  ' "$workdir/platform-routes.yaml" >/dev/null
+  TEAM="$team" yq -e '
+    select(.kind == "Deployment" and .metadata.name == "httpbin" and .metadata.namespace == ("txe-demo-" + strenv(TEAM)))
+  ' "$workdir/platform-routes.yaml" >/dev/null
+  TEAM="$team" yq -e '
+    select(.kind == "ReferenceGrant" and .metadata.namespace == ("txe-demo-" + strenv(TEAM))) |
+    select(.spec.from[0].namespace == "gke-gateway" and .spec.to[0].name == "httpbin")
+  ' "$workdir/platform-routes.yaml" >/dev/null
+done
+assert_manifest "$workdir/platform-routes.yaml" \
+  'select(.kind == "Namespace" and .metadata.name == "txe-demo-black") | select(.metadata.labels."ext-authz-token-exchange.magneticflux.net/policy" == null)' \
+  'the unlabeled Helm-owned black namespace'
+assert_manifest "$workdir/platform-routes.yaml" \
+  'select(.kind == "HTTPRoute" and .metadata.name == "txe-demo" and .metadata.namespace == "gke-gateway") | select(.spec.parentRefs[0].sectionName == "custom-listener" and .spec.rules[0].matches[0].path.value == "/anything" and .spec.rules[0].backendRefs[0].namespace == "txe-demo-yellow")' \
+  'the platform-owned demo route'
+assert_manifest "$workdir/platform-routes.yaml" \
+  'select(.kind == "ConfigMap" and .metadata.name == "keycloak-resource-policy" and .metadata.namespace == "txe-demo-yellow") | select(.data."config.yaml" | contains("https://httpbin.example.test/anything/keycloak-resource"))' \
+  'the shared Keycloak resource policy'
+assert_manifest "$workdir/platform-routes.yaml" \
+  'select(.kind == "ConfigMap" and .metadata.name == "error-invalid-target-policy" and .metadata.namespace == "txe-demo-red")' \
+  'the complete fake issuer error policy matrix'
 
 echo "I: rendering Keycloak for externally terminated HTTPS without GKE IAP"
 # shellcheck disable=SC2016
@@ -360,6 +411,36 @@ echo "I: checking Gateway hostname and /etc/hosts helpers"
   export GKE_EXTERNAL_SCHEME=http
   gke_uses_direct_gateway
   [ "$(gke_external_port)" = "80" ]
+
+  preflight_gke_gateway() {
+    GKE_SELECTED_LISTENER_SCHEME=http
+    GKE_SELECTED_LISTENER_PORT=80
+  }
+  gateway_ip_address() {
+    printf '%s\n' 203.0.113.20
+  }
+  export GKE_EXTERNAL_SCHEME=http
+  export_gke_command_environment
+  [ "$GKE_COMMAND_HTTPBIN_URL" = "http://httpbin.example.test" ]
+  [ "$GKE_COMMAND_KEYCLOAK_URL" = "http://keycloak.example.test" ]
+  [ "$GKE_COMMAND_DIRECT_ADDRESS" = "203.0.113.20" ]
+
+  gateway_ip_address() {
+    echo "E: Gateway address must not be queried for external TLS" >&2
+    return 1
+  }
+  export GKE_EXTERNAL_SCHEME=https
+  export_gke_command_environment
+  [ "$GKE_COMMAND_DIRECT_ADDRESS" = "" ]
 )
+
+# shellcheck disable=SC2016
+grep -Fq 'create configmap "$lock_name"' scripts/run-gke-smoke.sh
+grep -Fq 'trap restore EXIT INT TERM' scripts/run-gke-smoke.sh
+grep -Fq 'E2E_EXPECT_INSECURE_TOKEN_LOGS=false' scripts/run-gke-smoke.sh
+# shellcheck disable=SC2016
+grep -Fq 'rollout status "deployment/$plugin_deployment"' scripts/run-gke-smoke.sh
+# shellcheck disable=SC2016
+grep -Fq 'delete configmap "$lock_name"' scripts/run-gke-smoke.sh
 
 echo "I: GKE platform/app chart render checks passed"

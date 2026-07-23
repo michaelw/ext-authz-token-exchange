@@ -1,0 +1,26 @@
+{{- if .Values.demoRoute.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: txe-demo
+  namespace: {{ .Values.demoRoute.gatewayNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 4 }}
+    ext-authz-token-exchange.magneticflux.net/deployment-model: gke-platform
+    ext-authz-token-exchange.magneticflux.net/fixture: demo
+spec:
+  parentRefs:
+    - name: {{ .Values.demoRoute.gatewayName | quote }}
+      sectionName: {{ .Values.demoRoute.gatewaySectionName | quote }}
+  hostnames:
+    - {{ .Values.demoRoute.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.demoRoute.pathPrefix | quote }}
+      backendRefs:
+        - name: {{ .Values.demoRoute.serviceName | quote }}
+          namespace: {{ .Values.demoRoute.backendNamespace | quote }}
+          port: {{ .Values.demoRoute.servicePort }}
+{{- end }}

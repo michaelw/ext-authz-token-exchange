@@ -100,6 +100,24 @@ For a browser-recorded walkthrough, start the local dashboard:
 devspace run demo-dashboard -- -open
 ```
 
+For an existing-Gateway `gke-platform` deployment, the same dashboard and full
+non-stress suite use the Helm-owned `txe-demo-*` fixture:
+
+```sh
+devspace run demo-dashboard -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http \
+  -- -open
+
+devspace run smoke -p gke-platform \
+  --var GKE_DEPLOYMENT_DOMAIN=example.test \
+  --var GKE_GATEWAY_SECTION_NAME=http
+```
+
+When the selected listener matches the public scheme, these commands dial the
+Gateway address directly while preserving the public HTTP Host and TLS SNI.
+When TLS terminates upstream of an HTTP listener, they use public DNS.
+
 Omit `-open` to keep the current manual-open behavior and then open
 `http://127.0.0.1:8088/` yourself. The dashboard is a demo-only binary with
 embedded static assets. It is not copied into the production `prod` image; that

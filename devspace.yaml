@@ -50,6 +50,8 @@ vars:
     value: yellow,red,blue,green
   GKE_TEAM_NAMESPACE_PREFIX:
     value: txe-team
+  GKE_DEMO_NAMESPACE_PREFIX:
+    value: txe-demo
   GKE_TEAM_PATH_ROOT:
     value: /anything/txe
   GKE_TEAM_NAME:
@@ -199,69 +201,11 @@ profiles:
             releaseName: ext-authz-token-exchange-e2e
             chart:
               name: ./charts/ext-authz-token-exchange-e2e
+            valuesFiles:
+              - ./charts/ext-authz-token-exchange-e2e/values-keycloak.yaml
             values:
               fakeTokenEndpoint:
                 image: ${runtime.images.fake-token-endpoint.image}:${runtime.images.fake-token-endpoint.tag}
-              additionalScenarios:
-                - color: yellow
-                  scenarios:
-                    - name: keycloak-audience
-                      scope: profile
-                      pathPrefix: /anything/keycloak-audience
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-audience-client
-                    - name: keycloak-resource
-                      scope: profile
-                      pathPrefix: /anything/keycloak-resource
-                      issuerRef: local-keycloak
-                      resources:
-                        - https://httpbin.${DEPLOYMENT_DOMAIN}/anything/keycloak-resource
-                      audiences:
-                        - tx-audience-client
-                    - name: keycloak-expired-subject-token
-                      scope: profile
-                      pathPrefix: /anything/keycloak-expired-subject-token
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-audience-client
-                    - name: keycloak-unsigned-subject-token
-                      scope: profile
-                      pathPrefix: /anything/keycloak-unsigned-subject-token
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-audience-client
-                    - name: keycloak-truncated-signature
-                      scope: profile
-                      pathPrefix: /anything/keycloak-truncated-signature
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-audience-client
-                    - name: keycloak-untrusted-issuer
-                      scope: profile
-                      pathPrefix: /anything/keycloak-untrusted-issuer
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-audience-client
-                    - name: keycloak-invalid-audience
-                      scope: profile
-                      pathPrefix: /anything/keycloak-invalid-audience
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-missing-audience-client
-                    - name: keycloak-invalid-scope
-                      scope: tx-missing-scope
-                      pathPrefix: /anything/keycloak-invalid-scope
-                      issuerRef: local-keycloak
-                      resources: []
-                      audiences:
-                        - tx-audience-client
         keycloak:
           namespace: ext-authz-token-exchange-e2e
           helm:
@@ -404,47 +348,26 @@ profiles:
                 OTEL_METRICS_EXPORTER: none
         gke-platform-resources:
           namespace: ${GKE_PLATFORM_NAMESPACE}
+          updateImageTags: false
           helm:
             releaseName: txe-platform
             chart:
               name: ./charts/ext-authz-token-exchange-e2e
+            valuesFiles:
+              - ./charts/ext-authz-token-exchange-e2e/values-keycloak.yaml
             values:
               gatewayProvider: gke-gateway
               host: ${GKE_HTTPBIN_HOST}
-              namespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
+              namespacePrefix: ${GKE_DEMO_NAMESPACE_PREFIX}
               systemNamespace: ${GKE_PLATFORM_NAMESPACE}
               policy:
                 httpbinResourceBase: ${GKE_EXTERNAL_SCHEME}://${GKE_HTTPBIN_HOST}
               fakeTokenEndpoint:
                 enabled: true
                 image: ghcr.io/michaelw/ext-authz-token-exchange-fake-token-endpoint:${GKE_IMAGE_TAG}
-                routes:
-                  - name: yellow-success
-                    match:
-                      audience: httpbin-yellow
-                    response:
-                      type: success
-                      scenario: yellow
-                  - name: red-success
-                    match:
-                      audience: httpbin-red
-                    response:
-                      type: success
-                      scenario: red
-                  - name: blue-success
-                    match:
-                      audience: httpbin-blue
-                    response:
-                      type: success
-                      scenario: blue
-                  - name: green-success
-                    match:
-                      audience: httpbin-green
-                    response:
-                      type: success
-                      scenario: green
               teamApp:
-                enabled: false
+                enabled: true
+                gatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
               platformRoutes:
                 enabled: true
                 gatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
@@ -454,7 +377,16 @@ profiles:
                 teamNames: ${GKE_PLATFORM_TEAMS}
                 teamNamespacePrefix: ${GKE_TEAM_NAMESPACE_PREFIX}
                 teamPathRoot: ${GKE_TEAM_PATH_ROOT}
-              teams: []
+              demoRoute:
+                enabled: true
+                gatewayNamespace: ${GKE_GATEWAY_NAMESPACE}
+                gatewayName: ${GKE_GATEWAY_NAME}
+                gatewaySectionName: ${GKE_GATEWAY_SECTION_NAME}
+                host: ${GKE_HTTPBIN_HOST}
+                pathPrefix: /anything
+                backendNamespace: ${GKE_DEMO_NAMESPACE_PREFIX}-yellow
+              unselectedNamespaces:
+                - ${GKE_DEMO_NAMESPACE_PREFIX}-black
         gke-platform-keycloak:
           namespace: ${GKE_PLATFORM_NAMESPACE}
           helm:
@@ -775,7 +707,7 @@ commands:
     section: build
     command: |
       echo "I: target=actionlint"
-      go run github.com/rhysd/actionlint/cmd/actionlint@latest
+      go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
   lint:
     description: "Run repository lint checks"
@@ -783,7 +715,7 @@ commands:
     command: |
       echo "I: target=lint"
       pre-commit run --all-files
-      go run github.com/rhysd/actionlint/cmd/actionlint@latest
+      go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
   helm-verify:
     description: "Verify Helm chart dependencies, lint, and rendering"
@@ -810,7 +742,7 @@ commands:
       echo "I: target=verify"
       echo "I: target=lint"
       pre-commit run --all-files
-      go run github.com/rhysd/actionlint/cmd/actionlint@latest
+      go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       echo "I: target=test"
       go mod download
       go build ./cmd/...
@@ -839,8 +771,14 @@ commands:
     section: build
     command: |
       echo "I: target=smoke"
-      devspace deploy
-      E2E_BASE_URL="https://httpbin.$DEPLOYMENT_DOMAIN" devspace run test-e2e $@
+      if printf '%s' "${DEVSPACE_PROFILES:-}" | grep -q 'gke-platform'; then
+        source ./scripts/devspace-pipeline.sh
+        export_gke_command_environment
+        ./scripts/run-gke-smoke.sh "$@"
+      else
+        devspace deploy
+        E2E_BASE_URL="https://httpbin.$DEPLOYMENT_DOMAIN" devspace run test-e2e $@
+      fi
 
   test-e2e:
     description: "Run Kubernetes e2e tests against the selected test stack"
@@ -919,6 +857,19 @@ commands:
     section: build
     command: |
       echo "I: target=demo-dashboard"
+      if printf '%s' "${DEVSPACE_PROFILES:-}" | grep -q 'gke-platform'; then
+        source ./scripts/devspace-pipeline.sh
+        export_gke_command_environment
+        DEMO_BASE_URL="$GKE_COMMAND_HTTPBIN_URL" \
+        DEMO_KEYCLOAK_BASE_URL="$GKE_COMMAND_KEYCLOAK_URL" \
+        DEMO_KEYCLOAK_ISSUER="$GKE_COMMAND_KEYCLOAK_URL/realms/token-exchange-e2e" \
+        DEMO_DIRECT_ADDRESS="$GKE_COMMAND_DIRECT_ADDRESS" \
+        DEMO_NAMESPACE_PREFIX="$GKE_DEMO_NAMESPACE_PREFIX" \
+        DEMO_SYSTEM_NAMESPACE="$GKE_PLATFORM_NAMESPACE" \
+        DEMO_PLUGIN_NAMESPACE="$GKE_GATEWAY_NAMESPACE" \
+          go run ./cmd/demo-dashboard "$@"
+        exit
+      fi
       DEMO_PLUGIN_NAMESPACE="ext-authz-token-exchange"
       if [ "$GATEWAY_PROVIDER" = "gke-gateway" ]; then
         DEMO_PLUGIN_NAMESPACE="$GATEWAY_NAMESPACE"

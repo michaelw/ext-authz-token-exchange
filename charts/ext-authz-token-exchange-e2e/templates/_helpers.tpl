@@ -67,8 +67,16 @@ local
 
 {{- define "ext-authz-token-exchange-e2e.policyConfig" -}}
 {{- $resources := .resources }}
+{{- if .resourcePaths }}
+{{- $resources = list }}
+{{- range $path := .resourcePaths }}
+{{- $resources = append $resources (printf "%s%s" $.Values.policy.httpbinResourceBase $path) }}
+{{- end }}
+{{- end }}
 {{- if not (hasKey . "resources") }}
+{{- if not .resourcePaths }}
 {{- $resources = list (printf "%s%s" $.Values.policy.httpbinResourceBase .pathPrefix) }}
+{{- end }}
 {{- end }}
 {{- $audiences := .audiences }}
 {{- if and (not (hasKey . "audiences")) .audience }}

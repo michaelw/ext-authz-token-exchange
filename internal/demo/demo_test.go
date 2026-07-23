@@ -92,3 +92,15 @@ func TestCheckedInScenarioConfigsValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestCurlIncludesDirectGatewayResolve(t *testing.T) {
+	got := Curl(Options{
+		BaseURL:       "https://httpbin.example.test",
+		DirectAddress: "2001:db8::10",
+	}, Scenario{
+		Request: Request{Method: "GET", Path: "/anything/yellow"},
+	})
+	if !strings.Contains(got, `--resolve 'httpbin.example.test:443:[2001:db8::10]'`) {
+		t.Fatalf("Curl() = %q, want IPv6 direct Gateway override", got)
+	}
+}

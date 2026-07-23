@@ -4,7 +4,6 @@ package demo
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/michaelw/ext-authz-token-exchange/internal/directhttp"
 	"sigs.k8s.io/yaml"
 )
 
@@ -42,6 +42,7 @@ type Options struct {
 	SystemNamespace  string
 	PluginNamespace  string
 	PluginDeployment string
+	DirectAddress    string
 	InsecureTLS      bool
 }
 
@@ -54,6 +55,7 @@ func LoadOptionsFromEnv() Options {
 		SystemNamespace:  envDefault("DEMO_SYSTEM_NAMESPACE", DefaultSystemNamespace),
 		PluginNamespace:  envDefault("DEMO_PLUGIN_NAMESPACE", DefaultPluginNamespace),
 		PluginDeployment: envDefault("DEMO_PLUGIN_DEPLOYMENT", DefaultPluginDeployment),
+		DirectAddress:    strings.TrimSpace(os.Getenv("DEMO_DIRECT_ADDRESS")),
 		InsecureTLS:      envBool("DEMO_INSECURE_SKIP_VERIFY", true),
 	}
 }
@@ -323,6 +325,7 @@ func (opts Options) WithDefaults() Options {
 	if opts.PluginDeployment == "" {
 		opts.PluginDeployment = DefaultPluginDeployment
 	}
+	opts.DirectAddress = strings.TrimSpace(opts.DirectAddress)
 	return opts
 }
 
@@ -432,6 +435,17 @@ func Curl(opts Options, sc Scenario) string {
 		requestURL = opts.BaseURL + sc.Request.Path
 	}
 	parts := []string{"curl", "-sk", "-X", shellQuote(sc.Request.Method)}
+	if parsed, parseErr := url.Parse(requestURL); parseErr == nil && opts.DirectAddress != "" {
+		port := parsed.Port()
+		if port == "" {
+			if parsed.Scheme == "https" {
+				port = "443"
+			} else {
+				port = "80"
+			}
+		}
+		parts = append(parts, "--resolve", shellQuote(directhttp.CurlResolve(parsed.Hostname(), port, opts.DirectAddress)))
+	}
 	if bearer := sc.Request.Token.Bearer(); bearer != "" {
 		parts = append(parts, "-H", shellQuote("Authorization: Bearer "+bearer))
 	}
@@ -443,12 +457,25 @@ func Curl(opts Options, sc Scenario) string {
 }
 
 func httpClient(opts Options) *http.Client {
-	return &http.Client{
-		Timeout: DefaultRequestTimeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: opts.InsecureTLS},
-		},
+	return NewHTTPClient(opts)
+}
+
+// NewHTTPClient creates the shared demo client, including an optional direct
+// Gateway dial override that preserves public request hostnames.
+func NewHTTPClient(opts Options) *http.Client {
+	transport, err := directhttp.NewTransport(opts.DirectAddress, opts.InsecureTLS)
+	if err != nil {
+		return &http.Client{Timeout: DefaultRequestTimeout, Transport: errorTransport{err: err}}
 	}
+	return &http.Client{Timeout: DefaultRequestTimeout, Transport: transport}
+}
+
+type errorTransport struct {
+	err error
+}
+
+func (t errorTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, t.err
 }
 
 type parsedBody struct {

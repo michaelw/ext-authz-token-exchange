@@ -88,6 +88,12 @@ fakeTokenEndpoint:
       response:
         type: success
         scenario: blue
+    - name: green-success
+      match:
+        audience: httpbin-green
+      response:
+        type: success
+        scenario: green
   defaultResponse:
     type: oauth_error
     status: 400
@@ -121,6 +127,19 @@ platformRoutes:
   teamPathRoot: /anything/txe
   serviceName: httpbin
   servicePort: 8080
+
+demoRoute:
+  enabled: false
+  gatewayNamespace: gke-gateway
+  gatewayName: gateway
+  gatewaySectionName: https
+  host: httpbin.int.kube
+  pathPrefix: /anything
+  backendNamespace: service-yellow
+  serviceName: httpbin
+  servicePort: 8080
+
+unselectedNamespaces: []
 
 teams:
   - color: blue
