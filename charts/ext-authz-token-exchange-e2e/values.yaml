@@ -107,7 +107,7 @@ fakeTokenEndpoint:
 teamApp:
   enabled: false
   name: httpbin
-  image: mccutchen/go-httpbin:2.23.1
+  image: mccutchen/go-httpbin:2.24.0
   imagePullPolicy: IfNotPresent
   port: 8080
   gatewayNamespace: gke-gateway
