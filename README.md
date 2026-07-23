@@ -124,8 +124,10 @@ Profiles are composable. On a fresh cluster, use `devspace deploy -p with-infra`
 to install required starter-pack infrastructure, including starter-pack's
 `with-test` httpbin routes, plus this repo's demo/e2e stack.
 
-Refer to the [DevSpace](docs/devspace.md) and [devspace-starter-pack](https://github.com/michaelw/devspace-starter-pack) documentation
-for more information.
+Refer to the [DevSpace](docs/devspace.md),
+[GKE Platform Demo Quickstart](docs/gke-platform-demo.md), and
+[devspace-starter-pack](https://github.com/michaelw/devspace-starter-pack)
+documentation for more information.
 
 ### Uninstall
 

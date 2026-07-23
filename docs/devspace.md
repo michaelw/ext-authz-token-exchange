@@ -78,6 +78,9 @@ devspace deploy -p with-infra -p with-keycloak -p ext-proc
 
 ### Existing-Gateway GKE deployment
 
+For the shortest platform demo path, use the
+[GKE Platform Demo Quickstart](gke-platform-demo.md).
+
 The opt-in `gke-platform` and `gke-app` profiles target an existing GKE
 Gateway without using starter-pack discovery, DNS, Terraform, registry login,
 image builds, or IAP. They do not change the default deployment or the
