@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.0...v0.6.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/prometheus/client_golang to v1.24.1 ([#192](https://github.com/michaelw/ext-authz-token-exchange/issues/192)) ([de8606e](https://github.com/michaelw/ext-authz-token-exchange/commit/de8606e4ad03428e39dc61e92432aae6976c93ef))
+
 ## [0.6.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.2...v0.6.0) (2026-07-23)
 
 
