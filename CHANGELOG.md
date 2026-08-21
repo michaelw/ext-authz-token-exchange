@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.0...v0.6.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **deps:** update kubernetes monorepo to v0.36.4 ([#224](https://github.com/michaelw/ext-authz-token-exchange/issues/224)) ([346e4f7](https://github.com/michaelw/ext-authz-token-exchange/commit/346e4f73a50cb8ebd7cc5802df9cb8e03832a604))
+* **deps:** update module github.com/envoyproxy/go-control-plane/envoy to v1.39.0 ([#217](https://github.com/michaelw/ext-authz-token-exchange/issues/217)) ([ff185c4](https://github.com/michaelw/ext-authz-token-exchange/commit/ff185c498d27675df33a8b94b8d37f626dba5a57))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.32.1 ([#211](https://github.com/michaelw/ext-authz-token-exchange/issues/211)) ([e54a0b3](https://github.com/michaelw/ext-authz-token-exchange/commit/e54a0b3ef21c491fae489b91c77f00b9db90aaff))
+* **deps:** update module github.com/prometheus/client_golang to v1.24.1 ([#192](https://github.com/michaelw/ext-authz-token-exchange/issues/192)) ([de8606e](https://github.com/michaelw/ext-authz-token-exchange/commit/de8606e4ad03428e39dc61e92432aae6976c93ef))
+* **deps:** update module google.golang.org/grpc to v1.83.0 ([#202](https://github.com/michaelw/ext-authz-token-exchange/issues/202)) ([2370322](https://github.com/michaelw/ext-authz-token-exchange/commit/2370322471a26b652367c3c438d52861de0757c2))
+* **deps:** update module google.golang.org/grpc to v1.83.1 ([#219](https://github.com/michaelw/ext-authz-token-exchange/issues/219)) ([95818fc](https://github.com/michaelw/ext-authz-token-exchange/commit/95818fc34c15fa1f59b327242a5fe9cbd21e2e07))
+* **deps:** update module google.golang.org/protobuf to v1.36.12 ([#209](https://github.com/michaelw/ext-authz-token-exchange/issues/209)) ([459ae78](https://github.com/michaelw/ext-authz-token-exchange/commit/459ae78020b994e69429ed8c85ab514b0cdf529c))
+* **deps:** update opentelemetry-go monorepo to v1.45.0 ([#204](https://github.com/michaelw/ext-authz-token-exchange/issues/204)) ([236ada4](https://github.com/michaelw/ext-authz-token-exchange/commit/236ada4383276af47a805f87f427c46208809716))
+* **deps:** update opentelemetry-go-contrib monorepo to v0.70.0 ([#205](https://github.com/michaelw/ext-authz-token-exchange/issues/205)) ([b3008f5](https://github.com/michaelw/ext-authz-token-exchange/commit/b3008f58d72212b98a1213fccdb26bc2d033801b))
+
 ## [0.6.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.2...v0.6.0) (2026-07-23)
 
 
