@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.0...v0.6.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **deps:** update kubernetes monorepo to v0.36.4 ([#224](https://github.com/michaelw/ext-authz-token-exchange/issues/224)) ([346e4f7](https://github.com/michaelw/ext-authz-token-exchange/commit/346e4f73a50cb8ebd7cc5802df9cb8e03832a604))
+* **deps:** update kubernetes monorepo to v0.37.0 ([#230](https://github.com/michaelw/ext-authz-token-exchange/issues/230)) ([7ba50ab](https://github.com/michaelw/ext-authz-token-exchange/commit/7ba50ab8f222e8ea8cb282164a189b56c540ab5a))
+* **deps:** update module github.com/coreos/go-oidc/v3 to v3.21.0 ([d306d8e](https://github.com/michaelw/ext-authz-token-exchange/commit/d306d8eb59fdd263fff14ddc17d486a0b3b40177))
+* **deps:** update module github.com/envoyproxy/go-control-plane/envoy to v1.39.0 ([#217](https://github.com/michaelw/ext-authz-token-exchange/issues/217)) ([ff185c4](https://github.com/michaelw/ext-authz-token-exchange/commit/ff185c498d27675df33a8b94b8d37f626dba5a57))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.32.1 ([#211](https://github.com/michaelw/ext-authz-token-exchange/issues/211)) ([e54a0b3](https://github.com/michaelw/ext-authz-token-exchange/commit/e54a0b3ef21c491fae489b91c77f00b9db90aaff))
+* **deps:** update module github.com/onsi/gomega to v1.43.0 ([#231](https://github.com/michaelw/ext-authz-token-exchange/issues/231)) ([ec218a9](https://github.com/michaelw/ext-authz-token-exchange/commit/ec218a950f391ad7a8e7ba4e372ba7d5177f2711))
+* **deps:** update module github.com/prometheus/client_golang to v1.24.1 ([#192](https://github.com/michaelw/ext-authz-token-exchange/issues/192)) ([de8606e](https://github.com/michaelw/ext-authz-token-exchange/commit/de8606e4ad03428e39dc61e92432aae6976c93ef))
+* **deps:** update module github.com/prometheus/client_model to v0.6.3 ([64f356f](https://github.com/michaelw/ext-authz-token-exchange/commit/64f356f4335857f081920c04d5868f3abb9b4658))
+* **deps:** update module google.golang.org/grpc to v1.83.0 ([#202](https://github.com/michaelw/ext-authz-token-exchange/issues/202)) ([2370322](https://github.com/michaelw/ext-authz-token-exchange/commit/2370322471a26b652367c3c438d52861de0757c2))
+* **deps:** update module google.golang.org/grpc to v1.83.1 ([#219](https://github.com/michaelw/ext-authz-token-exchange/issues/219)) ([95818fc](https://github.com/michaelw/ext-authz-token-exchange/commit/95818fc34c15fa1f59b327242a5fe9cbd21e2e07))
+* **deps:** update module google.golang.org/grpc to v1.83.2 ([#227](https://github.com/michaelw/ext-authz-token-exchange/issues/227)) ([0f671d5](https://github.com/michaelw/ext-authz-token-exchange/commit/0f671d51a33f7edc08e2f4861a09de14b376857b))
+* **deps:** update module google.golang.org/protobuf to v1.36.12 ([#209](https://github.com/michaelw/ext-authz-token-exchange/issues/209)) ([459ae78](https://github.com/michaelw/ext-authz-token-exchange/commit/459ae78020b994e69429ed8c85ab514b0cdf529c))
+* **deps:** update opentelemetry-go monorepo to v1.45.0 ([#204](https://github.com/michaelw/ext-authz-token-exchange/issues/204)) ([236ada4](https://github.com/michaelw/ext-authz-token-exchange/commit/236ada4383276af47a805f87f427c46208809716))
+* **deps:** update opentelemetry-go monorepo to v1.46.0 ([#228](https://github.com/michaelw/ext-authz-token-exchange/issues/228)) ([76c7367](https://github.com/michaelw/ext-authz-token-exchange/commit/76c736765bd418bf7c4cf656b7d6e4b89022ce5e))
+* **deps:** update opentelemetry-go-contrib monorepo to v0.70.0 ([#205](https://github.com/michaelw/ext-authz-token-exchange/issues/205)) ([b3008f5](https://github.com/michaelw/ext-authz-token-exchange/commit/b3008f58d72212b98a1213fccdb26bc2d033801b))
+* **deps:** update opentelemetry-go-contrib monorepo to v0.71.0 ([#229](https://github.com/michaelw/ext-authz-token-exchange/issues/229)) ([d621c01](https://github.com/michaelw/ext-authz-token-exchange/commit/d621c01709e1bf903e4a2b4a262c6933f36076e8))
+
 ## [0.6.0](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.5.2...v0.6.0) (2026-07-23)
 
 
