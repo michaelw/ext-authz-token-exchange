@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.26
+# syntax=docker/dockerfile:1.27
 
 # match relative path from the root of the repository
 ARG WORKSPACE=/workspaces/ext-authz-token-exchange
