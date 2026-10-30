@@ -201,10 +201,34 @@ requires with-test Gateway/Istio infrastructure; use
 The `smoke` workflow runs the cluster-backed e2e path nightly and on manual
 dispatch. Pull requests can opt in by adding the `smoke` label, which creates a
 fresh kind cluster for each local gateway mode. The workflow uses the Go smoke
-helper under `test/e2e/cmd/smoke` to deploy `with-infra` and `with-keycloak`
-for the Istio `ext_authz` path, deploy the same profiles plus `ext-proc` for
+helper under `test/e2e/cmd/smoke` to deploy test infrastructure and `with-keycloak`
+for the Istio `ext_authz` path, deploy the same stack plus `ext-proc` for
 the EnvoyFilter `ext_proc` path, wait for pods and token exchange readiness, and
 then run `devspace run test-e2e`.
+
+The helper clones a pinned infrastructure checkout into a temporary directory
+instead of using DevSpace's shared dependency cache. It also isolates the
+DevSpace, Go, Helm, and Docker buildx state, and uses local port forwards so
+host DNS and certificate integration are unnecessary.
+
+To exercise an Istio InferencePool route with the chart-owned `ext_proc`
+filter, use the existing smoke helper with its opt-in pool mode:
+
+```sh
+SMOKE_MODE=ext-proc-inferencepool go run ./test/e2e/cmd/smoke
+```
+
+This mode uses Istio 1.28.0 by default (set `SMOKE_ISTIO_VERSION=1.31.3` to
+check the later route behavior), the pinned Gateway API Inference Extension v1.5.0
+test component, and the e2e chart's CPU-only backend and route fixture. It runs the
+Ginkgo `inferencepool` spec, including pool, weighted-backend, two-pool, and
+endpoint-picker-unavailable cases, and deletes the disposable kind cluster
+afterward.
+The command needs kind, kubectl, Helm, DevSpace, Docker, and network access to
+fetch the pinned test component and images.
+For manual upgrade checks, set `SMOKE_KEEP_CLUSTER=true` to retain the cluster
+and temporary kubeconfig; delete the named kind cluster and temporary directory
+when finished.
 
 DevSpace is the repository command runner for local validation. If it becomes
 awkward for non-cluster checks, Taskfile is the next preferred option.

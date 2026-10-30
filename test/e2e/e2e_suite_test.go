@@ -141,7 +141,7 @@ type e2eEnv struct {
 
 func loadE2EEnv() e2eEnv {
 	base := strings.TrimRight(os.Getenv("E2E_BASE_URL"), "/")
-	httpbinResourceBase := base
+	httpbinResourceBase := envDefault("E2E_RESOURCE_BASE_URL", base)
 	host := strings.TrimSpace(os.Getenv("E2E_HOST"))
 	if host == "" && base != "" {
 		if parsed, err := url.Parse(base); err == nil {
@@ -185,6 +185,7 @@ func loadE2EEnv() e2eEnv {
 func TestLoadE2EEnvUsesBaseURLForHTTPBinResourceBase(t *testing.T) {
 	t.Setenv("E2E_BASE_URL", "https://httpbin.gcp.kube/")
 	t.Setenv("E2E_HOST", "")
+	t.Setenv("E2E_RESOURCE_BASE_URL", "")
 
 	got := loadE2EEnv()
 
@@ -196,6 +197,17 @@ func TestLoadE2EEnvUsesBaseURLForHTTPBinResourceBase(t *testing.T) {
 	}
 	if got.host != "httpbin.gcp.kube" {
 		t.Fatalf("host = %q, want httpbin.gcp.kube", got.host)
+	}
+}
+
+func TestLoadE2EEnvPreservesResourceBaseBehindPortForward(t *testing.T) {
+	t.Setenv("E2E_BASE_URL", "https://127.0.0.1:18443")
+	t.Setenv("E2E_HOST", "httpbin.int.kube")
+	t.Setenv("E2E_RESOURCE_BASE_URL", "https://httpbin.int.kube")
+
+	got := loadE2EEnv()
+	if got.host != "httpbin.int.kube" || got.httpbinResourceBase != "https://httpbin.int.kube" {
+		t.Fatalf("host=%q resourceBase=%q, want gateway host and resource URL", got.host, got.httpbinResourceBase)
 	}
 }
 
@@ -700,7 +712,11 @@ func httpClient() *http.Client {
 }
 
 func request(ctx context.Context, method, path, bearer string, headers map[string]string) (*http.Response, []byte) {
-	req, err := http.NewRequestWithContext(ctx, method, env.baseURL+path, nil)
+	return requestWithBody(ctx, method, path, bearer, headers, nil)
+}
+
+func requestWithBody(ctx context.Context, method, path, bearer string, headers map[string]string, requestBody io.Reader) (*http.Response, []byte) {
+	req, err := http.NewRequestWithContext(ctx, method, env.baseURL+path, requestBody)
 	Expect(err).NotTo(HaveOccurred())
 	if env.host != "" {
 		req.Host = env.host

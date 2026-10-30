@@ -132,3 +132,12 @@ LABEL org.opencontainers.image.title="ext-authz-token-exchange-fake-token-endpoi
 EXPOSE 8080
 
 ENTRYPOINT ["/app/fake-token-endpoint"]
+
+# Local InferencePool e2e backend. This image is never published by DevSpace.
+FROM gcr.io/distroless/static-debian12 AS inference-test-backend
+ARG WORKSPACE
+USER 65532:65532
+WORKDIR /app
+COPY --from=build ${WORKSPACE}/bin/inference-test-backend /app/inference-test-backend
+EXPOSE 8000
+ENTRYPOINT ["/app/inference-test-backend"]

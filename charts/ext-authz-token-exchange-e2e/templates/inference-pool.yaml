@@ -1,0 +1,139 @@
+{{- if .Values.inferencePool.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-test-backend
+  namespace: {{ .Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-test-backend
+  template:
+    metadata:
+      labels:
+        app: inference-test-backend
+        inference.networking.k8s.io/engine-type: vllm
+    spec:
+      containers:
+        - name: backend
+          image: {{ .Values.inferencePool.backendImage | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+          resources:
+            requests:
+              cpu: 10m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-test-backend
+  namespace: {{ .Values.systemNamespace | quote }}
+spec:
+  selector:
+    app: inference-test-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: inference-pool
+  namespace: {{ .Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" . | indent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.inferencePool.gatewayName | quote }}
+      namespace: {{ .Values.inferencePool.gatewayNamespace | quote }}
+  hostnames:
+    - {{ .Values.inferencePool.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/chat/completions
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: {{ .Values.inferencePool.name | quote }}
+{{- $root := . }}
+{{- range $route := list
+  (dict "name" "weighted-ordinary" "host" .Values.inferencePool.weightedOrdinaryHost "serviceWeight" 1 "poolWeight" 0)
+  (dict "name" "weighted-pool" "host" .Values.inferencePool.weightedPoolHost "serviceWeight" 0 "poolWeight" 1)
+  (dict "name" "weighted-mixed" "host" .Values.inferencePool.weightedMixedHost "serviceWeight" 1 "poolWeight" 1)
+}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $route.name }}
+  namespace: {{ $root.Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $root | indent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $root.Values.inferencePool.gatewayName | quote }}
+      namespace: {{ $root.Values.inferencePool.gatewayNamespace | quote }}
+  hostnames:
+    - {{ $route.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/chat/completions
+      backendRefs:
+        - kind: Service
+          name: inference-test-backend
+          port: 8000
+          weight: {{ $route.serviceWeight }}
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: {{ $root.Values.inferencePool.name | quote }}
+          weight: {{ $route.poolWeight }}
+{{- end }}
+{{- range $route := list
+  (dict "name" "two-pools-a" "host" .Values.inferencePool.twoPoolsAHost "firstWeight" 1 "secondWeight" 0)
+  (dict "name" "two-pools-b" "host" .Values.inferencePool.twoPoolsBHost "firstWeight" 0 "secondWeight" 1)
+  (dict "name" "two-pools-mixed" "host" .Values.inferencePool.twoPoolsMixedHost "firstWeight" 1 "secondWeight" 1)
+}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $route.name }}
+  namespace: {{ $root.Values.systemNamespace | quote }}
+  labels:
+{{ include "ext-authz-token-exchange-e2e.labels" $root | indent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $root.Values.inferencePool.gatewayName | quote }}
+      namespace: {{ $root.Values.inferencePool.gatewayNamespace | quote }}
+  hostnames:
+    - {{ $route.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/chat/completions
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: {{ $root.Values.inferencePool.name | quote }}
+          weight: {{ $route.firstWeight }}
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: {{ $root.Values.inferencePool.secondName | quote }}
+          weight: {{ $route.secondWeight }}
+{{- end }}
+{{- end }}
