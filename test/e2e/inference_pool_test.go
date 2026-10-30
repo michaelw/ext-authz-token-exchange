@@ -25,6 +25,27 @@ var _ = Describe("InferencePool route", Label("inferencepool"), func() {
 		}
 	})
 
+	It("preserves denial and exchange on an ordinary route on the same gateway", func(ctx SpecContext) {
+		bearer := "ordinary-route-" + randomHexSuffix()
+		Eventually(func(g Gomega) {
+			resp, body := requestOrdinary(ctx, "/anything/red", bearer)
+			g.Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
+			assertExchangedJWT(g, headerFromHTTPBin(body, "Authorization"), exchangedJWTWant{
+				Scenario: "red",
+				Subject:  bearer,
+				Scope:    "red",
+				Resource: []string{env.httpbinResourceBase + "/anything/red"},
+				Audience: []string{"httpbin-red"},
+			})
+		}, 45*time.Second, time.Second).Should(Succeed())
+
+		resp, body := requestOrdinary(ctx, "/anything/denied", bearer)
+		Expect(resp.StatusCode).To(Equal(http.StatusForbidden), string(body))
+		var parsed map[string]string
+		Expect(json.Unmarshal(body, &parsed)).To(Succeed())
+		Expect(parsed).To(HaveKeyWithValue("error", "policy_denied"))
+	})
+
 	It("keeps token-exchange denial active on a pool route", func(ctx SpecContext) {
 		caseID := "deny-" + randomHexSuffix()
 		call := func() (*http.Response, []byte) {
@@ -340,6 +361,24 @@ func requestInferenceAtHost(ctx context.Context, host, caseID, bearer string) (*
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
+	resp, err := httpClient().Do(req)
+	Expect(err).NotTo(HaveOccurred())
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	Expect(err).NotTo(HaveOccurred())
+	return resp, body
+}
+
+func requestOrdinary(ctx context.Context, path, bearer string) (*http.Response, []byte) {
+	base, err := url.Parse(env.baseURL)
+	Expect(err).NotTo(HaveOccurred())
+	host := "httpbin." + strings.TrimPrefix(env.host, "inference.")
+	base.Host = net.JoinHostPort(host, base.Port())
+	base.Path = path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String(), nil)
+	Expect(err).NotTo(HaveOccurred())
+	req.Host = host
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := httpClient().Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	defer resp.Body.Close()
