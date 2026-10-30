@@ -100,6 +100,13 @@ profiles:
           git: https://github.com/michaelw/devspace-starter-pack
           profiles:
             - with-test
+  - name: with-infra-smoke
+    merge:
+      dependencies:
+        infra:
+          path: ${SMOKE_INFRA_PATH}
+          profiles:
+            - with-test
   - name: with-test
     activation:
       - vars:
@@ -233,6 +240,21 @@ profiles:
                 enabled: false
               gatewayExtAuthzService:
                 enabled: false
+  - name: inferencepool-test
+    merge:
+      deployments:
+        ext-authz-token-exchange-e2e:
+          helm:
+            values:
+              inferencePool:
+                enabled: true
+                host: inference.${DEPLOYMENT_DOMAIN}
+                weightedOrdinaryHost: weighted-ordinary.${DEPLOYMENT_DOMAIN}
+                weightedPoolHost: weighted-pool.${DEPLOYMENT_DOMAIN}
+                weightedMixedHost: weighted-mixed.${DEPLOYMENT_DOMAIN}
+                twoPoolsAHost: two-pools-a.${DEPLOYMENT_DOMAIN}
+                twoPoolsBHost: two-pools-b.${DEPLOYMENT_DOMAIN}
+                twoPoolsMixedHost: two-pools-mixed.${DEPLOYMENT_DOMAIN}
   - name: gke
     activation:
       - vars:
@@ -734,6 +756,7 @@ commands:
         --namespace ext-authz-token-exchange-e2e \
         > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
       ./scripts/verify-gke-deployment-model.sh
+      ./scripts/verify-ext-proc-filter.sh
 
   verify:
     description: "Run CI-equivalent local validation without a Kubernetes cluster"
@@ -765,6 +788,7 @@ commands:
         --namespace ext-authz-token-exchange-e2e \
         > /tmp/ext-authz-token-exchange-e2e-rendered.yaml
       ./scripts/verify-gke-deployment-model.sh
+      ./scripts/verify-ext-proc-filter.sh
 
   smoke:
     description: "Deploy the selected provider test stack and run Kubernetes e2e smoke tests"

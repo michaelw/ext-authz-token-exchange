@@ -450,8 +450,8 @@ integration mode when installing the chart:
 
 - `authorizationPolicy.enabled=true` uses Istio's native `CUSTOM`
   `AuthorizationPolicy` and a mesh-level `extensionProvider`.
-- `envoyFilter.enabled=true` uses the legacy chart-owned `EnvoyFilter` that
-  inserts `envoy.filters.http.ext_authz` before the router.
+- `envoyFilter.enabled=true` uses the chart-owned `EnvoyFilter` in `ext_proc`
+  mode. It inserts `ext-authz-token-exchange.ext_proc` before the router.
 
 The `AuthorizationPolicy` mode expects infrastructure to provide an Istio
 provider, defaulting to `gateway-ext-authz-grpc`. The optional
@@ -490,7 +490,7 @@ Relevant values:
 | `gatewayExtAuthzService.serviceEntry.location` | `MESH_INTERNAL` | ServiceEntry location. |
 | `gatewayExtAuthzService.serviceEntry.resolution` | `DNS` | ServiceEntry endpoint resolution. |
 | `gatewayExtAuthzService.serviceEntry.protocol` | `GRPC` | ServiceEntry port protocol. |
-| `envoyFilter.enabled` | `false` | Render the legacy Istio `EnvoyFilter`. Mutually exclusive with `authorizationPolicy.enabled`. |
+| `envoyFilter.enabled` | `false` | Render the Istio `ext_proc` `EnvoyFilter`. Mutually exclusive with `authorizationPolicy.enabled`. |
 | `envoyFilter.namespace` | `istio-ingress` | Namespace where the EnvoyFilter is created. |
 | `envoyFilter.workloadSelectorLabels` | Gateway label selector | Default labels for selecting gateway workloads. |
 | `envoyFilter.workloadSelectorLabelsOverride` | `{}` | Complete replacement for the default selector labels. |

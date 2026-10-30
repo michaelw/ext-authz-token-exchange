@@ -139,6 +139,21 @@ demoRoute:
   serviceName: httpbin
   servicePort: 8080
 
+inferencePool:
+  enabled: false
+  name: e2e-inferencepool
+  backendImage: inference-test-backend:smoke
+  gatewayNamespace: istio-ingress
+  gatewayName: gateway
+  host: httpbin.int.kube
+  weightedOrdinaryHost: weighted-ordinary.int.kube
+  weightedPoolHost: weighted-pool.int.kube
+  weightedMixedHost: weighted-mixed.int.kube
+  secondName: e2e-inferencepool-second
+  twoPoolsAHost: two-pools-a.int.kube
+  twoPoolsBHost: two-pools-b.int.kube
+  twoPoolsMixedHost: two-pools-mixed.int.kube
+
 unselectedNamespaces: []
 
 teams:

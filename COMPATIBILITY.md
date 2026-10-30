@@ -8,6 +8,16 @@ while moving from the original token-exchange plan to the RFC-aligned design.
 For the current operator-facing configuration and behavior reference, see
 `docs/configuration.md`.
 
+### Istio ext_proc filter instance
+
+The chart-owned Istio `ext_proc` filter instance is named
+`ext-authz-token-exchange.ext_proc`. Earlier chart versions used
+`envoy.filters.http.ext_proc`. A Helm upgrade updates the existing EnvoyFilter
+resource. If you own per-route filter configuration, dashboards, or other
+references to the old instance name, update them to the new name and check the
+gateway's accepted Envoy configuration after rollout. The `ext_authz` mode and
+the Envoy protobuf filter type are unchanged.
+
 - `target_upstream` was the previous planning name for what is now the
   RFC8707/RFC8693 `resources` field. Use `exchange.resources` for target API or
   upstream URIs where the exchanged token will be used.

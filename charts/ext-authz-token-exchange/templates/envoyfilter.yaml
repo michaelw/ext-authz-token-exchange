@@ -62,7 +62,7 @@ spec:
       patch:
         operation: INSERT_BEFORE
         value:
-          name: envoy.filters.http.ext_proc
+          name: ext-authz-token-exchange.ext_proc
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
             failure_mode_allow: {{ .Values.envoyFilter.extProc.failureModeAllow }}

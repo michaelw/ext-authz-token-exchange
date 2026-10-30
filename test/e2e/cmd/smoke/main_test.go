@@ -1,17 +1,50 @@
 package main
 
 import (
+	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestRemoveSmokeTempDirHandlesReadOnlyModuleCache(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "smoke")
+	module := filepath.Join(path, "go-mod-cache", "example.com", "module@v1")
+	if err := os.MkdirAll(module, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(module, "go.mod"), []byte("module example.com/module\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(module, 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	removeSmokeTempDir(path)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("temporary directory remains: %v", err)
+	}
+}
+
+func TestCommandOutputKeepsSuccessfulStderrOutOfJSON(t *testing.T) {
+	got, err := commandOutput(context.Background(), nil, "sh", "-c", `printf 'diagnostic\n' >&2; printf '{"ok":true}'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `{"ok":true}` {
+		t.Fatalf("commandOutput = %q, want JSON stdout only", got)
+	}
+}
 
 func TestDeployProfiles(t *testing.T) {
 	tests := []struct {
 		mode string
 		want []string
 	}{
-		{mode: "ext-authz", want: []string{"with-infra", "with-keycloak"}},
-		{mode: "ext-proc", want: []string{"with-infra", "with-keycloak", "ext-proc"}},
+		{mode: "ext-authz", want: []string{"with-infra-smoke", "with-keycloak"}},
+		{mode: "ext-proc", want: []string{"with-infra-smoke", "with-keycloak", "ext-proc"}},
+		{mode: "ext-proc-inferencepool", want: []string{"with-infra-smoke", "ext-proc", "inferencepool-test"}},
 	}
 	for _, tt := range tests {
 		got, err := deployProfiles(tt.mode)
@@ -51,6 +84,27 @@ istio-ingress gateway 1/2 Running 0 1m
 		if got[i] != want[i] {
 			t.Fatalf("parsePodReadiness returned %v, want %v", got, want)
 		}
+	}
+}
+
+func TestHasInferenceOverride(t *testing.T) {
+	withOverride := []byte(`{"typed_per_filter_config":{"envoy.filters.http.ext_proc":{"@type":"type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute","overrides":{"grpc_service":{"envoy_grpc":{"cluster_name":"outbound|9002||e2e-inferencepool-epp.test.svc.cluster.local"}}}}}}`)
+	if !hasInferenceOverride(withOverride) {
+		t.Fatal("expected EPP ExtProcPerRoute override")
+	}
+	if hasInferenceOverride([]byte(`{"@type":"type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor"}`)) {
+		t.Fatal("base ext_proc filter should not count as a per-route override")
+	}
+}
+
+func TestHasIsolatedFilters(t *testing.T) {
+	isolated := []byte(`{"http_filters":[{"name":"envoy.filters.http.ext_proc"},{"name":"ext-authz-token-exchange.ext_proc","typed_config":{"grpc_service":{"envoy_grpc":{"cluster_name":"outbound|3001||ext-authz-token-exchange.test.svc.cluster.local"}}}}]}`)
+	if !hasIsolatedFilters(isolated) {
+		t.Fatal("expected distinct endpoint picker and token-exchange filters")
+	}
+	duplicate := []byte(`{"http_filters":[{"name":"envoy.filters.http.ext_proc"},{"name":"envoy.filters.http.ext_proc","typed_config":{"grpc_service":{"envoy_grpc":{"cluster_name":"outbound|3001||ext-authz-token-exchange.test.svc.cluster.local"}}}}]}`)
+	if hasIsolatedFilters(duplicate) {
+		t.Fatal("duplicate generic ext_proc filters must not count as isolated")
 	}
 }
 

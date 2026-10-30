@@ -46,6 +46,22 @@ devspace deploy -p with-infra -p with-keycloak
 devspace run test-e2e
 ```
 
+The smoke helper can also create a disposable kind cluster with an Istio
+InferencePool route and run the focused Ginkgo spec through the same DevSpace
+test command:
+
+```sh
+SMOKE_MODE=ext-proc-inferencepool go run ./test/e2e/cmd/smoke
+```
+
+The `inferencepool-test` profile enables a CPU-only backend and HTTPRoute in
+this chart. The smoke helper builds that backend locally, loads it into kind,
+and installs two Gateway API Inference Extension v1.5.0 InferencePools and
+endpoint pickers in the demo namespace. The routes cover a single pool, a
+normal backend weighted with a pool, and two pools in one weighted rule. The
+backend records only synthetic test requests in memory and exposes them to
+the e2e assertions.
+
 The `with-keycloak` profile deploys Keycloak as a separate Helm release rather
 than making the e2e chart an umbrella chart. The Keycloak release owns the realm
 import and creates the plugin OAuth client Secret in the plugin namespace. The
