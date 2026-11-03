@@ -34,6 +34,8 @@ const (
 
 type config struct {
 	mode                string
+	chartPackage        string
+	chartVersion        string
 	clusterName         string
 	baseURL             string
 	host                string
@@ -102,6 +104,12 @@ func run() error {
 		"HELM_DATA_HOME="+filepath.Join(tempDir, "helm", "data"),
 	)
 	env = append(env, "HOST_INTEGRATION=false")
+	if err := runStep(ctx, env, "docker", "buildx", "version"); err != nil {
+		return fmt.Errorf("Docker buildx is unavailable with the isolated Docker config: %w", err)
+	}
+	if err := runStep(ctx, env, "docker", "buildx", "inspect", "default"); err != nil {
+		return fmt.Errorf("the default Docker buildx builder is unavailable: %w", err)
+	}
 
 	fmt.Printf("smoke: mode=%s cluster=%s kubeconfig=%s\n", cfg.mode, cfg.clusterName, kubeconfig)
 	kindArgs := []string{"create", "cluster", "--name", cfg.clusterName, "--kubeconfig", kubeconfig, "--wait", cfg.clusterCreateWait.String()}
@@ -155,6 +163,20 @@ func run() error {
 	if err := runStep(ctx, env, "devspace", deployArgs(cfg.mode)...); err != nil {
 		collectDiagnostics(env, cfg.diagnosticTimeout)
 		return err
+	}
+	if cfg.chartPackage != "" {
+		if err := runStep(ctx, env, "helm", "upgrade", "ext-authz-token-exchange", cfg.chartPackage,
+			"--namespace", "ext-authz-token-exchange", "--reuse-values", "--wait", "--timeout", "10m"); err != nil {
+			collectDiagnostics(env, cfg.diagnosticTimeout)
+			return err
+		}
+		installed, err := commandOutput(ctx, env, "helm", "list", "--namespace", "ext-authz-token-exchange", "--output", "json")
+		if err != nil {
+			return err
+		}
+		if err := checkInstalledChartVersion(installed, cfg.chartVersion); err != nil {
+			return err
+		}
 	}
 	if inferenceChart != "" {
 		for _, name := range []string{"e2e-inferencepool", "e2e-inferencepool-second"} {
@@ -303,6 +325,11 @@ func loadConfig() (config, error) {
 	if _, err := deployProfiles(mode); err != nil {
 		return config{}, err
 	}
+	chartPackage := os.Getenv("SMOKE_CHART_PACKAGE")
+	chartVersion := os.Getenv("SMOKE_CHART_VERSION")
+	if chartPackage != "" && (mode != "ext-proc-inferencepool" || chartVersion == "") {
+		return config{}, errors.New("SMOKE_CHART_PACKAGE requires ext-proc-inferencepool mode and SMOKE_CHART_VERSION")
+	}
 	clusterName := os.Getenv("SMOKE_CLUSTER_NAME")
 	if clusterName == "" {
 		clusterName = defaultClusterNamePrefix + "-" + mode
@@ -313,6 +340,8 @@ func loadConfig() (config, error) {
 
 	return config{
 		mode:                mode,
+		chartPackage:        chartPackage,
+		chartVersion:        chartVersion,
 		clusterName:         clusterName,
 		baseURL:             getenvDefault("E2E_BASE_URL", defaultBaseURL),
 		timeout:             durationFromEnv("SMOKE_TIMEOUT", defaultTimeout),
@@ -324,6 +353,26 @@ func loadConfig() (config, error) {
 		tokenReadyTimeout:   durationFromEnv("SMOKE_TOKEN_READY_TIMEOUT", defaultTokenReadyTimeout),
 		tokenReadyInterval:  durationFromEnv("SMOKE_TOKEN_READY_INTERVAL", defaultTokenReadyInterval),
 	}, nil
+}
+
+func checkInstalledChartVersion(output, version string) error {
+	var releases []struct {
+		Name  string `json:"name"`
+		Chart string `json:"chart"`
+	}
+	if err := json.Unmarshal([]byte(output), &releases); err != nil {
+		return fmt.Errorf("parse installed Helm releases: %w", err)
+	}
+	for _, release := range releases {
+		if release.Name == "ext-authz-token-exchange" {
+			want := "ext-authz-token-exchange-" + version
+			if release.Chart != want {
+				return fmt.Errorf("installed chart is %q, want %q", release.Chart, want)
+			}
+			return nil
+		}
+	}
+	return errors.New("ext-authz-token-exchange Helm release was not found")
 }
 
 func deployArgs(mode string) []string {

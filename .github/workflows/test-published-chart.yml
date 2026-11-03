@@ -16,17 +16,50 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CHART_NAME: ext-authz-token-exchange
   CHART_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
+  CHART_VERSION: ${{ inputs.version }}
 
 jobs:
   test-published-chart:
     name: Test published chart
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
       - name: Set up Helm
         uses: ./.github/actions/setup-helm
+        with:
+          version: v3.18.3
+
+      - name: Install smoke tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl iproute2 make openssl tar
+
+          mkdir -p "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kind" "https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-amd64"
+          chmod +x "${RUNNER_TEMP}/bin/kind"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/v1.33.2/bin/linux/amd64/kubectl"
+          chmod +x "${RUNNER_TEMP}/bin/kubectl"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/yq" "https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64"
+          chmod +x "${RUNNER_TEMP}/bin/yq"
+
+          curl -fsSL -o "${RUNNER_TEMP}/bin/devspace" "https://github.com/loft-sh/devspace/releases/download/v6.3.15/devspace-linux-amd64"
+          chmod +x "${RUNNER_TEMP}/bin/devspace"
 
       - name: Log in to GHCR for Helm
         env:
@@ -39,8 +72,22 @@ jobs:
 
       - name: Validate published chart
         run: |
-          VERSION="${{ inputs.version }}"
-          helm pull "${CHART_REGISTRY}/${CHART_NAME}" --version "$VERSION"
-          tar -tf "${CHART_NAME}-${VERSION}.tgz" | head -10
-          helm show chart "${CHART_REGISTRY}/${CHART_NAME}" --version "$VERSION"
-          helm show values "${CHART_REGISTRY}/${CHART_NAME}" --version "$VERSION"
+          set -euo pipefail
+          [[ "$CHART_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == "v${CHART_VERSION}" ]]
+          mkdir -p "${RUNNER_TEMP}/chart-package"
+          helm pull "${CHART_REGISTRY}/${CHART_NAME}" --version "$CHART_VERSION" \
+            --destination "${RUNNER_TEMP}/chart-package"
+          package="${RUNNER_TEMP}/chart-package/${CHART_NAME}-${CHART_VERSION}.tgz"
+          test -s "$package"
+          helm show chart "$package"
+          helm show values "$package"
+
+      - name: Install and test published chart
+        env:
+          SMOKE_MODE: ext-proc-inferencepool
+          SMOKE_ISTIO_VERSION: 1.31.3
+          SMOKE_CLUSTER_NAME: txe-published-chart
+          SMOKE_CHART_VERSION: ${{ inputs.version }}
+          SMOKE_CHART_PACKAGE: ${{ runner.temp }}/chart-package/ext-authz-token-exchange-${{ inputs.version }}.tgz
+        run: go run ./test/e2e/cmd/smoke

@@ -194,17 +194,12 @@ helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e -
 
 Go coverage is uploaded to Codecov and `coverage.out` remains available as a
 workflow artifact for local debugging or fallback. Rendered Helm manifests are
-uploaded as workflow artifacts. Cluster-backed e2e remains optional because it
-requires with-test Gateway/Istio infrastructure; use
-`devspace run smoke` for that smoke path.
-
-The `smoke` workflow runs the cluster-backed e2e path nightly and on manual
-dispatch. Pull requests can opt in by adding the `smoke` label, which creates a
-fresh kind cluster for each local gateway mode. The workflow uses the Go smoke
-helper under `test/e2e/cmd/smoke` to deploy test infrastructure and `with-keycloak`
-for the Istio `ext_authz` path, deploy the same stack plus `ext-proc` for
-the EnvoyFilter `ext_proc` path, wait for pods and token exchange readiness, and
-then run `devspace run test-e2e`.
+uploaded as workflow artifacts. The `smoke` workflow runs on every pull request,
+nightly, and on manual dispatch. It creates a fresh kind cluster for each
+`ext_authz`, `ext_proc`, and InferencePool job. Both InferencePool jobs are
+required checks on `main`: one uses Istio 1.28.0 and the other uses 1.31.3.
+The workflow uses the Go smoke helper under `test/e2e/cmd/smoke` to deploy the
+test stack and run `devspace run test-e2e`.
 
 The helper clones a pinned infrastructure checkout into a temporary directory
 instead of using DevSpace's shared dependency cache. It also isolates the
@@ -212,7 +207,7 @@ DevSpace, Go, Helm, and Docker buildx state, and uses local port forwards so
 host DNS and certificate integration are unnecessary.
 
 To exercise an Istio InferencePool route with the chart-owned `ext_proc`
-filter, use the existing smoke helper with its opt-in pool mode:
+filter outside CI, use the smoke helper's pool mode:
 
 ```sh
 SMOKE_MODE=ext-proc-inferencepool go run ./test/e2e/cmd/smoke
@@ -262,8 +257,18 @@ When a Release Please release is created, GitHub Actions publishes:
 
 The chart package is also attached to the GitHub Release. The release workflow
 validates the published OCI chart with `helm pull`, `helm show chart`, and
-`helm show values`. A manual `Test Published Chart` workflow can re-check a
-specific published chart version. Helm pushes the chart package to
+`helm show values`. After the chart is published, run `Test Published Chart`
+at the matching release tag:
+
+```sh
+gh workflow run test-published-chart.yml --ref v0.6.1 -f version=0.6.1
+```
+
+This workflow pulls the OCI package, installs it over the smoke helper's test
+release with the test values retained, and checks the installed chart version.
+It then checks the renamed gateway filter in xDS and runs the InferencePool
+denial and token-exchange tests on Istio 1.31.3. It cannot run before the OCI
+package exists. Helm pushes the chart package to
 `oci://ghcr.io/michaelw/charts`; pull, install, and upgrade commands include the
 chart basename, for example
 `oci://ghcr.io/michaelw/charts/ext-authz-token-exchange`.
