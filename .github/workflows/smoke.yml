@@ -9,7 +9,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
 
 permissions:
   contents: read
@@ -19,15 +18,27 @@ env:
 
 jobs:
   smoke:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'smoke')
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        mode:
-          - ext-authz
-          - ext-proc
+        include:
+          - check: Smoke ext-authz
+            mode: ext-authz
+            cluster: ext-authz
+          - check: Smoke ext-proc
+            mode: ext-proc
+            cluster: ext-proc
+          - check: Smoke InferencePool Istio 1.28.0
+            mode: ext-proc-inferencepool
+            istio: 1.28.0
+            cluster: inferencepool-1280
+          - check: Smoke InferencePool Istio 1.31.3
+            mode: ext-proc-inferencepool
+            istio: 1.31.3
+            cluster: inferencepool-1313
 
     steps:
       - name: Checkout
@@ -37,6 +48,9 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Install smoke tooling
         run: |
@@ -65,5 +79,6 @@ jobs:
       - name: Run smoke (${{ matrix.mode }})
         env:
           SMOKE_MODE: ${{ matrix.mode }}
-          SMOKE_CLUSTER_NAME: ext-authz-token-exchange-smoke-${{ matrix.mode }}
+          SMOKE_ISTIO_VERSION: ${{ matrix.istio }}
+          SMOKE_CLUSTER_NAME: txe-smoke-${{ matrix.cluster }}
         run: go run ./test/e2e/cmd/smoke

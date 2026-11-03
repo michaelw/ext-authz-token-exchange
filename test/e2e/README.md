@@ -54,6 +54,12 @@ test command:
 SMOKE_MODE=ext-proc-inferencepool go run ./test/e2e/cmd/smoke
 ```
 
+CI runs this mode on every pull request with Istio 1.28.0 and 1.31.3. After a
+chart release, `Test Published Chart` pulls the OCI package and uses the same
+helper to upgrade the test release from that package. It checks the installed
+version, the distinct gateway filters, denial, and token exchange. Run that
+workflow at the tag for the chart version under test.
+
 The `inferencepool-test` profile enables a CPU-only backend and HTTPRoute in
 this chart. The smoke helper builds that backend locally, loads it into kind,
 and installs two Gateway API Inference Extension v1.5.0 InferencePools and

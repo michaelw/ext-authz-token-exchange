@@ -65,6 +65,37 @@ func TestDeployProfiles(t *testing.T) {
 	}
 }
 
+func TestPublishedChartConfig(t *testing.T) {
+	t.Setenv("SMOKE_MODE", "ext-proc-inferencepool")
+	t.Setenv("SMOKE_CHART_PACKAGE", "chart.tgz")
+	t.Setenv("SMOKE_CHART_VERSION", "0.6.1")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.chartPackage != "chart.tgz" || cfg.chartVersion != "0.6.1" {
+		t.Fatalf("published chart config = %q, %q", cfg.chartPackage, cfg.chartVersion)
+	}
+
+	t.Setenv("SMOKE_MODE", "ext-authz")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("published chart must use the InferencePool smoke mode")
+	}
+}
+
+func TestInstalledChartVersion(t *testing.T) {
+	const releases = `[{"name":"ext-authz-token-exchange","chart":"ext-authz-token-exchange-0.6.1"}]`
+	if err := checkInstalledChartVersion(releases, "0.6.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkInstalledChartVersion(releases, "0.6.0"); err == nil {
+		t.Fatal("wrong installed chart version was accepted")
+	}
+	if err := checkInstalledChartVersion(`[]`, "0.6.1"); err == nil {
+		t.Fatal("missing chart release was accepted")
+	}
+}
+
 func TestParsePodReadiness(t *testing.T) {
 	input := `
 default ready-7c5d 1/1 Running 0 1m
