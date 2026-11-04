@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.2](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.1...v0.6.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **deps:** update google.golang.org/genproto/googleapis/rpc digest to 2ffab32 ([#126](https://github.com/michaelw/ext-authz-token-exchange/issues/126)) ([67bed97](https://github.com/michaelw/ext-authz-token-exchange/commit/67bed9719a5563aec2b6079265154f9b53956c13))
+* **deps:** update kubernetes monorepo to v0.37.2 ([c0595b6](https://github.com/michaelw/ext-authz-token-exchange/commit/c0595b68b46c27b688afebc42380c7372f68e900))
+* **deps:** update module github.com/onsi/ginkgo/v2 to v2.34.0 ([#300](https://github.com/michaelw/ext-authz-token-exchange/issues/300)) ([b2687b0](https://github.com/michaelw/ext-authz-token-exchange/commit/b2687b004be91221932298ec313682a6af10419f))
+* **deps:** update module google.golang.org/grpc to v1.85.0 ([bc33dee](https://github.com/michaelw/ext-authz-token-exchange/commit/bc33deedee1a1ff4f5e1993ed24797b59c78f53c))
+
 ## [0.6.1](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.0...v0.6.1) (2026-11-03)
 
 
