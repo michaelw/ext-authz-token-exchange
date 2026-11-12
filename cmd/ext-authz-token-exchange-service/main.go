@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc/filters"
+	"go.opentelemetry.io/otel/trace/noop"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -186,6 +187,7 @@ func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {
 
 func grpcStatsHandler() stats.Handler {
 	return otelgrpc.NewServerHandler(
+		otelgrpc.WithTracerProvider(noop.NewTracerProvider()),
 		otelgrpc.WithPropagators(telemetry.Propagators()),
 		otelgrpc.WithFilter(grpcTracingFilter()),
 	)

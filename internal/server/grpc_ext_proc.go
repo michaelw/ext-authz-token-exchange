@@ -72,6 +72,13 @@ func summarizeExtProcResponse(message any) string {
 
 // Process implements Envoy ext_proc request-header processing.
 func (s *ExtProcGRPCServer) Process(stream envoy_service_ext_proc_v3.ExternalProcessor_ProcessServer) error {
+	ctx := stream.Context()
+	var endSpan func()
+	defer func() {
+		if endSpan != nil {
+			endSpan()
+		}
+	}()
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -83,10 +90,14 @@ func (s *ExtProcGRPCServer) Process(stream envoy_service_ext_proc_v3.ExternalPro
 		if req.GetObservabilityMode() {
 			continue
 		}
+		if endSpan == nil && req.GetRequestHeaders() != nil {
+			parent, span := startGatewaySpan(ctx, extProcHeaders(req.GetRequestHeaders().GetHeaders()), ExtProcProcessMethod)
+			ctx, endSpan = parent, func() { span.End() }
+		}
 
 		resp := continueProcessingResponse(req)
 		if headers := req.GetRequestHeaders(); headers != nil {
-			resp = s.evaluateRequestHeaders(stream.Context(), req)
+			resp = s.evaluateRequestHeaders(ctx, req)
 		}
 		if resp == nil {
 			logProtocolWarning(s.evaluator.cfg.LogFormat, "ext_proc", "missing_processing_message", "WARN: missing ext-proc processing message")

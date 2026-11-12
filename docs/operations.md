@@ -147,6 +147,8 @@ than silently changing its trust root.
 
 Use W3C `traceparent` and `tracestate`. The Apigee adapter prefers a valid
 transport parent, then the request-header parent carried inside MessageContext.
+Envoy adapters use the same priority. RPC span creation waits until payload
+headers are available, so early transport instrumentation cannot hide that parent.
 It starts a new RPC server span, retains that parent through evaluation, and
 injects the token-endpoint HTTP client span context. Backend headers remain
 unchanged by token exchange. Each span has a distinct ID within the same trace.

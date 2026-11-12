@@ -524,9 +524,10 @@ entries:
 		Expect(spanContext.TraceID().String()).To(Equal("4bf92f3577b34da6a3ce929d0e0e4736"))
 		bag := baggage.FromContext(exchanger.ctx)
 		Expect(bag.Member("tenant").Value()).To(Equal("blue"))
-		Expect(recorder.Ended()).To(HaveLen(1))
+		Expect(recorder.Ended()).To(HaveLen(2))
 		Expect(recorder.Ended()[0].Name()).To(Equal("ext_authz Check"))
-		Expect(recorder.Ended()[0].Parent().SpanID().String()).To(Equal("00f067aa0ba902b7"))
+		Expect(recorder.Ended()[0].Parent().SpanID()).To(Equal(recorder.Ended()[1].SpanContext().SpanID()))
+		Expect(recorder.Ended()[1].Parent().SpanID().String()).To(Equal("00f067aa0ba902b7"))
 	})
 
 	It("fails closed when matching policy is unhealthy", func() {

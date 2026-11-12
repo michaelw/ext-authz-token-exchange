@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,6 +230,14 @@ func run() error {
 		collectDiagnostics(env, cfg.diagnosticTimeout)
 		return err
 	}
+	encodedCA, err := commandOutput(ctx, env, "kubectl", "-n", "istio-ingress", "get", "secret", "cluster-root-ca-secret", "-o", `jsonpath={.data.tls\.crt}`)
+	if err != nil {
+		return err
+	}
+	caFile, err := writeSmokeTrust(tempDir, encodedCA)
+	if err != nil {
+		return err
+	}
 
 	testBaseURL := cfg.baseURL
 	if poolBaseURL != "" {
@@ -246,7 +256,8 @@ func run() error {
 			"E2E_KEYCLOAK_ISSUER="+keycloakIssuerURL(originalBaseURL),
 		)
 	}
-	testEnv = append(testEnv, "E2E_SKIP_INSTALL=true", "E2E_DIRECT_ADDRESS="+cfg.directAddress)
+	testEnv = append(testEnv, "E2E_SKIP_INSTALL=true", "E2E_DIRECT_ADDRESS="+cfg.directAddress,
+		"E2E_CA_CERT_FILE="+caFile, "E2E_INSECURE_SKIP_VERIFY=false", "E2E_CONTRACT_BASE_URL="+cfg.baseURL)
 	testArgs := []string{"run", "test-e2e"}
 	if inferenceChart != "" {
 		testArgs = append(testArgs, "--label-filter=inferencepool")
@@ -258,6 +269,18 @@ func run() error {
 
 	fmt.Println("smoke: completed successfully")
 	return nil
+}
+
+func writeSmokeTrust(directory, encoded string) (string, error) {
+	certificate, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+	if err != nil || !x509.NewCertPool().AppendCertsFromPEM(certificate) {
+		return "", errors.New("smoke gateway CA is missing or invalid")
+	}
+	path := filepath.Join(directory, "gateway-ca.pem")
+	if err := os.WriteFile(path, certificate, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func removeSmokeTempDir(path string) {

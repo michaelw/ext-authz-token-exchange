@@ -118,6 +118,9 @@ func summarizeAuthzResponse(resp any) string {
 
 // Check implements the Envoy external authorization check.
 func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.CheckRequest) (*envoy_service_auth_v3.CheckResponse, error) {
+	headers := httpRequestHeaders(req.GetAttributes().GetRequest().GetHttp())
+	ctx, span := startGatewaySpan(ctx, headers, AuthzCheckMethod)
+	defer span.End()
 	attributes := req.GetAttributes()
 	if attributes == nil {
 		logProtocolWarning(s.cfg.LogFormat, "ext_authz", "missing_attributes", "ERROR: structural attributes block is nil")
@@ -144,7 +147,6 @@ func (s *AuthzGRPCServer) Check(ctx context.Context, req *envoy_service_auth_v3.
 	}
 
 	method := strings.ToUpper(httpReq.GetMethod())
-	headers := httpRequestHeaders(httpReq)
 
 	host := header(headers, ":authority")
 	if host == "" {

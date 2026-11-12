@@ -17,8 +17,12 @@ func TestGatewayContract(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		path = "demo-scenarios.yaml"
 	}
+	baseURL := os.Getenv("E2E_CONTRACT_BASE_URL")
+	if baseURL == "" {
+		baseURL = os.Getenv("E2E_BASE_URL")
+	}
 	opts := demo.Options{
-		BaseURL: os.Getenv("E2E_BASE_URL"), ConfigPath: path,
+		BaseURL: baseURL, ConfigPath: path,
 		DirectAddress: os.Getenv("E2E_DIRECT_ADDRESS"), CACertFile: os.Getenv("E2E_CA_CERT_FILE"),
 		NamespacePrefix: os.Getenv("E2E_NAMESPACE_PREFIX"),
 		InsecureTLS:     os.Getenv("E2E_INSECURE_SKIP_VERIFY") == "true",

@@ -2,11 +2,33 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/pem"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestSmokeTrustRequiresAUsableCertificate(t *testing.T) {
+	for _, input := range []string{"", "not base64", base64.StdEncoding.EncodeToString([]byte("not PEM"))} {
+		if _, err := writeSmokeTrust(t.TempDir(), input); err == nil {
+			t.Fatal("invalid CA was accepted")
+		}
+	}
+	server := httptest.NewTLSServer(http.NotFoundHandler())
+	defer server.Close()
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	path, err := writeSmokeTrust(t.TempDir(), base64.StdEncoding.EncodeToString(certificate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(certificate) {
+		t.Fatal("gateway trust material changed")
+	}
+}
 
 func TestRemoveSmokeTempDirHandlesReadOnlyModuleCache(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "smoke")
