@@ -8,6 +8,12 @@ routes, and rewrites the upstream `Authorization` header with the exchanged
 access token. Requests that match invalid or ambiguous policy regions fail
 closed.
 
+Managed Apigee can use the same engine through its authenticated ExternalCallout
+gRPC API. See [Apigee development and private PSC setup](docs/apigee.md).
+
+JSON logging is the default. Set `TOKEN_EXCHANGE_LOG_FORMAT=text` for the legacy
+Envoy layout. See [logging controls and safety changes](docs/logging.md).
+
 ## Project Overview
 
 - `cmd/ext-authz-token-exchange-service/main.go` — gRPC service entrypoint
@@ -56,6 +62,10 @@ subrequest, follow the [Tracing Tutorial](docs/tracing.md).
 
 The local demo includes a browser UI for exercising token exchange scenarios
 and inspecting policy, response, log, and request-flow details.
+
+Each scenario run fetches fresh generated Keycloak test tokens. Tokens entered,
+fetched explicitly, or cleared by the user remain pinned for manual tests. This
+behavior is shared by the GKE Gateway, Istio, and Apigee dashboard workflows.
 
 ![Token exchange demo policy view](docs/images/token-exchange-demo-policy.png)
 

@@ -76,4 +76,5 @@ case " $* " in
   *) label_filter_args=(--label-filter=!stress) ;;
 esac
 
+go generate ./...
 go run github.com/onsi/ginkgo/v2/ginkgo -r "${label_filter_args[@]}" "$@" ./test/e2e

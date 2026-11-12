@@ -1,0 +1,7 @@
+<RaiseFault name="RF-Deny">
+  <FaultResponse><Set>
+    <StatusCode>{txe.status}</StatusCode>
+    <Payload contentType="application/json">{txe.body}</Payload>
+  </Set></FaultResponse>
+  <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+</RaiseFault>

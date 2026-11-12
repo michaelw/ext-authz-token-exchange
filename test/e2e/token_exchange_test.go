@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -115,13 +116,12 @@ var _ = Describe("multi-namespace token exchange", Ordered, func() {
 		if env.expectInsecureLogs {
 			Eventually(func(g Gomega) {
 				after := strings.TrimPrefix(pluginLogs(ctx), pluginBefore)
-				g.Expect(after).To(ContainSubstring(`INSECURE_LOG_TOKENS`))
-				g.Expect(after).To(ContainSubstring(`subject_token=options-token`))
+				g.Expect(hasTokenDebugEvent(after, "options-token")).To(BeTrue())
 			}, 30*time.Second, time.Second).Should(Succeed())
 		} else {
 			Eventually(func(g Gomega) {
 				after := strings.TrimPrefix(pluginLogs(ctx), pluginBefore)
-				g.Expect(after).To(ContainSubstring(`/envoy.service.ext_proc.v3.ExternalProcessor/Process`))
+				g.Expect(after).To(ContainSubstring(`allow_exchange`))
 				g.Expect(after).NotTo(ContainSubstring(`options-token`))
 				g.Expect(after).NotTo(ContainSubstring(`subject_token=`))
 			}, 30*time.Second, time.Second).Should(Succeed())
@@ -257,6 +257,39 @@ entries:
 		}
 	})
 })
+
+func hasTokenDebugEvent(logs, token string) bool {
+	for _, line := range strings.Split(logs, "\n") {
+		var event struct {
+			Event   string `json:"event"`
+			Subject string `json:"subject_token"`
+		}
+		if json.Unmarshal([]byte(line), &event) == nil && event.Event == "insecure_token_debug" && event.Subject == token {
+			return true
+		}
+		if strings.Contains(line, "INSECURE_LOG_TOKENS ") && strings.Contains(line, "subject_token="+token+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTokenDebugEventFormats(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{
+		{`{"event":"insecure_token_debug","subject_token":"synthetic"}`, true},
+		{`[gRPC] INSECURE_LOG_TOKENS subject_token=synthetic exchanged_token=other`, true},
+		{`{"event":"request_decision","message":"synthetic"}`, false},
+		{`{"event":"insecure_token_debug","subject_token":"synthetic-other"}`, false},
+		{`[gRPC] INSECURE_LOG_TOKENS subject_token=synthetic-other exchanged_token=other`, false},
+	} {
+		if got := hasTokenDebugEvent(tc.line, "synthetic"); got != tc.want {
+			t.Fatalf("token debug detection=%t, want %t", got, tc.want)
+		}
+	}
+}
 
 type exchangedJWTWant struct {
 	Scenario string

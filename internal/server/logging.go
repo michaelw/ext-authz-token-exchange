@@ -10,7 +10,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/michaelw/ext-authz-token-exchange/internal/config"
+	"github.com/michaelw/ext-authz-token-exchange/internal/logging"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -20,8 +23,20 @@ var customLogger = log.New(os.Stdout, "[gRPC] ", log.LstdFlags)
 
 const maxLogFieldLength = 512
 
+// LogStartup reports only effective logging controls, never issuer settings.
+func LogStartup(cfg config.RuntimeConfig, inspect bool) {
+	format := logging.Format(cfg.LogFormat)
+	text := fmt.Sprintf("LOGGING format=%s health_checks=%t insecure_tokens=%t apigee_inspection=%t", format, cfg.LogHealthChecks, cfg.InsecureLogTokens, inspect)
+	logging.Write(customLogger, format, logging.Event{Name: "logging_settings", Severity: "INFO", Message: text}, text)
+	if cfg.InsecureLogTokens {
+		text := "WARNING: insecure token logging enabled; use synthetic credentials only"
+		logging.Write(customLogger, format, logging.Event{Name: "insecure_logging_enabled", Severity: "WARN", Message: text}, text)
+	}
+}
+
 // LoggingOptions controls gRPC request/response logging behavior.
 type LoggingOptions struct {
+	Format  string
 	Methods map[string]LoggingMethod
 }
 
@@ -59,7 +74,7 @@ func LoggingInterceptorWithOptions(opts LoggingOptions) grpc.UnaryServerIntercep
 			args += fmt.Sprintf(" | response=%s", responseSummary(resp, methodLogging, hasMethodLogging))
 		}
 
-		logRPC(ctx, info.FullMethod, duration, err, args)
+		logRPCFormat(opts.Format, ctx, info.FullMethod, duration, err, args)
 
 		return resp, err
 	}
@@ -81,7 +96,7 @@ func LoggingStreamInterceptorWithOptions(opts LoggingOptions) grpc.StreamServerI
 		start := time.Now()
 		err := handler(srv, wrapped)
 		duration := time.Since(start)
-		logRPC(stream.Context(), info.FullMethod, duration, err, wrapped.args())
+		logRPCFormat(opts.Format, stream.Context(), info.FullMethod, duration, err, wrapped.args())
 		return err
 	}
 }
@@ -131,6 +146,22 @@ func (s *summaryServerStream) args() string {
 	return args
 }
 
+func logRPCFormat(format string, ctx context.Context, method string, duration time.Duration, err error, args string) {
+	if logging.Format(format) == "json" {
+		severity := "INFO"
+		code := status.Code(err)
+		if err != nil {
+			severity = "ERROR"
+		}
+		if code == codes.InvalidArgument || code == codes.Unauthenticated || code == codes.PermissionDenied {
+			severity = "WARN"
+		}
+		logging.Write(customLogger, format, logging.Event{Name: "rpc_complete", Severity: severity, Adapter: adapterForMethod(method), RPCMethod: safeRPCMethod(method), GRPCStatus: code.String(), DurationMS: float64(duration) / float64(time.Millisecond)}, "")
+		return
+	}
+	logRPC(ctx, method, duration, err, args)
+}
+
 func logRPC(ctx context.Context, method string, duration time.Duration, err error, args string) {
 	clientAddr := "UNKNOWN"
 	if p, ok := peer.FromContext(ctx); ok {
@@ -144,11 +175,10 @@ func logRPC(ctx context.Context, method string, duration time.Duration, err erro
 			logField(method),
 			args)
 	} else {
-		customLogger.Printf("| ERR | %13v | %15s | %s - %v%s",
+		customLogger.Printf("| ERR | %13v | %15s | %s - failure_class=internal%s",
 			duration,
 			logField(clientAddr),
 			logField(method),
-			err,
 			args)
 	}
 }
@@ -162,9 +192,69 @@ func responseSummary(resp any, method LoggingMethod, registered bool) string {
 }
 
 func logPath(path string) string {
-	path, _, _ = strings.Cut(path, "?")
-	path, _, _ = strings.Cut(path, "#")
-	return logField(path)
+	return "[redacted]"
+}
+
+func safeHTTPMethod(method string) string {
+	switch strings.ToUpper(method) {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE":
+		return strings.ToUpper(method)
+	default:
+		return "OTHER"
+	}
+}
+
+func safeCorrelation(value string) string {
+	if len(value) == 0 || len(value) > 128 {
+		return ""
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' || r == ':') {
+			return ""
+		}
+	}
+	return value
+}
+
+func safeHeaderName(name string) string {
+	switch strings.ToLower(name) {
+	case "authorization", "cookie", "content-type", "content-length", "accept", "host", "origin", "user-agent", "traceparent", "tracestate", "www-authenticate", ":authority", ":method", ":path", ":scheme":
+		return strings.ToLower(name)
+	default:
+		return "[other]"
+	}
+}
+
+func safeHeaderNames(headers map[string]string) []string {
+	seen := map[string]string{}
+	for name := range headers {
+		seen[safeHeaderName(name)] = ""
+	}
+	return sortedMapKeys(seen)
+}
+
+func adapterForMethod(method string) string {
+	switch method {
+	case AuthzCheckMethod:
+		return "ext_authz"
+	case ExtProcProcessMethod:
+		return "ext_proc"
+	case ApigeeProcessMethod:
+		return "apigee"
+	default:
+		return ""
+	}
+}
+
+func safeRPCMethod(method string) string {
+	if adapterForMethod(method) != "" || method == "/grpc.health.v1.Health/Check" {
+		return method
+	}
+	return "other"
+}
+
+func logProtocolWarning(format, adapter, reason, text string) {
+	logging.Write(customLogger, format, logging.Event{Name: "protocol_error", Severity: "WARN", Adapter: adapter, Reason: reason}, text)
 }
 
 func logField(value string) string {

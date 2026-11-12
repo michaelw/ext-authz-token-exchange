@@ -1,0 +1,36 @@
+{
+  "project": "example-apigee-project",
+  "context": "gke_example-cluster-project_us-central1_example-cluster",
+  "region": "us-central1",
+  "organization": "example-apigee-project",
+  "environment": "production",
+  "proxy": "txe-production",
+  "proxy_service_account": "proxy@example-apigee-project.iam.gserviceaccount.com",
+  "proxy_subject": "123456789012345678901",
+  "synthetic_demo": false,
+  "private_active": true,
+  "manage_targets": true,
+  "callout": {
+    "host": "10.10.0.10",
+    "port": 443,
+    "audience": "https://callout.example.test",
+    "server_name": "callout.example.test",
+    "certificate": ".devspace/operator-trust/callout-ca.pem"
+  },
+  "backend": {
+    "host": "10.10.0.11",
+    "port": 443,
+    "server_name": "backend.example.test",
+    "certificate": ".devspace/operator-trust/backend-ca.pem"
+  },
+  "ingress": {
+    "url": "https://api.example.test",
+    "certificate": ".devspace/operator-trust/ingress-ca.pem"
+  },
+  "acceptance_probe": {"path": "/token-exchange-canary", "status": 401},
+  "kubernetes": {
+    "namespace": "txe-production",
+    "release": "txe-production",
+    "values": ".devspace/production-values.yaml"
+  }
+}

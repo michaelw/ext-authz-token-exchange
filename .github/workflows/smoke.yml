@@ -10,6 +10,10 @@ on:
       - synchronize
       - reopened
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -44,41 +48,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up shared smoke tooling
+        uses: ./.github/actions/setup-toolchain
         with:
-          go-version-file: go.mod
-
-      - name: Set up Docker buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Install smoke tooling
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates curl iproute2 make openssl tar
-
-          mkdir -p "${RUNNER_TEMP}/bin"
-          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
-
-          curl -fsSL -o "${RUNNER_TEMP}/bin/kind" "https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-amd64"
-          chmod +x "${RUNNER_TEMP}/bin/kind"
-
-          curl -fsSL -o "${RUNNER_TEMP}/bin/kubectl" "https://dl.k8s.io/release/v1.33.2/bin/linux/amd64/kubectl"
-          chmod +x "${RUNNER_TEMP}/bin/kubectl"
-
-          curl -fsSL "https://get.helm.sh/helm-v3.18.3-linux-amd64.tar.gz" | tar -xz -C "${RUNNER_TEMP}"
-          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/bin/helm"
-
-          curl -fsSL -o "${RUNNER_TEMP}/bin/yq" "https://github.com/mikefarah/yq/releases/download/v4.45.4/yq_linux_amd64"
-          chmod +x "${RUNNER_TEMP}/bin/yq"
-
-          curl -fsSL -o "${RUNNER_TEMP}/bin/devspace" "https://github.com/loft-sh/devspace/releases/download/v6.3.15/devspace-linux-amd64"
-          chmod +x "${RUNNER_TEMP}/bin/devspace"
+          target: smoke-toolchain
 
       - name: Run smoke (${{ matrix.mode }})
         env:
           SMOKE_MODE: ${{ matrix.mode }}
           SMOKE_ISTIO_VERSION: ${{ matrix.istio }}
           SMOKE_CLUSTER_NAME: txe-smoke-${{ matrix.cluster }}
-        run: go run ./test/e2e/cmd/smoke
+        run: |
+          docker run --rm --user 0:0 --network host \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:$PWD" -v "$RUNNER_TEMP:$RUNNER_TEMP" \
+            -v "$HOME/.cache/txe-go:/go-cache" -w "$PWD" \
+            -e TMPDIR="$RUNNER_TEMP" -e SMOKE_MODE -e SMOKE_ISTIO_VERSION -e SMOKE_CLUSTER_NAME \
+            txe-smoke-toolchain:ci sh -c 'git config --global --add safe.directory "$PWD" && go generate ./... && go run ./test/e2e/cmd/smoke'

@@ -4,6 +4,7 @@ package demo
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -44,6 +45,7 @@ type Options struct {
 	PluginDeployment string
 	DirectAddress    string
 	InsecureTLS      bool
+	CACertFile       string
 }
 
 // LoadOptionsFromEnv returns demo options from environment variables.
@@ -57,6 +59,7 @@ func LoadOptionsFromEnv() Options {
 		PluginDeployment: envDefault("DEMO_PLUGIN_DEPLOYMENT", DefaultPluginDeployment),
 		DirectAddress:    strings.TrimSpace(os.Getenv("DEMO_DIRECT_ADDRESS")),
 		InsecureTLS:      envBool("DEMO_INSECURE_SKIP_VERIFY", true),
+		CACertFile:       strings.TrimSpace(os.Getenv("DEMO_CA_CERT_FILE")),
 	}
 }
 
@@ -434,7 +437,14 @@ func Curl(opts Options, sc Scenario) string {
 	if err != nil {
 		requestURL = opts.BaseURL + sc.Request.Path
 	}
-	parts := []string{"curl", "-sk", "-X", shellQuote(sc.Request.Method)}
+	flag := "-sS"
+	if opts.InsecureTLS {
+		flag = "-sk"
+	}
+	parts := []string{"curl", flag, "-X", shellQuote(sc.Request.Method)}
+	if opts.CACertFile != "" {
+		parts = append(parts, "--cacert", shellQuote(opts.CACertFile))
+	}
 	if parsed, parseErr := url.Parse(requestURL); parseErr == nil && opts.DirectAddress != "" {
 		port := parsed.Port()
 		if port == "" {
@@ -466,6 +476,17 @@ func NewHTTPClient(opts Options) *http.Client {
 	transport, err := directhttp.NewTransport(opts.DirectAddress, opts.InsecureTLS)
 	if err != nil {
 		return &http.Client{Timeout: DefaultRequestTimeout, Transport: errorTransport{err: err}}
+	}
+	if opts.CACertFile != "" {
+		data, err := os.ReadFile(opts.CACertFile)
+		if err != nil {
+			return &http.Client{Transport: errorTransport{err: err}}
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(data) {
+			return &http.Client{Transport: errorTransport{err: fmt.Errorf("demo CA file contains no PEM certificates")}}
+		}
+		transport.TLSClientConfig.RootCAs = roots
 	}
 	return &http.Client{Timeout: DefaultRequestTimeout, Transport: transport}
 }

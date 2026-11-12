@@ -185,7 +185,7 @@ func TestGRPCStatsHandlerDoesNotRecordHealthChecks(t *testing.T) {
 	}
 }
 
-func TestGRPCStatsHandlerRecordsAuthzChecks(t *testing.T) {
+func TestGRPCStatsHandlerDefersSpansUntilGatewayPayloadIsDecoded(t *testing.T) {
 	provider := sdktrace.NewTracerProvider()
 	previousProvider := otel.GetTracerProvider()
 	otel.SetTracerProvider(provider)
@@ -198,8 +198,8 @@ func TestGRPCStatsHandlerRecordsAuthzChecks(t *testing.T) {
 
 	ctx := grpcStatsHandler().TagRPC(context.Background(), &stats.RPCTagInfo{FullMethodName: server.AuthzCheckMethod})
 
-	if !oteltrace.SpanFromContext(ctx).IsRecording() {
-		t.Fatalf("expected ext-authz Check RPC to record a span")
+	if oteltrace.SpanFromContext(ctx).IsRecording() {
+		t.Fatalf("RPC instrumentation created a span before the gateway parent was available")
 	}
 }
 

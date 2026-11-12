@@ -116,6 +116,17 @@ get_from_cache() {
   local key default path value
   key="$1"
   default="$2"
+  if [ -f .devspace/gateway.json ]; then
+    case "$key" in
+      REGISTRY|DEV_REGISTRY|DEV_REGISTRY_IMAGE_PREFIX) value="$(python3 scripts/gateway.py value --key registry)" ;;
+      GKE_PROJECT_ID) value="$(python3 scripts/gateway.py value --key project)" ;;
+      GKE_REGION) value="$(python3 scripts/gateway.py value --key region)" ;;
+      GATEWAY_NAMESPACE) value="$(python3 scripts/gateway.py value --key namespace)" ;;
+      DEPLOYMENT_DOMAIN) value="$(python3 scripts/gateway.py value --key domain)" ;;
+      *) value="" ;;
+    esac
+    if [ -n "$value" ]; then printf '%s\n' "$value"; return; fi
+  fi
   current_context >/dev/null
 
   path="$(init_cache)"
@@ -133,6 +144,12 @@ get_from_cache() {
       ;;
   esac
 
+  if [ -z "$value" ] && [ "$key" = GATEWAY_NAMESPACE ]; then
+    case "$(current_context)" in
+      gke_*) ;;
+      *) value=istio-ingress ;;
+    esac
+  fi
   printf '%s\n' "${value:-$default}"
 }
 
@@ -158,6 +175,10 @@ require_gke_values() {
 }
 
 gateway_provider() {
+  if [ -f .devspace/gateway.json ]; then
+    python3 scripts/gateway.py value --key gateway
+    return
+  fi
   case "$(current_context)" in
     gke_*) printf 'gke-gateway\n' ;;
     *) printf 'local-istio\n' ;;

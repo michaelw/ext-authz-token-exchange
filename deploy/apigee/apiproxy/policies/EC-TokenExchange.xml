@@ -1,0 +1,14 @@
+<ExternalCallout name="EC-TokenExchange" enabled="true" continueOnError="false">
+  <TimeoutMs>1000</TimeoutMs>
+  <GrpcConnection>
+    <Server name="txe-callout"/>
+    <Authentication><GoogleIDToken><Audience>CONFIGURE_AUDIENCE</Audience></GoogleIDToken></Authentication>
+  </GrpcConnection>
+  <Configurations>
+    <Property name="with.request.headers">true</Property>
+    <Property name="with.request.content">false</Property>
+    <Property name="with.response.headers">false</Property>
+    <Property name="with.response.content">false</Property>
+    <FlowVariable>txe.input</FlowVariable>
+  </Configurations>
+</ExternalCallout>

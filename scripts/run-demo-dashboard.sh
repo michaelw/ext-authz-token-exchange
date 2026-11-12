@@ -6,4 +6,4 @@ if [ "${1:-}" = "--" ]; then
   shift
 fi
 
-exec go run ./cmd/demo-dashboard "$@"
+exec python3 scripts/developer.py dashboard "$@"

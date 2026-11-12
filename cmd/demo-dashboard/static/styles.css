@@ -259,10 +259,13 @@ h3 {
 
 .inspector {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  height: clamp(480px, 70vh, 900px);
+  min-width: 0;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .sidebar-header,
@@ -520,6 +523,7 @@ dd {
 .tabs {
   display: flex;
   grid-row: 1;
+  overflow-x: auto;
   padding: 8px;
   gap: 6px;
   border-bottom: 1px solid var(--line);
@@ -539,24 +543,20 @@ dd {
   display: block;
   grid-row: 2;
   grid-column: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   margin: 0;
   padding: 14px;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
 }
 
-.tab-panel.active {
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-  z-index: 1;
+/* Inactive content must not size the shared grid row. */
+.tab-panel:not(.active) {
+  display: none;
 }
 
 .response-panel {
@@ -567,7 +567,8 @@ dd {
 
 .token-panel {
   display: grid;
-  grid-template-rows: minmax(150px, auto) auto;
+  grid-template-rows: auto auto;
+  align-content: start;
   gap: 12px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow: auto;
@@ -605,8 +606,9 @@ dd {
 
 #input-token {
   width: 100%;
-  height: calc(100% - 62px);
+  height: 128px;
   min-height: 96px;
+  max-height: 320px;
   resize: vertical;
   border: 1px solid var(--line);
   border-radius: 7px;

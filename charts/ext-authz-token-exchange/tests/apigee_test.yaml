@@ -1,0 +1,58 @@
+suite: authenticated Apigee listener
+templates:
+  - templates/deployment.yaml
+set:
+  fullnameOverride: txe
+  gatewayProvider: apigee
+  apigee.enabled: true
+  apigee.audience: https://callout.example.test
+  apigee.allowedSubjects: "123456789"
+  apigee.tlsSecret: callout-tls
+tests:
+  - it: requires gateway authentication and mounts TLS read-only
+    asserts:
+      - isKind:
+          of: Deployment
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: APIGEE_AUTH_AUDIENCE, value: "https://callout.example.test"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: APIGEE_AUTH_ALLOWED_SUBJECTS, value: "123456789"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: APIGEE_TLS_CERT_FILE, value: /etc/apigee-tls/tls.crt}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: APIGEE_TLS_KEY_FILE, value: /etc/apigee-tls/tls.key}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: APIGEE_INSPECT_MESSAGES, value: "false"}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: apigee-tls, secret: {secretName: callout-tls}}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: apigee-tls, mountPath: /etc/apigee-tls, readOnly: true}
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content: {name: apigee-grpc, containerPort: 3003}
+          any: true
+  - it: rejects a missing audience
+    set:
+      apigee.audience: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: apigee.audience is required
+  - it: rejects missing allowed subjects
+    set:
+      apigee.allowedSubjects: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: apigee.allowedSubjects is required
+  - it: rejects missing TLS identity
+    set:
+      apigee.tlsSecret: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: apigee.tlsSecret is required

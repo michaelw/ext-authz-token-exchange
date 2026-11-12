@@ -15,6 +15,7 @@ const state = {
   tokenVerifyRequestID: 0,
   tokenVerification: { token: "", pending: false, response: null },
   runningAll: false,
+  connection: { insecureTLS: true },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -48,6 +49,12 @@ async function api(path, options = {}) {
 async function load() {
   const data = await api("/api/scenarios");
   state.scenarios = data.scenarios;
+  state.connection = data;
+  if (data.gatewayKind === "apigee") {
+    $("subtitle").textContent = "RFC8693 token exchange through managed Apigee";
+    $("gateway-node-label").textContent = "Managed Apigee";
+    $("plugin-node-label").textContent = "ExternalCallout service";
+  }
   state.issuer = data.issuer || { label: "Issuer" };
   for (const scenario of state.scenarios) {
     if (!state.tokenValues.has(scenario.name)) {
@@ -233,7 +240,7 @@ function shouldPrefillScenarioToken(scenario) {
   if (scenario?.skipped || scenario?.available === false) {
     return false;
   }
-  if (state.tokenOverrides.has(scenario.name) || normalizeBearerInput(tokenForScenario(scenario))) {
+  if (state.tokenOverrides.has(scenario.name)) {
     return false;
   }
   return isGeneratedTokenPrefill(scenario.request?.token?.prefill);
@@ -276,6 +283,9 @@ function renderSelected() {
   if (!selected) {
     return;
   }
+  const issuerLabel = selected.requires?.issuer === "local-keycloak" ? "Keycloak" : state.issuer.label || "Issuer";
+  $("issuer-node-label").textContent = issuerLabel;
+  $("issuer-logs-title").textContent = issuerLabel;
   const scenario = effectiveScenario(selected);
   const result = state.results.get(selected.name);
   $("scenario-title").textContent = scenario.name;
@@ -583,21 +593,21 @@ function buildMermaidDiagram(scenario, result) {
   const lines = [
     "sequenceDiagram",
     "    participant Client",
-    "    participant Gateway as \"Gateway API pod\"",
-    "    participant Plugin as \"ext-authz plugin\"",
+    `    participant Gateway as ${JSON.stringify(state.connection.gatewayKind === "apigee" ? "Managed Apigee" : "Gateway API pod")}`,
+    `    participant Plugin as ${JSON.stringify(state.connection.gatewayKind === "apigee" ? "ExternalCallout service in GKE" : "ext-authz plugin")}`,
   ];
   if (!unmatched) {
     lines.push("    participant Policy as \"ConfigMap policy\"");
   }
   if (exchange && !hasCORSHeaders) {
-    lines.push(`    participant Issuer as ${JSON.stringify(state.issuer.label || "Issuer")}`);
+    lines.push(`    participant Issuer as ${JSON.stringify(scenario.requires?.issuer === "local-keycloak" ? "Keycloak" : state.issuer.label || "Issuer")}`);
   }
   if (status < 400 || unmatched || hasCORSHeaders) {
     lines.push("    participant Httpbin as \"go-httpbin\"");
   }
   lines.push("");
   lines.push(`    Client->>Gateway: ${diagramText(requestLine(request))}`);
-  lines.push("    Gateway->>Plugin: Envoy ext_authz Check");
+  lines.push(state.connection.gatewayKind === "apigee" ? "    Gateway->>Plugin: TLS + ID token + PSC: ProcessMessage" : "    Gateway->>Plugin: Envoy ext_authz Check");
 
   if (unmatched) {
     lines.push("    Plugin-->>Gateway: OK, no matching policy");
@@ -1209,14 +1219,23 @@ function isReasonableText(contentType, body) {
 }
 
 function buildCurlPreview(scenario) {
-  const parts = ["curl -sk", "-X", quote(scenario.request.method)];
+  const parts = [state.connection.insecureTLS ? "curl -sk" : "curl -sS", "-X", quote(scenario.request.method)];
+  if (state.connection.caCertFile) {
+    parts.push("--cacert", quote(state.connection.caCertFile));
+  }
+  const address = `${state.connection.baseURL || ""}${scenario.request.path}`;
+  if (state.connection.directAddress && state.connection.baseURL) {
+    const url = new URL(address);
+    const ip = state.connection.directAddress.includes(":") ? `[${state.connection.directAddress}]` : state.connection.directAddress;
+    parts.push("--resolve", quote(`${url.hostname}:${url.port || (url.protocol === "https:" ? "443" : "80")}:${ip}`));
+  }
   if (scenario.request.token?.value) {
     parts.push("-H", quote(`Authorization: Bearer ${scenario.request.token.value}`));
   }
   for (const [key, value] of Object.entries(scenario.request.headers || {})) {
     parts.push("-H", quote(`${key}: ${value}`));
   }
-  parts.push(quote(scenario.request.path));
+  parts.push(quote(address));
   return parts.join(" ");
 }
 
@@ -1226,7 +1245,7 @@ async function refreshLogs() {
   $("issuer-logs").textContent = "Loading...";
   const [plugin, issuer] = await Promise.all([
     api("/api/logs/plugin").catch((error) => ({ logs: "", warning: error.message })),
-    api("/api/logs/issuer").catch((error) => ({ logs: "", warning: error.message })),
+    api(`/api/logs/issuer?issuer=${encodeURIComponent(state.selected?.requires?.issuer || "fake-issuer")}`).catch((error) => ({ logs: "", warning: error.message })),
   ]);
   $("plugin-logs").textContent = plugin.warning ? `${plugin.warning}\n${plugin.logs || ""}` : plugin.logs;
   $("issuer-logs").textContent = issuer.warning ? `${issuer.warning}\n${issuer.logs || ""}` : issuer.logs;

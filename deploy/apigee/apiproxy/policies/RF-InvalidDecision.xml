@@ -1,0 +1,3 @@
+<RaiseFault name="RF-InvalidDecision">
+  <FaultResponse><Set><StatusCode>500</StatusCode><Payload contentType="application/json">{"error":"server_error"}</Payload></Set></FaultResponse>
+</RaiseFault>

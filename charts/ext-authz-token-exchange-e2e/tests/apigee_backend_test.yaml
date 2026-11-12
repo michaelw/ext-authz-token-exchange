@@ -1,0 +1,67 @@
+suite: private TLS Apigee backend
+templates: [templates/team-apps.yaml]
+set:
+  gatewayProvider: apigee
+  teams: [{color: yellow}]
+  teamApp.enabled: true
+  teamApp.tlsSecret: backend-tls
+  teamApp.exposure.pscNatSubnet: backend-nat
+  teamApp.exposure.pscConsumerProjects: [example-apigee-tenant]
+tests:
+  - it: publishes the private backend Service with a consumer allow-list
+    documentSelector: {path: kind, value: ServiceAttachment}
+    asserts:
+      - equal:
+          path: spec
+          value:
+            connectionPreference: ACCEPT_MANUAL
+            natSubnets: [backend-nat]
+            consumerAllowList: [{project: example-apigee-tenant, connectionLimit: 10}]
+            proxyProtocol: false
+            resourceRef: {kind: Service, name: httpbin-private}
+  - it: uses an internal TCP load balancer for the backend
+    documentSelector: {path: metadata.name, value: httpbin-private}
+    asserts:
+      - isKind: {of: Service}
+      - equal:
+          path: metadata.annotations["networking.gke.io/load-balancer-type"]
+          value: Internal
+      - equal: {path: spec.type, value: LoadBalancer}
+      - equal:
+          path: spec.ports
+          value: [{name: https, port: 8080, targetPort: http, protocol: TCP}]
+  - it: mounts the backend certificate and uses HTTPS readiness
+    documentSelector: {path: kind, value: Deployment}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: HTTPS_CERT_FILE, value: /etc/httpbin-tls/tls.crt}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: HTTPS_KEY_FILE, value: /etc/httpbin-tls/tls.key}
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: tls, secret: {secretName: backend-tls}}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: {name: tls, mountPath: /etc/httpbin-tls, readOnly: true}
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.scheme
+          value: HTTPS
+  - it: omits PSC resources and extra gateway routing when PSC is off
+    set:
+      teamApp.exposure.pscNatSubnet: ""
+    asserts:
+      - hasDocuments: {count: 2}
+  - it: rejects a private PSC backend without TLS
+    set:
+      teamApp.tlsSecret: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: httpbin PSC requires teamApp.tlsSecret
+  - it: rejects PSC without approved consumers
+    set:
+      teamApp.exposure.pscConsumerProjects: []
+    asserts:
+      - failedTemplate:
+          errorMessage: teamApp.exposure.pscConsumerProjects is required

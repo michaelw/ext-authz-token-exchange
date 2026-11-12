@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -45,7 +46,7 @@ func TestLoggingInterceptorDoesNotLogSensitiveResponseFields(t *testing.T) {
 		},
 	}
 
-	_, err := LoggingInterceptorWithOptions(LoggingOptions{Methods: AuthzLoggingMethods()})(peer.NewContext(context.Background(), &peer.Peer{
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Format: "text", Methods: AuthzLoggingMethods()})(peer.NewContext(context.Background(), &peer.Peer{
 		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
 	}), loggingCheckRequest("GET", "orders.example.com", "/api/orders?email=alice@example.com&token=subject-token"), &grpc.UnaryServerInfo{
 		FullMethod: AuthzCheckMethod,
@@ -70,8 +71,8 @@ func TestLoggingInterceptorDoesNotLogSensitiveResponseFields(t *testing.T) {
 	if !bytes.Contains([]byte(got), []byte("response=ok")) {
 		t.Fatalf("log did not contain sanitized response summary: %s", got)
 	}
-	if !bytes.Contains([]byte(got), []byte("/api/orders")) {
-		t.Fatalf("log did not retain sanitized path: %s", got)
+	if !bytes.Contains([]byte(got), []byte("[redacted]")) {
+		t.Fatalf("log did not redact request location: %s", got)
 	}
 }
 
@@ -128,12 +129,13 @@ func TestExtProcLoggingInterceptorLogsSanitizedAllowedRequest(t *testing.T) {
 			Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
 		}),
 		recv: func(message any) error {
-			*message.(*envoy_service_ext_proc_v3.ProcessingRequest) = *request
+			proto.Reset(message.(*envoy_service_ext_proc_v3.ProcessingRequest))
+			proto.Merge(message.(*envoy_service_ext_proc_v3.ProcessingRequest), request)
 			return nil
 		},
 	}
 
-	err := LoggingStreamInterceptorWithOptions(LoggingOptions{Methods: ExtProcLoggingMethods()})(nil, stream, &grpc.StreamServerInfo{
+	err := LoggingStreamInterceptorWithOptions(LoggingOptions{Format: "text", Methods: ExtProcLoggingMethods()})(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: ExtProcProcessMethod,
 	}, func(_ any, serverStream grpc.ServerStream) error {
 		var received envoy_service_ext_proc_v3.ProcessingRequest
@@ -151,7 +153,7 @@ func TestExtProcLoggingInterceptorLogsSanitizedAllowedRequest(t *testing.T) {
 		"|   0 |",
 		"192.0.2.10:12345",
 		ExtProcProcessMethod,
-		"| GET | https://orders.example.com/api/orders",
+		"| GET | [redacted]://[redacted][redacted]",
 		"response=ok",
 	} {
 		if !bytes.Contains([]byte(got), []byte(expected)) {
@@ -187,7 +189,7 @@ func TestExtProcLoggingInterceptorLogsDeniedResponseWithoutBody(t *testing.T) {
 	})
 	stream := loggingServerStreamFor(request, nil)
 
-	err := LoggingStreamInterceptorWithOptions(LoggingOptions{Methods: ExtProcLoggingMethods()})(nil, stream, &grpc.StreamServerInfo{
+	err := LoggingStreamInterceptorWithOptions(LoggingOptions{Format: "text", Methods: ExtProcLoggingMethods()})(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: ExtProcProcessMethod,
 	}, func(_ any, serverStream grpc.ServerStream) error {
 		var received envoy_service_ext_proc_v3.ProcessingRequest
@@ -260,7 +262,7 @@ func TestExtProcLoggingInterceptorLogsReceiveAndSendErrors(t *testing.T) {
 			restoreLogger := captureLogger(&logs)
 			defer restoreLogger()
 
-			err := LoggingStreamInterceptorWithOptions(LoggingOptions{Methods: ExtProcLoggingMethods()})(nil, tt.stream, &grpc.StreamServerInfo{
+			err := LoggingStreamInterceptorWithOptions(LoggingOptions{Format: "text", Methods: ExtProcLoggingMethods()})(nil, tt.stream, &grpc.StreamServerInfo{
 				FullMethod: ExtProcProcessMethod,
 			}, tt.handler)
 			if err == nil {
@@ -294,7 +296,7 @@ func TestLoggingStreamInterceptorLeavesUnregisteredMethodsUnlogged(t *testing.T)
 	defer restoreLogger()
 
 	stream := &loggingTestServerStream{ctx: context.Background()}
-	err := LoggingStreamInterceptorWithOptions(LoggingOptions{Methods: ExtProcLoggingMethods()})(nil, stream, &grpc.StreamServerInfo{
+	err := LoggingStreamInterceptorWithOptions(LoggingOptions{Format: "text", Methods: ExtProcLoggingMethods()})(nil, stream, &grpc.StreamServerInfo{
 		FullMethod: "/grpc.health.v1.Health/Watch",
 	}, func(any, grpc.ServerStream) error { return nil })
 	if err != nil {
@@ -332,7 +334,8 @@ func loggingServerStreamFor(request *envoy_service_ext_proc_v3.ProcessingRequest
 	return &loggingTestServerStream{
 		ctx: context.Background(),
 		recv: func(message any) error {
-			*message.(*envoy_service_ext_proc_v3.ProcessingRequest) = *request
+			proto.Reset(message.(*envoy_service_ext_proc_v3.ProcessingRequest))
+			proto.Merge(message.(*envoy_service_ext_proc_v3.ProcessingRequest), request)
 			return nil
 		},
 		sendErr: sendErr,
@@ -369,7 +372,7 @@ func TestLoggingInterceptorUsesRegisteredMethodSummary(t *testing.T) {
 		customLogger.SetOutput(originalWriter)
 	})
 
-	_, err := LoggingInterceptor()(peer.NewContext(context.Background(), &peer.Peer{
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Format: "text"})(peer.NewContext(context.Background(), &peer.Peer{
 		Addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 12345},
 	}), struct{}{}, &grpc.UnaryServerInfo{
 		FullMethod: "/example.Service/Method",
@@ -386,7 +389,7 @@ func TestLoggingInterceptorUsesRegisteredMethodSummary(t *testing.T) {
 	}
 
 	logs.Reset()
-	_, err = LoggingInterceptorWithOptions(LoggingOptions{Methods: map[string]LoggingMethod{
+	_, err = LoggingInterceptorWithOptions(LoggingOptions{Format: "text", Methods: map[string]LoggingMethod{
 		"/example.Service/Method": {
 			LogEnabled:        true,
 			SummarizeResponse: func(any) string { return "registered" },
@@ -416,7 +419,7 @@ func TestLoggingInterceptorCanSkipRegisteredMethod(t *testing.T) {
 		customLogger.SetOutput(originalWriter)
 	})
 
-	_, err := LoggingInterceptorWithOptions(LoggingOptions{Methods: map[string]LoggingMethod{
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Format: "text", Methods: map[string]LoggingMethod{
 		"/grpc.health.v1.Health/Check": {
 			LogEnabled:        false,
 			SummarizeResponse: func(any) string { return "health_status=serving" },
@@ -451,7 +454,7 @@ func TestLoggingInterceptorDoesNotSkipAuthzWhenHealthCheckLoggingDisabled(t *tes
 		},
 	}
 
-	_, err := LoggingInterceptorWithOptions(LoggingOptions{Methods: map[string]LoggingMethod{
+	_, err := LoggingInterceptorWithOptions(LoggingOptions{Format: "text", Methods: map[string]LoggingMethod{
 		AuthzCheckMethod: {
 			LogEnabled:        true,
 			SummarizeResponse: summarizeAuthzResponse,
@@ -482,7 +485,7 @@ func TestLoggingInterceptorDoesNotSkipAuthzWhenHealthCheckLoggingDisabled(t *tes
 
 func TestLogPathDropsQueryFragmentAndNormalizesControls(t *testing.T) {
 	got := logPath("/api/orders?email=alice@example.com\nx-forged=true#fragment")
-	if got != "/api/orders" {
+	if got != "[redacted]" {
 		t.Fatalf("unexpected sanitized path: %q", got)
 	}
 }
@@ -492,7 +495,7 @@ func TestAuthzServerDoesNotLogTokensByDefault(t *testing.T) {
 	restoreLogger := captureLogger(&logs)
 	defer restoreLogger()
 
-	srv := NewAuthzGRPCServer(config.RuntimeConfig{BearerRealm: "example"}, policy.NewStaticStore(loggingIndex()), &loggingExchanger{
+	srv := NewAuthzGRPCServer(config.RuntimeConfig{LogFormat: "text", BearerRealm: "example"}, policy.NewStaticStore(loggingIndex()), &loggingExchanger{
 		result: exchange.Result{AccessToken: "exchanged-access-token"},
 	})
 
@@ -519,7 +522,7 @@ func TestAuthzServerLogsTokensWhenInsecureLoggingEnabled(t *testing.T) {
 	restoreLogger := captureLogger(&logs)
 	defer restoreLogger()
 
-	srv := NewAuthzGRPCServer(config.RuntimeConfig{BearerRealm: "example", InsecureLogTokens: true}, policy.NewStaticStore(loggingIndex()), &loggingExchanger{
+	srv := NewAuthzGRPCServer(config.RuntimeConfig{LogFormat: "text", BearerRealm: "example", InsecureLogTokens: true}, policy.NewStaticStore(loggingIndex()), &loggingExchanger{
 		result: exchange.Result{AccessToken: "exchanged-access-token"},
 	})
 
@@ -537,8 +540,8 @@ func TestAuthzServerLogsTokensWhenInsecureLoggingEnabled(t *testing.T) {
 	for _, want := range []string{
 		"INSECURE_LOG_TOKENS",
 		"method=GET",
-		"host=orders.example.com",
-		"path=/api/orders",
+		"host=[redacted]",
+		"path=[redacted]",
 		"policy=orders/token-exchange",
 		"subject_token=subject-token",
 		"exchanged_token=exchanged-access-token",
@@ -558,7 +561,7 @@ func TestAuthzServerLogsDenialReasonsWithoutSensitiveValues(t *testing.T) {
 	defer restoreLogger()
 
 	srv := NewAuthzGRPCServer(
-		config.RuntimeConfig{BearerRealm: "example", DefaultDenyUnmatched: true},
+		config.RuntimeConfig{LogFormat: "text", BearerRealm: "example", DefaultDenyUnmatched: true},
 		policy.NewStaticStore(loggingDenyIndex()),
 		&loggingExchanger{},
 	)
@@ -588,8 +591,7 @@ func TestAuthzServerLogsDenialReasonsWithoutSensitiveValues(t *testing.T) {
 		"DENY reason=explicit_policy",
 		"policy=orders/token-exchange",
 		"DENY reason=unmatched_default_deny",
-		"path=/api/orders",
-		"path=/api/customers",
+		"path=[redacted]",
 	} {
 		if !bytes.Contains([]byte(got), []byte(want)) {
 			t.Fatalf("log did not contain %q: %s", want, got)

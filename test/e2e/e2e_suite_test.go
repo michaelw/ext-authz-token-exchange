@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -135,6 +136,7 @@ type e2eEnv struct {
 	skipCleanup         bool
 	insecureTLS         bool
 	directAddress       string
+	keycloakAddress     string
 	expectInsecureLogs  bool
 	kube                *kubernetes.Clientset
 }
@@ -178,7 +180,8 @@ func loadE2EEnv() e2eEnv {
 		skipCleanup:         envBool("E2E_SKIP_CLEANUP", false),
 		insecureTLS:         envBool("E2E_INSECURE_SKIP_VERIFY", true),
 		directAddress:       strings.TrimSpace(os.Getenv("E2E_DIRECT_ADDRESS")),
-		expectInsecureLogs:  envBool("E2E_EXPECT_INSECURE_TOKEN_LOGS", true),
+		keycloakAddress:     strings.TrimSpace(envDefault("E2E_KEYCLOAK_DIRECT_ADDRESS", os.Getenv("E2E_DIRECT_ADDRESS"))),
+		expectInsecureLogs:  envBool("E2E_EXPECT_INSECURE_TOKEN_LOGS", false),
 	}
 }
 
@@ -197,6 +200,15 @@ func TestLoadE2EEnvUsesBaseURLForHTTPBinResourceBase(t *testing.T) {
 	}
 	if got.host != "httpbin.gcp.kube" {
 		t.Fatalf("host = %q, want httpbin.gcp.kube", got.host)
+	}
+}
+
+func TestLoadE2EEnvAllowsSeparateKeycloakAddress(t *testing.T) {
+	t.Setenv("E2E_DIRECT_ADDRESS", "192.0.2.10")
+	t.Setenv("E2E_KEYCLOAK_DIRECT_ADDRESS", "127.0.0.1")
+	got := loadE2EEnv()
+	if got.directAddress != "192.0.2.10" || got.keycloakAddress != "127.0.0.1" {
+		t.Fatalf("gateway=%q keycloak=%q, want separate gateway and issuer addresses", got.directAddress, got.keycloakAddress)
 	}
 }
 
@@ -304,8 +316,8 @@ env:
   GRPC_LOG_HEALTH_CHECKS: "false"
   TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
   TOKEN_EXCHANGE_BEARER_REALM: %q
-  # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
-  TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+  # Explicit synthetic-test opt-in only.
+  TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "%t"
 resources:
   requests:
     cpu: 50m
@@ -334,7 +346,7 @@ issuerProfiles:
       clientSecretSecretRef:
         name: %q
         key: client_secret
-`, imageValues(env.pluginImage), defaultBearerRealm,
+`, imageValues(env.pluginImage), defaultBearerRealm, env.expectInsecureLogs,
 		oauthSecretName, env.oauthClientID, env.oauthClientSecret, oauthSecretName,
 		defaultEndpoint, defaultBearerRealm, oauthSecretName, oauthSecretName)
 }
@@ -667,7 +679,7 @@ func deploymentReady(ctx context.Context, namespace, name string) bool {
 }
 
 func issuerProfileConfigured(ctx context.Context, name string) bool {
-	cm, err := env.kube.CoreV1().ConfigMaps(env.namespace).Get(ctx, issuerProfilesConfigMap, metav1.GetOptions{})
+	cm, err := env.kube.CoreV1().ConfigMaps(env.namespace).Get(ctx, envDefault("E2E_ISSUER_PROFILES_CONFIGMAP", issuerProfilesConfigMap), metav1.GetOptions{})
 	if err != nil {
 		return false
 	}
@@ -706,8 +718,19 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 }
 
 func httpClient() *http.Client {
-	transport, err := directhttp.NewTransport(env.directAddress, env.insecureTLS)
+	return httpClientForAddress(env.directAddress)
+}
+
+func httpClientForAddress(address string) *http.Client {
+	transport, err := directhttp.NewTransport(address, env.insecureTLS)
 	Expect(err).NotTo(HaveOccurred())
+	if path := os.Getenv("E2E_CA_CERT_FILE"); path != "" {
+		pem, err := os.ReadFile(path)
+		Expect(err).NotTo(HaveOccurred())
+		roots := x509.NewCertPool()
+		Expect(roots.AppendCertsFromPEM(pem)).To(BeTrue(), "E2E_CA_CERT_FILE must contain a PEM certificate")
+		transport.TLSClientConfig.RootCAs = roots
+	}
 	return &http.Client{Timeout: 10 * time.Second, Transport: transport}
 }
 

@@ -1,0 +1,8 @@
+<RaiseFault name="RF-DenyChallenge">
+  <FaultResponse><Set>
+    <StatusCode>{txe.status}</StatusCode>
+    <Headers><Header name="WWW-Authenticate">{txe.www_authenticate}</Header></Headers>
+    <Payload contentType="application/json">{txe.body}</Payload>
+  </Set></FaultResponse>
+  <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+</RaiseFault>

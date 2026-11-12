@@ -1,8 +1,9 @@
 [build]
-  cmd = "go build -v -gcflags=all='-N -l' ./cmd/..."
-  bin = "./ext-authz-router-service"
+  cmd = "go generate ./... && go build -o ./tmp/plugin -v -gcflags=all='-N -l' ./cmd/ext-authz-token-exchange-service"
+  bin = "./tmp/plugin"
   # full_bin = "dlv exec ./ext-authz-router-service --headless --continue --log --listen=:2345 --api-version=2 --accept-multiclient"
-  include_ext = ["go", "tpl", "tmpl", "html"]
+  include_ext = ["go", "proto", "tpl", "tmpl", "html"]
+  exclude_regex = [".*\\.pb\\.go$"]
   excludeDir = ["tmp", "vendor"]
 
 [log]

@@ -118,7 +118,13 @@ entries:
 			resp, body := requestInference(ctx, caseID, bearer)
 			g.Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
 			g.Expect(strings.TrimPrefix(tokenEndpointLogs(ctx), beforeIssuer)).To(ContainSubstring("scenario=red"))
-			g.Expect(strings.TrimPrefix(pluginLogs(ctx), beforeService)).To(ContainSubstring("subject_token=" + bearer))
+			logs := strings.TrimPrefix(pluginLogs(ctx), beforeService)
+			if env.expectInsecureLogs {
+				g.Expect(hasTokenDebugEvent(logs, bearer)).To(BeTrue())
+			} else {
+				g.Expect(logs).To(ContainSubstring("allow_exchange"))
+				g.Expect(logs).NotTo(ContainSubstring(bearer))
+			}
 		}, 45*time.Second, time.Second).Should(Succeed())
 		allowedCase := "allowed-confirmed-" + randomHexSuffix()
 		resp, body := requestInference(ctx, allowedCase, bearer)

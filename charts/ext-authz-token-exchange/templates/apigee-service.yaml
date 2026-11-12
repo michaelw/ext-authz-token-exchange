@@ -1,0 +1,63 @@
+{{- if .Values.apigee.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}-apigee
+  labels:
+{{ include "ext-authz-token-exchange.labels" . | indent 4 }}
+  {{- if .Values.apigee.service.private }}
+  annotations:
+    networking.gke.io/load-balancer-type: Internal
+  {{- end }}
+spec:
+  type: {{ .Values.apigee.service.type }}
+  {{- with .Values.apigee.service.address }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  selector:
+{{ include "ext-authz-token-exchange.selectorLabels" . | indent 4 }}
+  ports:
+    - name: apigee-grpc
+      port: 443
+      targetPort: apigee-grpc
+      protocol: TCP
+---
+{{- if .Values.apigee.psc.enabled }}
+{{- if not .Values.apigee.psc.consumerProjects }}
+{{- fail "apigee.psc.consumerProjects must allow the Apigee project" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}-apigee-private
+  annotations:
+    networking.gke.io/load-balancer-type: Internal
+spec:
+  type: LoadBalancer
+  selector:
+{{ include "ext-authz-token-exchange.selectorLabels" . | indent 4 }}
+  ports:
+    - name: apigee-grpc
+      port: 443
+      targetPort: apigee-grpc
+      protocol: TCP
+---
+apiVersion: networking.gke.io/v1
+kind: ServiceAttachment
+metadata:
+  name: {{ include "ext-authz-token-exchange.fullname" . }}-apigee
+spec:
+  connectionPreference: ACCEPT_MANUAL
+  natSubnets:
+    - {{ required "apigee.psc.natSubnet is required" .Values.apigee.psc.natSubnet | quote }}
+  consumerAllowList:
+    {{- range .Values.apigee.psc.consumerProjects }}
+    - project: {{ . | quote }}
+      connectionLimit: 10
+    {{- end }}
+  proxyProtocol: false
+  resourceRef:
+    kind: Service
+    name: {{ include "ext-authz-token-exchange.fullname" . }}-apigee-private
+{{- end }}
+{{- end }}

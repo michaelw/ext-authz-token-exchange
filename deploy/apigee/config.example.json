@@ -1,0 +1,33 @@
+{
+  "project": "example-apigee-project",
+  "context": "gke_example-apigee-project_us-central1_example-cluster",
+  "region": "us-central1",
+  "organization": "example-apigee-project",
+  "environment": "development",
+  "proxy": "txe-development",
+  "proxy_service_account": "callout-proxy@example-apigee-project.iam.gserviceaccount.com",
+  "synthetic_demo": false,
+  "manage_targets": true,
+  "callout": {
+    "host": "callout.example.test",
+    "port": 443,
+    "audience": "https://callout.example.test",
+    "certificate": ".devspace/callout-ca.pem",
+    "server_name": "callout.example.test"
+  },
+  "backend": {
+    "host": "backend.example.test",
+    "port": 443,
+    "certificate": ".devspace/backend-ca.pem",
+    "server_name": "backend.example.test"
+  },
+  "ingress": {
+    "url": "https://api.example.test",
+    "certificate": ".devspace/ingress-ca.pem"
+  },
+  "kubernetes": {
+    "namespace": "txe-development",
+    "release": "txe-development",
+    "values": ".devspace/apigee-plugin-values.json"
+  }
+}

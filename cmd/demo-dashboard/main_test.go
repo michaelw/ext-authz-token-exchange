@@ -67,6 +67,24 @@ func TestDashboardURL(t *testing.T) {
 	}
 }
 
+func TestKeycloakHTTPClientRoutesPrivateIssuerSeparately(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/realms/demo/certs" {
+			t.Errorf("unexpected issuer path %s", r.URL.Path)
+		}
+		w.WriteHeader(204)
+	}))
+	defer upstream.Close()
+	t.Setenv("DEMO_KEYCLOAK_BASE_URL", upstream.URL)
+	t.Setenv("DEMO_KEYCLOAK_ISSUER", "http://keycloak.synthetic.svc:8080/realms/demo")
+	t.Setenv("DEMO_KEYCLOAK_DIRECT_ADDRESS", "127.0.0.1")
+	response, err := keycloakHTTPClient(demo.Options{DirectAddress: "192.0.2.1"}).Get("http://keycloak.synthetic.svc:8080/realms/demo/certs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+}
+
 func TestDeploymentStatus(t *testing.T) {
 	tests := []struct {
 		name      string

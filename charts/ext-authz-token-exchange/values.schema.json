@@ -26,7 +26,7 @@
     },
     "gatewayProvider": {
       "type": "string",
-      "enum": ["local-istio", "gke-gateway"]
+      "enum": ["local-istio", "gke-gateway", "apigee"]
     },
     "extensionMode": {
       "type": "string",

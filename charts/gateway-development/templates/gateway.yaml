@@ -1,0 +1,39 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.name }}
+spec:
+  gatewayClassName: {{ .Values.gatewayClassName }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: txe-gateway-tls
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "txe-gateway-tls" }}
+{{- $certificate := genSelfSignedCert .Values.host nil (list .Values.host) 30 }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: txe-gateway-tls
+type: kubernetes.io/tls
+data:
+  {{- if $existing }}
+  tls.crt: {{ index $existing.data "tls.crt" }}
+  tls.key: {{ index $existing.data "tls.key" }}
+  {{- else }}
+  tls.crt: {{ $certificate.Cert | b64enc }}
+  tls.key: {{ $certificate.Key | b64enc }}
+  {{- end }}

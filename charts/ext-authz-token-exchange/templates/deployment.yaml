@@ -29,6 +29,9 @@
 {{- if and (eq (include "ext-authz-token-exchange.gkeCalloutEnabled" .) "true") .Values.gkeAuthz.callout.tls.enabled }}
 {{- $secretNames = append $secretNames .Values.gkeAuthz.callout.tls.secretName }}
 {{- end }}
+{{- if .Values.apigee.enabled }}
+{{- $secretNames = append $secretNames .Values.apigee.tlsSecret }}
+{{- end }}
 {{- if gt (len $secretNames) 0 }}
 {{- $_ := set $deploymentAnnotations "secret.reloader.stakater.com/reload" (join "," (uniq $secretNames)) }}
 {{- end }}
@@ -40,7 +43,7 @@
 {{- $_ := set $env "GRPC_TLS_KEY_FILE" (printf "%s/tls.key" (.Values.gkeAuthz.callout.tls.mountPath | default "/etc/ext-authz-token-exchange/tls")) }}
 {{- $_ := set $values "env" $env }}
 {{- $ports := deepCopy (.Values.ports | default dict) }}
-{{- $_ := set $ports "grpc-authz-tls" (dict "containerPort" (.Values.gkeAuthz.callout.tls.port | default 3000)) }}
+{{- $_ := set $ports "grpc-authz-tls" (dict "enabled" true "containerPort" (.Values.gkeAuthz.callout.tls.port | default 3000)) }}
 {{- $_ := set $values "ports" $ports }}
 {{- end }}
 {{- $volumeMounts := deepCopy (.Values.volumeMounts | default dict) }}
@@ -55,4 +58,18 @@
 {{- $_ := set $volumes "gke-authz-tls" (dict "secret" (dict "secretName" .Values.gkeAuthz.callout.tls.secretName)) }}
 {{- end }}
 {{- $_ := set $values "volumes" $volumes }}
+{{- if .Values.apigee.enabled }}
+{{- $env := $values.env }}
+{{- $_ := set $env "APIGEE_GRPC_PORT" (toString .Values.apigee.port) }}
+{{- $_ := set $env "APIGEE_TLS_CERT_FILE" "/etc/apigee-tls/tls.crt" }}
+{{- $_ := set $env "APIGEE_TLS_KEY_FILE" "/etc/apigee-tls/tls.key" }}
+{{- $_ := set $env "APIGEE_AUTH_AUDIENCE" (required "apigee.audience is required" .Values.apigee.audience) }}
+{{- $_ := set $env "APIGEE_AUTH_ALLOWED_SUBJECTS" (required "apigee.allowedSubjects is required" .Values.apigee.allowedSubjects) }}
+{{- $_ := set $env "APIGEE_INSPECT_MESSAGES" (toString .Values.apigee.inspectMessages) }}
+{{- $ports := deepCopy (.Values.ports | default dict) }}
+{{- $_ := set $ports "apigee-grpc" (dict "containerPort" .Values.apigee.port) }}
+{{- $_ := set $values "ports" $ports }}
+{{- $_ := set $volumeMounts "apigee-tls" (dict "name" "apigee-tls" "mountPath" "/etc/apigee-tls" "readOnly" true) }}
+{{- $_ := set $volumes "apigee-tls" (dict "secret" (dict "secretName" (required "apigee.tlsSecret is required" .Values.apigee.tlsSecret))) }}
+{{- end }}
 {{- include "common.itsumi.deployments.tpl" (merge (dict "Values" $values) (omit . "Values")) }}

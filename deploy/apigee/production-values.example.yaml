@@ -1,0 +1,53 @@
+# Operator-owned example. Replace identities, registry, Secret names and issuer.
+gatewayProvider: apigee
+fullnameOverride: txe-production
+image:
+  repository: registry.example.test/security/token-exchange
+  tag: reviewed-image-tag
+apigee:
+  enabled: true
+  tlsSecret: operator-callout-tls
+  audience: https://callout.example.test
+  allowedSubjects: "123456789012345678901"
+  inspectMessages: false
+  service:
+    type: ClusterIP
+env:
+  TOKEN_EXCHANGE_LOG_FORMAT: json
+  TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "false"
+  TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "false"
+  GRPC_LOG_HEALTH_CHECKS: "false"
+  METRICS_ENABLED: "true"
+issuerProfiles:
+  profiles:
+    - name: production-issuer
+      tokenEndpoint: https://issuer.example.test/oauth/token
+      clientIDSecretRef: {name: operator-oauth-client, key: client_id}
+      clientSecretSecretRef: {name: operator-oauth-client, key: client_secret}
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 65
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+minReadySeconds: 10
+strategy:
+  type: RollingUpdate
+  rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+terminationGracePeriodSeconds: 45
+lifecycle:
+  preStop:
+    exec:
+      command: [/app/ext-authz-token-exchange-service, pre-stop-sleep, 30s]
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/instance: txe-production

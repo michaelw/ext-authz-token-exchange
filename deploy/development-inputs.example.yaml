@@ -1,0 +1,42 @@
+# Copy settings to the ignored development-inputs.yaml, not into tracked files.
+# These are illustrative resources, not a deployable environment.
+project: example-cluster-project
+apigee_project: example-apigee-project
+region: us-central1
+context: gke_example-cluster-project_us-central1_example-cluster
+registry: us-central1-docker.pkg.dev/example-cluster-project/development
+apigee_config:
+  organization: example-apigee-project
+  environment: development
+  proxy: txe-example
+  proxy_service_account: proxy@example-apigee-project.iam.gserviceaccount.com
+  proxy_subject: "123456789012345678901"
+  synthetic_demo: true
+  # Supplied private connectivity remains owned by its original operator.
+  private_active: true
+  callout:
+    host: 10.10.0.10
+    port: 443
+    server_name: callout.example.test
+    audience: https://callout.example.test
+    certificate: .devspace/tls/callout.crt
+  backend:
+    host: 10.10.0.11
+    port: 8080
+    server_name: backend.example.test
+    certificate: .devspace/tls/backend.crt
+  ingress:
+    url: https://apigee.example.test
+    address: 192.0.2.10
+    certificate: .devspace/tls/ingress-ca.crt
+  kubernetes:
+    namespace: txe-example
+    release: txe-example
+    values: .devspace/apigee-plugin-values.json
+  demo:
+    system_namespace: txe-example-system
+    backend_namespace: txe-example-demo-yellow
+    callout_cert: .devspace/tls/callout.crt
+    callout_key: .devspace/tls/callout.key
+    backend_cert: .devspace/tls/backend.crt
+    backend_key: .devspace/tls/backend.key

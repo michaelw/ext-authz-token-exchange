@@ -121,7 +121,9 @@ ext_proc
 {{- end }}
 
 {{- define "ext-authz-token-exchange.otelEnvironment" -}}
-{{- if eq (include "ext-authz-token-exchange.gatewayProvider" .) "gke-gateway" -}}
+{{- if eq (include "ext-authz-token-exchange.gatewayProvider" .) "apigee" -}}
+apigee
+{{- else if eq (include "ext-authz-token-exchange.gatewayProvider" .) "gke-gateway" -}}
 gke
 {{- else -}}
 local
