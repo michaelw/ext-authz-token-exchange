@@ -266,3 +266,43 @@ and mocked prerequisite planning. These checks require no GCP credentials.
 Actual GitHub PR execution, bare-machine reconstruction, and live native
 Istio/GKE Gateway regression runs remain separate gates. No changes were
 committed or pushed, and no release was published.
+
+## Readiness Milestone
+
+Validated on 2026-11-12 against the existing private PSC environment. This
+milestone did not provision another project or paid Apigee organization.
+
+- Eight shared gateway cases, eight Keycloak cases, nine smoke cases, and five
+  failure cases passed with the updated plugin. Missing and invalid gateway
+  credentials were rejected over verified TLS. Failure tests restored fixtures.
+- Privacy checks parsed 63 JSON events and 12 decisions. Sensitive canaries were
+  absent. JSON stayed enabled; inspection and token logging were disabled.
+- The live trace probe found one correlated plugin decision and the same trace
+  ID at the private backend. It did not change export settings. Recorded-span
+  tests verify transport-parent priority, payload fallback, sampling, and local
+  RPC/evaluation/token-endpoint parentage. Native Apigee span export and policy
+  span parentage were not established by this environment.
+- Live ingress, callout, and backend certificates were renewed. Fresh verified
+  handshakes confirmed replacement fingerprints and expiry on November 19 at
+  18:07 UTC. The final proxy revision was 6. Protected rollback material remains
+  local and ignored.
+- Two earlier renewal attempts failed and rolled back. They exposed trust-anchor
+  import and ingress-propagation issues. Independent anchors now use separate
+  aliases. Renewal waits for the served fingerprint before retiring overlap
+  trust. During the final attempt's monitored window, 517 of 518 fresh-connection
+  requests succeeded; one connection failed. This is not zero-downtime proof.
+  The single-replica environment has no production availability guarantee.
+- Local checks passed 71 Python tests, 27 focused Helm assertions, lint, Go
+  coverage/race/vet, and container builds. Challenge fuzzing completed 32,680
+  executions. Tests cover accepted challenge values and fail-closed behavior
+  across all adapters, including boundary sizes and quoted commas.
+
+Validated plugin image digest:
+`sha256:b7c5ba0eb5e2e2d95973887b82afc3d8d98e4d735f54a459146f9e7c4e0050c3`.
+Later provenance-only rebuilds can have a different image-index digest.
+
+[PR 318](https://github.com/michaelw/ext-authz-token-exchange/pull/318) contains
+current CI results and subsequent deployment evidence. CI runs kind smoke tests,
+not GCP provisioning or live Apigee tests. Existing paid-organization integration,
+production scaling, issuer-specific renewal, and native tracing export require
+operator acceptance in the target environment. No release was published.
