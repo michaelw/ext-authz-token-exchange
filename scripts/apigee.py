@@ -226,9 +226,14 @@ def configure_targets(client, c, state):
             save_state(c, state)
         elif store not in state["truststores"]:
             raise RuntimeError("refusing to adopt an existing truststore: " + store)
-        if client.request("GET", resource + "/aliases/ca", missing=True) is None:
-            data, kind = multipart("certFile", "ca.pem", cert)
-            client.request("POST", resource + "/aliases?alias=ca&format=keycertfile", data, kind)
+        certificates = re.findall(br"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", cert, re.S)
+        # Independent trust anchors need independent aliases, not a synthetic
+        # certificate chain headed by the old leaf certificate.
+        for index, certificate in enumerate(certificates or [cert]):
+            alias = "ca" if len(certificates) <= 1 else "ca-" + str(index)
+            if client.request("GET", resource + "/aliases/" + alias, missing=True) is None:
+                data, kind = multipart("certFile", "ca.pem", certificate)
+                client.request("POST", resource + "/aliases?alias=" + alias + "&format=keycertfile", data, kind)
         name = target_name(c, role)
         resource = env + "/targetservers/" + name
         existing = client.request("GET", resource, missing=True)

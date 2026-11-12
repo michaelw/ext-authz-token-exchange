@@ -49,6 +49,18 @@ class ApigeeToolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             apigee.smoke(c)
 
+    def test_overlap_trust_imports_each_anchor_as_an_independent_alias(self):
+        certificates = [b"-----BEGIN CERTIFICATE-----\nT0xE\n-----END CERTIFICATE-----", b"-----BEGIN CERTIFICATE-----\nTkVX\n-----END CERTIFICATE-----"]
+        self.certificate.write_bytes(b"\n".join(certificates))
+        client = unittest.mock.Mock()
+        client.request.return_value = None
+        with patch.object(apigee, "save_state"):
+            apigee.configure_targets(client, self.config, {"targets":[], "truststores":[], "references":[]})
+        uploads = [call.args[2] for call in client.request.call_args_list if call.args[0] == "POST" and "/aliases?" in call.args[1]]
+        self.assertEqual(len(uploads), 4)
+        self.assertTrue(all(data.count(b"-----BEGIN CERTIFICATE-----") == 1 for data in uploads))
+        self.assertTrue(all(any(cert in upload for upload in uploads) for cert in certificates))
+
     def test_bundle_is_deterministic_and_fail_closed(self):
         first = apigee.bundle(self.config)
         self.assertEqual(first, apigee.bundle(self.config))

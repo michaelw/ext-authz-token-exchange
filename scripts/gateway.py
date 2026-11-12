@@ -474,6 +474,11 @@ def dispatch(action, args):
         if action == "renew-certificates":
             import apigee_certificates
             apigee_certificates.run(a, args)
+        elif action == "test-tracing":
+            if args:
+                raise ValueError("test-tracing takes no arguments")
+            import apigee_tracing_probe
+            apigee_tracing_probe.run(a)
         elif action == "test-e2e":
             run([sys.executable, ROOT / "scripts/apigee_keycloak_test.py", "--config", c["apigee_config"], "--confirm", a["project"], *args])
             run([sys.executable, ROOT / "scripts/apigee_e2e.py", "--config", c["apigee_config"], "--confirm", a["project"]])
@@ -520,7 +525,7 @@ def dispatch(action, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["setup", "value", "dependency", "image-tag", "preflight", "fixtures", "proxy", "rollback", "smoke", "test-e2e", "dashboard", "diagnostics", "baseline", "repeatability", "cleanup-check", "undeploy-proxy", "delete-proxy-resources", "destroy-infrastructure", "destroy-environment", "test-logging", "log-format", "inspect-on", "inspect-off", "debug", "renew-certificates"])
+    parser.add_argument("command", choices=["setup", "value", "dependency", "image-tag", "preflight", "fixtures", "proxy", "rollback", "smoke", "test-e2e", "dashboard", "diagnostics", "baseline", "repeatability", "cleanup-check", "undeploy-proxy", "delete-proxy-resources", "destroy-infrastructure", "destroy-environment", "test-logging", "test-tracing", "log-format", "inspect-on", "inspect-off", "debug", "renew-certificates"])
     parser.add_argument("--gateway", choices=["gke-gateway", "apigee"])
     parser.add_argument("--infrastructure", choices=["provision", "existing"])
     parser.add_argument("--apigee", choices=["evaluation", "existing"])

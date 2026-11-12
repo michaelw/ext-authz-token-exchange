@@ -433,6 +433,10 @@ func prepareSmokeInfrastructure(ctx context.Context, env []string, tempDir strin
 	if err := runStep(ctx, env, "yq", "-i", `(.hooks[] | select(.name == "docker-mac-net-connect-hook")).disabled = true`, filepath.Join(source, "devspace.yaml")); err != nil {
 		return "", err
 	}
+	// Nested DevSpace commands resolve defaults again without the caller's flags.
+	if err := runStep(ctx, env, "yq", "-i", `.vars.HOST_INTEGRATION.value = "false"`, filepath.Join(source, "devspace.yaml")); err != nil {
+		return "", err
+	}
 	if err := runStep(ctx, env, "yq", "-i", `(.profiles[] | select(.name == "local-network") | .merge.deployments.istiod.helm.values.pilot.env.ENABLE_GATEWAY_API_INFERENCE_EXTENSION) = true`, filepath.Join(source, "devspace.yaml")); err != nil {
 		return "", err
 	}

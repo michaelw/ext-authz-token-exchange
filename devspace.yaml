@@ -985,6 +985,9 @@ commands:
   test-logging:
     command: python3 scripts/gateway.py test-logging "$@"
 
+  test-tracing:
+    command: python3 scripts/gateway.py test-tracing "$@"
+
   debug:
     command: python3 scripts/gateway.py debug "$@"
 

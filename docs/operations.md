@@ -162,6 +162,11 @@ to emit its own spans; forwarding headers cannot create those spans for it.
 Do not capture Authorization, token forms, cookies, or client secrets in spans.
 Review collector redaction/sampling policy before production use.
 
+For owned development, `devspace run test-tracing` checks a synthetic request's
+trace ID on the plugin and backend legs without changing any exporter. Its report
+states the distinction between header continuity, recorded local span parentage,
+and actual Apigee-native span export. Do not treat the first as proof of the latter.
+
 ## Monitoring and Recovery
 
 Alert on served certificate expiry and renewal failures; wrong certificate/SAN;
