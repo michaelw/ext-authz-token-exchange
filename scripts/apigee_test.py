@@ -146,7 +146,7 @@ class ApigeeToolTests(unittest.TestCase):
             update.assert_not_called()
 
     def test_developer_binary_build_uses_the_shared_container(self):
-        with patch.object(apigee, "ROOT", self.root):
+        with patch.object(apigee, "ROOT", self.root), patch.dict(apigee.os.environ, {"TXE_TOOLCHAIN_ACTIVE": "false"}):
             with patch.object(apigee.platform, "system", return_value="Darwin"):
                 with patch.object(apigee.platform, "machine", return_value="arm64"):
                     with patch.object(apigee.subprocess, "run") as command:
@@ -157,6 +157,17 @@ class ApigeeToolTests(unittest.TestCase):
         self.assertIn("GOARCH=arm64", args)
         self.assertIn("go generate ./...", " ".join(args))
         self.assertEqual(args[-6:], ["go", "test", "-c", "-o", "/workspace/.devspace/bin/e2e.test", "./test/e2e"])
+
+    def test_developer_binary_reuses_the_running_toolchain(self):
+        with patch.object(apigee, "ROOT", self.root), patch.dict(apigee.os.environ, {"TXE_TOOLCHAIN_ACTIVE": "true"}), \
+             patch.object(apigee.subprocess, "run") as command:
+            destination = (self.root / ".devspace/bin/e2e.test").resolve()
+            self.assertEqual(apigee.build_go_binary("./test/e2e", destination, test=True), destination)
+        args = command.call_args.args[0]
+        self.assertNotIn("docker", args)
+        self.assertIn("go generate ./...", " ".join(args))
+        self.assertEqual(args[-6:], ["go", "test", "-c", "-o", str(destination), "./test/e2e"])
+        self.assertEqual(command.call_args.kwargs["cwd"], self.root)
 
     def test_target_identity_changes_with_address_or_certificate(self):
         original = apigee.target_name(self.config, "callout")

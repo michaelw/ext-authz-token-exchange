@@ -67,7 +67,7 @@ def inspect_live(c):
 
 def wait_ingress(c, certificate):
     expected = subprocess.check_output(["openssl", "x509", "-in", str(certificate), "-noout", "-fingerprint", "-sha256"], text=True).strip()
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + 1800
     hostname = urllib.parse.urlparse(c["ingress"]["url"]).hostname
     while True:
         try:

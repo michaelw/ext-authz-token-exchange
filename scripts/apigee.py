@@ -39,6 +39,10 @@ def build_go_binary(package, output, test=False):
     cache = ROOT / ".devspace/toolchain-cache"
     cache.mkdir(parents=True, exist_ok=True)
     args = ["go", "test", "-c"] if test else ["go", "build"]
+    if os.environ.get("TXE_TOOLCHAIN_ACTIVE") == "true":
+        subprocess.run(["sh", "-c", 'go generate ./... && exec "$@"', "sh", *args, "-o", str(output), package],
+                       cwd=ROOT, env=dict(os.environ, GOOS=system, GOARCH=arch), check=True)
+        return output
     args += ["-o", "/workspace/" + relative.as_posix(), package]
     subprocess.run(["docker", "run", "--rm", "--pull=never", "--user", str(os.getuid()) + ":" + str(os.getgid()), "-e", "HOME=/tmp", "-e", "GOOS=" + system, "-e", "GOARCH=" + arch,
                     "-v", str(ROOT) + ":/workspace", "-v", str(cache) + ":/go-cache", "-w", "/workspace", os.environ.get("TXE_TOOLCHAIN_IMAGE", "txe-toolchain:local"),

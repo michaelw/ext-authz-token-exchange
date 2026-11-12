@@ -96,6 +96,22 @@ class RenewalTests(unittest.TestCase):
         self.assertEqual(self.exercise(), str(self.ca))
         self.assertEqual(self.state["stage"], "ready")
 
+    def test_ingress_waits_for_the_served_replacement(self):
+        c = {"ingress": {"url": "https://gateway.example", "address": "192.0.2.1", "certificate": "overlap.pem"}}
+        with patch.object(renewal.subprocess, "check_output", return_value="new fingerprint\n"), \
+             patch.object(renewal, "inspect_endpoint", side_effect=[["old fingerprint"], ["new fingerprint"]]), \
+             patch.object(renewal.time, "sleep") as wait:
+            renewal.wait_ingress(c, "replacement.pem")
+        wait.assert_called_once()
+
+    def test_ingress_timeout_does_not_report_readiness(self):
+        c = {"ingress": {"url": "https://gateway.example", "address": "192.0.2.1", "certificate": "overlap.pem"}}
+        with patch.object(renewal.subprocess, "check_output", return_value="new fingerprint\n"), \
+             patch.object(renewal, "inspect_endpoint", return_value=["old fingerprint"]), \
+             patch.object(renewal.time, "monotonic", side_effect=[0, 10000]):
+            with self.assertRaisesRegex(RuntimeError, "has not propagated"):
+                renewal.wait_ingress(c, "replacement.pem")
+
     def test_missing_namespace_ownership_stops_before_deployment_mutation(self):
         c = {"kubernetes":{"namespace":"plugin"}, "demo":{"system_namespace":"system", "backend_namespace":"backend"}}
         with patch.object(renewal.apigee, "kubectl", return_value=json.dumps({"metadata":{}})):

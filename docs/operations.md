@@ -103,6 +103,7 @@ trust is active, replace serving certificates second, probe every path third,
 and remove old trust only after the rollback/connection-drain window. Update
 Apigee trust references without adopting shared stores. The helper uses owned,
 content-addressed stores and references; old stores remain until explicit cleanup.
+Import independent trust anchors as separate aliases, not as one leaf chain.
 See [Apigee references](https://docs.cloud.google.com/apigee/docs/api-platform/system-administration/working-references).
 
 Optional cert-manager installations can use `renewBefore` and
@@ -130,6 +131,9 @@ certificate ownership. It checks live certificates, stages short-lived leaves
 under a protected local development CA, adds overlap trust, rolls changed
 services, updates the owned ingress, probes, and retires old trust. It retains
 protected old material and a resumable journal under ignored `.devspace/`.
+Client-ingress propagation can take up to 30 minutes. The command keeps overlap
+trust while it waits for the new served fingerprint. See
+[Google's self-managed certificate guidance](https://docs.cloud.google.com/load-balancing/docs/ssl-certificates/self-managed-certs).
 On failure it restores overlap trust before old serving files and configuration.
 Inspect any failed restoration before further updates. It never renews supplied
 production certificates. Run separately from deployment or development processes.

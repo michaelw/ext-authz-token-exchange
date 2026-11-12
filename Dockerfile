@@ -73,6 +73,7 @@ ENV GOCACHE=/go-cache/build
 ENV GOMODCACHE=/go-cache/mod
 ENV GOPATH=/go-cache
 ENV CGO_ENABLED=0
+ENV TXE_TOOLCHAIN_ACTIVE=true
 RUN curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${TARGETARCH}" \
     && chmod 0755 /usr/local/bin/yq
 RUN curl -fsSL -o /usr/local/bin/devspace "https://github.com/devspace-sh/devspace/releases/download/${DEVSPACE_VERSION}/devspace-linux-${TARGETARCH}" \

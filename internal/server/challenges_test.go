@@ -5,10 +5,50 @@ import (
 	"strings"
 	"testing"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 )
+
+func TestValidChallengesSurviveAllAdapters(t *testing.T) {
+	for _, values := range [][]string{
+		{`Basic realm="a,b", charset="UTF-8"`, `Bearer realm="escaped\"quote"`, "Custom\tvalue"},
+		{strings.Repeat("a", 4095), strings.Repeat("b", 4095)},
+		strings.Split(strings.TrimSuffix(strings.Repeat("Bearer,", 32), ","), ","),
+	} {
+		cfg := config.RuntimeConfig{}
+		store := policy.NewStaticStore(loggingIndex())
+		ex := &loggingExchanger{err: &exchange.OAuthError{StatusCode: 401, WWWAuthenticate: values}}
+		authz, err := NewAuthzGRPCServer(cfg, store, ex).Check(context.Background(), loggingCheckRequestWithHeaders("GET", "orders.example.com", "/api/orders", map[string]string{"authorization": "Bearer subject"}))
+		if err != nil || authz.GetDeniedResponse().GetStatus().GetCode() != 401 {
+			t.Fatal("ext-authz changed a valid denial")
+		}
+		proc := NewExtProcGRPCServer(cfg, store, ex).evaluateRequestHeaders(context.Background(), extProcHeaderRequest(map[string]string{":method": "GET", ":authority": "orders.example.com", ":path": "/api/orders", "authorization": "Bearer subject"}))
+		if proc.GetImmediateResponse().GetStatus().GetCode() != 401 {
+			t.Fatal("ext-proc changed a valid denial")
+		}
+		for _, headers := range [][]*corev3.HeaderValueOption{authz.GetDeniedResponse().GetHeaders(), proc.GetImmediateResponse().GetHeaders().GetSetHeaders()} {
+			var got []string
+			for _, option := range headers {
+				if h := option.GetHeader(); strings.EqualFold(h.GetKey(), "WWW-Authenticate") {
+					value := h.GetValue()
+					if h.GetRawValue() != nil {
+						value = string(h.GetRawValue())
+					}
+					got = append(got, value)
+				}
+			}
+			if len(got) != len(values) || strings.Join(got, "\x00") != strings.Join(values, "\x00") {
+				t.Fatal("Envoy challenge values or order changed")
+			}
+		}
+		response, err := NewApigeeGRPCServer(cfg, store, ex, false).ProcessMessage(context.Background(), loggingApigeeRequest("/api/orders", "Bearer subject"))
+		if err != nil || response.GetAdditionalFlowVariables()["txe.status"].GetInt32() != 401 || response.GetAdditionalFlowVariables()["txe.www_authenticate"].GetString_() != strings.Join(values, ", ") {
+			t.Fatal("Apigee changed valid joined challenges")
+		}
+	}
+}
 
 func TestChallengeValidation(t *testing.T) {
 	valid := []string{`Basic realm="a,b", charset="UTF-8"`, `Bearer realm="escaped\"quote"`, "Custom\tvalue\x80"}

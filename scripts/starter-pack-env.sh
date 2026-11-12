@@ -144,6 +144,12 @@ get_from_cache() {
       ;;
   esac
 
+  if [ -z "$value" ] && [ "$key" = GATEWAY_NAMESPACE ]; then
+    case "$(current_context)" in
+      gke_*) ;;
+      *) value=istio-ingress ;;
+    esac
+  fi
   printf '%s\n' "${value:-$default}"
 }
 
