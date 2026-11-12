@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -17,50 +21,35 @@ jobs:
     name: Pre-commit
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.x"
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchain
       - name: Run pre-commit hooks
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pre-commit==4.5.1
-          pre-commit run --all-files --show-diff-on-failure
-
-  test:
-    name: Go tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Run tests
-        run: go test ./...
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+          -e PRE_COMMIT_HOME=/tmp/pre-commit
+          -v "$PWD:/workspace" -v "$HOME/.cache/pre-commit:/tmp/pre-commit"
+          -w /workspace txe-toolchain:ci pre-commit run --all-files --show-diff-on-failure
 
   coverage:
     name: Go coverage
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Generate coverage
-        run: go test -coverprofile=coverage.out ./...
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchain
+      - name: Generate bindings and run unit tests once with coverage
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/workspace" -v "$HOME/.cache/txe-go:/go-cache" -w /workspace \
+            txe-toolchain:ci sh -c 'go generate ./... && go test -count=1 -coverprofile=coverage.out ./...'
+      - name: Test dashboard token refresh
+        run: docker run --rm -v "$PWD:/workspace:ro" -w /workspace txe-toolchain:ci node --test cmd/demo-dashboard/token_refresh_test.cjs
+      - name: Test Apigee developer tooling without cloud credentials
+        run: docker run --rm -v "$PWD:/workspace:ro" -w /workspace txe-toolchain:ci python3 -B -m unittest discover -s scripts -p '*_test.py'
+      - name: Verify reproducible protobuf generation
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/workspace" -v "$HOME/.cache/txe-go:/go-cache" -w /workspace \
+            txe-toolchain:ci sh -c 'sha256sum internal/apigeepb/*.pb.go > /tmp/proto.sha256 && go generate ./... && sha256sum -c /tmp/proto.sha256'
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
@@ -69,7 +58,6 @@ jobs:
           flags: go
           name: go-coverage
           fail_ci_if_error: true
-
       - name: Upload coverage artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -77,64 +65,100 @@ jobs:
           path: coverage.out
           if-no-files-found: error
 
+  test:
+    name: Go tests
+    runs-on: ubuntu-latest
+    needs: coverage
+    if: always()
+    steps:
+      - name: Preserve the required test status without repeating tests
+        env:
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+        run: test "$COVERAGE_RESULT" = success
+
+  race:
+    name: Go race checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchain
+      - name: Run race detector
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e CGO_ENABLED=1
+          -v "$PWD:/workspace" -v "$HOME/.cache/txe-go:/go-cache" -w /workspace
+          txe-toolchain:ci sh -c 'go generate ./... && go test -count=1 -race ./...'
+
+  static:
+    name: Go static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchain
+      - name: Vet and lint workflow syntax
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+          -v "$PWD:/workspace" -v "$HOME/.cache/txe-go:/go-cache" -w /workspace
+          txe-toolchain:ci sh -c 'go generate ./... && go vet ./... && go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7'
+
   build:
     name: Go build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchain
+      - name: Build production plugin without publishing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          go-version-file: go.mod
-
-      - name: Build commands
-        run: go build ./cmd/...
+          context: .
+          target: prod
+          push: false
+          load: true
+          tags: txe-plugin:ci
+          cache-from: |
+            type=gha,scope=images-main
+            type=gha,scope=images-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+          cache-to: type=gha,mode=max,scope=images-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+      - name: Build fixture with the same builder and compilation stage
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: fake-token-endpoint
+          push: false
+          load: true
+          tags: txe-fake-token-endpoint:ci
 
   helm:
     name: Helm validation
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Helm
-        uses: ./.github/actions/setup-helm
-
-      - name: Build chart dependencies
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchain
+      - name: Lint charts, assert rendered resource fields, and retain gateway checks
         run: |
-          helm dependency build charts/ext-authz-token-exchange
-          helm dependency build charts/keycloak
-
-      - name: Lint production chart
-        run: helm lint charts/ext-authz-token-exchange
-
-      - name: Lint e2e chart
-        run: helm lint charts/ext-authz-token-exchange-e2e
-
-      - name: Lint Keycloak chart
-        run: helm lint charts/keycloak
-
-      - name: Render manifests
-        run: |
-          mkdir -p artifacts/manifests
-          helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
-            --namespace ext-authz-token-exchange \
-            > artifacts/manifests/ext-authz-token-exchange.yaml
-          helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e \
-            --namespace ext-authz-token-exchange-e2e \
-            > artifacts/manifests/ext-authz-token-exchange-e2e.yaml
-
-      - name: Verify GKE platform and app renders
-        run: ./scripts/verify-gke-deployment-model.sh
-
-      - name: Verify Istio ext_proc filter render
-        run: ./scripts/verify-ext-proc-filter.sh
-
-      - name: Upload rendered manifests
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/workspace" -w /workspace txe-toolchain:ci bash -euc '
+              helm dependency build charts/ext-authz-token-exchange
+              helm dependency build charts/keycloak
+              terraform fmt -check -recursive infra/apigee
+              mkdir -p /tmp/terraform-provider-cache
+              export TF_PLUGIN_CACHE_DIR=/tmp/terraform-provider-cache
+              for module in prerequisites ingress; do
+                terraform -chdir=infra/apigee/$module init -backend=false -input=false -lockfile=readonly
+                terraform -chdir=infra/apigee/$module validate -no-color
+                terraform -chdir=infra/apigee/$module test -no-color
+              done
+              helm lint charts/ext-authz-token-exchange charts/ext-authz-token-exchange-e2e charts/keycloak charts/gateway-development
+              mkdir -p artifacts/manifests
+              helm unittest --strict -t JUnit -o artifacts/helm-unittest.xml charts/ext-authz-token-exchange charts/ext-authz-token-exchange-e2e charts/keycloak charts/gateway-development
+              helm template ext-authz-token-exchange charts/ext-authz-token-exchange --namespace ext-authz-token-exchange > artifacts/manifests/ext-authz-token-exchange.yaml
+              helm template ext-authz-token-exchange-e2e charts/ext-authz-token-exchange-e2e --namespace ext-authz-token-exchange-e2e > artifacts/manifests/ext-authz-token-exchange-e2e.yaml
+              bash scripts/verify-gke-deployment-model.sh
+              bash scripts/verify-ext-proc-filter.sh
+            '
+      - name: Upload rendered manifests and chart test report
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rendered-manifests
-          path: artifacts/manifests
+          path: artifacts/
           if-no-files-found: error

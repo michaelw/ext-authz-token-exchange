@@ -108,7 +108,7 @@ func fetchKeycloakSubjectTokenWithClient(ctx context.Context, clientID, clientSe
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := httpClient().Do(req)
+	resp, err := httpClientForAddress(env.keycloakAddress).Do(req)
 	Expect(err).NotTo(HaveOccurred())
 	defer resp.Body.Close()
 
@@ -165,7 +165,7 @@ func verifyKeycloakJWT(ctx context.Context, g Gomega, auth string) map[string]an
 func keycloakVerificationKey(ctx context.Context, g Gomega, kid string) *rsa.PublicKey {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, env.keycloakBaseURL+"/realms/"+env.keycloakRealm+"/protocol/openid-connect/certs", nil)
 	g.Expect(err).NotTo(HaveOccurred())
-	resp, err := httpClient().Do(req)
+	resp, err := httpClientForAddress(env.keycloakAddress).Do(req)
 	g.Expect(err).NotTo(HaveOccurred())
 	defer resp.Body.Close()
 	g.Expect(resp.StatusCode).To(Equal(http.StatusOK))

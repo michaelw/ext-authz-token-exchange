@@ -23,6 +23,7 @@ import (
 	envoy_service_ext_proc_v3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/exchange"
+	"github.com/michaelw/ext-authz-token-exchange/internal/logging"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
 	"github.com/michaelw/ext-authz-token-exchange/internal/server"
 	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
@@ -36,9 +37,10 @@ import (
 const healthCheckMethod = "/grpc.health.v1.Health/Check"
 
 func main() {
+	logging.ConfigureStandard(os.Getenv("TOKEN_EXCHANGE_LOG_FORMAT"))
 	if duration, ok, err := preStopSleepDuration(os.Args); ok {
 		if err != nil {
-			log.Fatalf("invalid pre-stop sleep configuration: %v", err)
+			log.Fatal("invalid pre-stop sleep configuration: failure_class=configuration")
 		}
 		log.Printf("Sleeping %s for Kubernetes preStop drain", duration)
 		time.Sleep(duration)
@@ -50,46 +52,54 @@ func main() {
 
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
-		log.Fatalf("invalid configuration: %v", err)
+		log.Fatal("invalid configuration: check runtime settings; TOKEN_EXCHANGE_LOG_FORMAT must be text or json")
 	}
+	apigeeCfg, err := config.LoadApigeeFromEnv()
+	if err != nil {
+		log.Fatal("invalid Apigee configuration: failure_class=configuration")
+	}
+	server.LogStartup(cfg, apigeeCfg.InspectMessages)
 	if cfg.NeedsIssuerSecretResolution() {
 		client, err := inClusterKubernetesClient()
 		if err != nil {
-			log.Fatalf("failed to create Kubernetes client for issuer profile Secret resolution: %v", err)
+			log.Fatal("failed to create Kubernetes client for issuer profile Secret resolution: failure_class=configuration")
 		}
 		cfg, err = config.ResolveIssuerProfileSecrets(ctx, client, podNamespaceFromEnv(), cfg)
 		if err != nil {
-			log.Fatalf("invalid issuer profile Secret configuration: %v", err)
+			log.Fatal("invalid issuer profile Secret configuration: failure_class=configuration")
 		}
 	}
 
 	shutdownTelemetry, err := telemetry.Init(ctx)
 	if err != nil {
-		log.Fatalf("failed to initialize telemetry: %v", err)
+		log.Fatal("failed to initialize telemetry: failure_class=configuration")
 	}
 	defer func() {
 		if err := shutdownTelemetry(context.Background()); err != nil {
-			log.Printf("failed to shut down telemetry: %v", err)
+			log.Print("failed to shut down telemetry: failure_class=internal")
 		}
 	}()
 
 	policyStore, err := policy.NewConfigMapStore(cfg)
 	if err != nil {
-		log.Fatalf("failed to create ConfigMap policy store: %v", err)
+		log.Fatal("failed to create ConfigMap policy store: failure_class=configuration")
 	}
 	if err := policyStore.Start(ctx); err != nil {
-		log.Fatalf("failed to start ConfigMap policy store: %v", err)
+		log.Fatal("failed to start ConfigMap policy store: failure_class=internal")
 	}
 	if cfg.MetricsEnabled {
 		go serveMetrics(ctx, cfg)
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
+	if apigeeCfg.Port != "" {
+		go func() { errCh <- serveApigee(ctx, apigeeCfg, cfg, policyStore) }()
+	}
 	go func() {
 		errCh <- serveGRPC(ctx, grpcPortFromEnv(), nil, cfg, policyStore)
 	}()
 	if tlsCfg, ok, err := grpcTLSConfigFromEnv(); err != nil {
-		log.Fatalf("invalid TLS gRPC configuration: %v", err)
+		log.Fatal("invalid TLS gRPC configuration: failure_class=configuration")
 	} else if ok {
 		go func() {
 			errCh <- serveGRPC(ctx, grpcTLSPortFromEnv(), tlsCfg, cfg, policyStore)
@@ -97,7 +107,7 @@ func main() {
 	}
 
 	if err := <-errCh; err != nil {
-		log.Fatalf("gRPC server failed: %v", err)
+		log.Fatal("gRPC server failed: failure_class=internal")
 	}
 }
 
@@ -171,7 +181,7 @@ func loggingOptions(cfg config.RuntimeConfig) server.LoggingOptions {
 		LogEnabled:        cfg.LogHealthChecks,
 		SummarizeResponse: summarizeHealthResponse,
 	}
-	return server.LoggingOptions{Methods: methods}
+	return server.LoggingOptions{Format: cfg.LogFormat, Methods: methods}
 }
 
 func grpcStatsHandler() stats.Handler {
@@ -250,11 +260,11 @@ func serveMetrics(ctx context.Context, cfg config.RuntimeConfig) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Printf("metrics server shutdown failed: %v", err)
+			log.Print("metrics server shutdown failed: failure_class=internal")
 		}
 	}()
 	log.Printf("Starting Prometheus metrics server on :%s%s", cfg.MetricsPort, cfg.MetricsPath)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("metrics server failed: %v", err)
+		log.Print("metrics server failed: failure_class=internal")
 	}
 }

@@ -212,6 +212,10 @@ func (s *server) scenarios(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"baseURL":          baseURL,
+		"gatewayKind":      envDefault("DEMO_GATEWAY_KIND", "envoy"),
+		"directAddress":    s.opts.DirectAddress,
+		"insecureTLS":      s.opts.InsecureTLS,
+		"caCertFile":       s.opts.CACertFile,
 		"baseURLHost":      baseURLHost,
 		"namespacePrefix":  s.opts.WithDefaults().NamespacePrefix,
 		"systemNamespace":  s.opts.WithDefaults().SystemNamespace,
@@ -357,6 +361,15 @@ func (s *server) runAll(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), demo.DefaultRequestTimeout+time.Second)
+		if strings.HasPrefix(sc.Request.Token.Prefill, "keycloak-") {
+			token, err := s.tokenForScenario(ctx, sc)
+			if err != nil {
+				cancel()
+				writeError(w, http.StatusBadGateway, err)
+				return
+			}
+			sc.Request.Token = demo.WithBearer(token.Bearer)
+		}
 		result, _ := demo.Run(ctx, s.opts, sc)
 		cancel()
 		if !result.Passed {
@@ -411,6 +424,9 @@ func (s *server) logs(w http.ResponseWriter, r *http.Request) {
 	case "issuer":
 		namespace = opts.SystemNamespace
 		deployment = s.issuer.Deployment
+		if r.URL.Query().Get("issuer") == "local-keycloak" {
+			deployment = "keycloak"
+		}
 	default:
 		writeError(w, http.StatusNotFound, fmt.Errorf("unknown log component %q", component))
 		return
@@ -575,7 +591,7 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := demo.NewHTTPClient(opts.WithDefaults()).Do(req)
+	resp, err := keycloakHTTPClient(opts.WithDefaults()).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: %w", baseURL, err)
 	}
@@ -604,6 +620,35 @@ func fetchKeycloakDemoSubjectToken(parent context.Context, opts demo.Options, cr
 		return "", fmt.Errorf("fetch Keycloak demo subject token from %s: response did not contain a bearer access token", baseURL)
 	}
 	return parsed.AccessToken, nil
+}
+
+type issuerForwardTransport struct {
+	next            http.RoundTripper
+	issuer, forward *url.URL
+}
+
+func (t issuerForwardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme == t.issuer.Scheme && req.URL.Host == t.issuer.Host {
+		copy := req.Clone(req.Context())
+		address := *req.URL
+		address.Scheme, address.Host = t.forward.Scheme, t.forward.Host
+		copy.URL, copy.Host = &address, req.URL.Host
+		return t.next.RoundTrip(copy)
+	}
+	return t.next.RoundTrip(req)
+}
+
+func keycloakHTTPClient(opts demo.Options) *http.Client {
+	if address, ok := os.LookupEnv("DEMO_KEYCLOAK_DIRECT_ADDRESS"); ok {
+		opts.DirectAddress = address
+	}
+	client := demo.NewHTTPClient(opts)
+	issuer, issuerErr := url.Parse(os.Getenv("DEMO_KEYCLOAK_ISSUER"))
+	forward, forwardErr := url.Parse(os.Getenv("DEMO_KEYCLOAK_BASE_URL"))
+	if issuerErr == nil && forwardErr == nil && issuer.Host != "" && forward.Host != "" {
+		client.Transport = issuerForwardTransport{next: client.Transport, issuer: issuer, forward: forward}
+	}
+	return client
 }
 
 func unsignedKeycloakSubjectToken() string {
@@ -722,7 +767,7 @@ func verifyDashboardTokenWithOptions(parent context.Context, raw string, opts de
 
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	ctx = oidc.ClientContext(ctx, demo.NewHTTPClient(opts.WithDefaults()))
+	ctx = oidc.ClientContext(ctx, keycloakHTTPClient(opts.WithDefaults()))
 	provider, err := oidc.NewProvider(ctx, claims.Issuer)
 	if err != nil {
 		resp.Status = "verification unavailable"

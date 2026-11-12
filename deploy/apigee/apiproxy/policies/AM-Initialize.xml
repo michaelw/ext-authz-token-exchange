@@ -1,0 +1,10 @@
+<AssignMessage name="AM-Initialize">
+  <AssignVariable><Name>txe.input.host</Name><Ref>request.header.host</Ref></AssignVariable>
+  <AssignVariable><Name>txe.input.path</Name><Ref>request.uri</Ref></AssignVariable>
+  <AssignVariable><Name>txe.input.scheme</Name><Ref>client.scheme</Ref></AssignVariable>
+  <AssignVariable><Name>txe.decision</Name><Value>invalid</Value></AssignVariable>
+  <AssignVariable><Name>txe.status</Name><Value>500</Value></AssignVariable>
+  <AssignVariable><Name>txe.body</Name><Value>{"error":"server_error"}</Value></AssignVariable>
+  <AssignVariable><Name>txe.www_authenticate</Name><Value/></AssignVariable>
+  <IgnoreUnresolvedVariables>false</IgnoreUnresolvedVariables>
+</AssignMessage>

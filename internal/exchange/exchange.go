@@ -4,6 +4,7 @@ package exchange
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,6 +108,39 @@ type OAuthError struct {
 	Message          string
 	Body             string
 	WWWAuthenticate  []string
+	Diagnostics      Diagnostics
+}
+
+// Diagnostics contains no upstream text, locations, bodies, or credentials.
+type Diagnostics struct {
+	Code           string
+	FailureClass   string
+	UpstreamStatus int
+	OAuthError     string
+}
+
+// SafeDiagnostics rejects arbitrary strings even from alternate exchangers.
+func (e *OAuthError) SafeDiagnostics() Diagnostics {
+	d := e.Diagnostics
+	switch d.Code {
+	case diagInvalidTokenEndpoint, diagCreateExchangeRequest, diagExchangeRequestFailed, diagReadExchangeResponseFailed, diagUnknownIssuerProfile,
+		diagRecognizedOAuthError, diagNonOAuthBadRequest, diagNonOAuthUnauthorized, diagForbiddenFailure, diagOtherNonOKFailure,
+		diagMalformedSuccessJSON, diagMissingAccessToken, diagNonBearerTokenType, diagWrongIssuedTokenType:
+	default:
+		d.Code = ""
+	}
+	switch d.FailureClass {
+	case "configuration", "timeout", "connection", "tls", "context_canceled", "invalid_response", "oauth_rejection", "upstream_http":
+	default:
+		d.FailureClass = ""
+	}
+	if !recognizedOAuthError(d.OAuthError) {
+		d.OAuthError = ""
+	}
+	if d.UpstreamStatus < 100 || d.UpstreamStatus > 599 {
+		d.UpstreamStatus = 0
+	}
+	return d
 }
 
 // NewClient returns a token exchange client.
@@ -211,14 +245,22 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 	if err != nil {
 		errorKind := exchangeRequestErrorKind(ctx, err)
 		recordExchangeMetrics(started, endpointHost, metricResultFailure, errorKind, metricStatusNone)
-		return Result{}, internalError("token exchange request failed", diagExchangeRequestFailed)
+		failure := internalError("token exchange request failed", diagExchangeRequestFailed)
+		failure.Diagnostics.FailureClass = transportFailureClass(ctx, err)
+		return Result{}, failure
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		recordExchangeMetrics(started, endpointHost, metricResultFailure, "read_response", statusClass(resp.StatusCode))
-		return Result{}, internalError("failed to read token exchange response", diagReadExchangeResponseFailed)
+		failure := internalError("failed to read token exchange response", diagReadExchangeResponseFailed)
+		failure.Diagnostics.FailureClass = "invalid_response"
+		if kind := exchangeRequestErrorKind(ctx, err); kind == "timeout" || kind == "context_canceled" {
+			failure.Diagnostics.FailureClass = kind
+		}
+		failure.Diagnostics.UpstreamStatus = resp.StatusCode
+		return Result{}, failure
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -249,7 +291,15 @@ func (c *Client) Exchange(ctx context.Context, entry policy.Entry, subjectToken 
 	return Result{AccessToken: success.AccessToken}, nil
 }
 
-func (c *Client) mapErrorResponse(resp *http.Response, body []byte) *OAuthError {
+func (c *Client) mapErrorResponse(resp *http.Response, body []byte) (failure *OAuthError) {
+	defer func() {
+		failure.Diagnostics.UpstreamStatus = resp.StatusCode
+		failure.Diagnostics.FailureClass = "upstream_http"
+		if recognizedOAuthError(failure.Error) && failure.Diagnostics.Code == diagRecognizedOAuthError {
+			failure.Diagnostics.OAuthError = failure.Error
+			failure.Diagnostics.FailureClass = "oauth_rejection"
+		}
+	}()
 	// RFC6749 Section 5.2 defines token endpoint error responses.
 	// https://www.rfc-editor.org/rfc/rfc6749#section-5.2
 	//
@@ -264,6 +314,7 @@ func (c *Client) mapErrorResponse(resp *http.Response, body []byte) *OAuthError 
 	wwwAuthenticate := resp.Header.Values("WWW-Authenticate")
 	if valid && c.cfg.ErrorPassthrough {
 		return &OAuthError{
+			Diagnostics:      Diagnostics{Code: diagRecognizedOAuthError},
 			StatusCode:       downstreamStatus(resp.StatusCode),
 			Error:            parsed.Error,
 			ErrorDescription: parsed.ErrorDescription,
@@ -340,6 +391,7 @@ func sanitizedOAuthError(status int, errorCode, description, diagnosticCode stri
 		description = fmt.Sprintf("%s (%s)", description, diagnosticCode)
 	}
 	return &OAuthError{
+		Diagnostics:      Diagnostics{Code: diagnosticCode},
 		StatusCode:       status,
 		Error:            errorCode,
 		ErrorDescription: description,
@@ -349,6 +401,7 @@ func sanitizedOAuthError(status int, errorCode, description, diagnosticCode stri
 
 func invalidTokenResponse(diagnosticCode string) *OAuthError {
 	return &OAuthError{
+		Diagnostics:      Diagnostics{Code: diagnosticCode, FailureClass: "invalid_response", UpstreamStatus: http.StatusOK},
 		StatusCode:       http.StatusInternalServerError,
 		Error:            "invalid_request",
 		ErrorDescription: fmt.Sprintf("internal server error (%s)", diagnosticCode),
@@ -357,10 +410,27 @@ func invalidTokenResponse(diagnosticCode string) *OAuthError {
 
 func internalError(message, diagnosticCode string) *OAuthError {
 	return &OAuthError{
-		StatusCode: http.StatusInternalServerError,
-		Error:      "server_error",
-		Message:    fmt.Sprintf("%s (%s)", message, diagnosticCode),
+		Diagnostics: Diagnostics{Code: diagnosticCode, FailureClass: "configuration"},
+		StatusCode:  http.StatusInternalServerError,
+		Error:       "server_error",
+		Message:     fmt.Sprintf("%s (%s)", message, diagnosticCode),
 	}
+}
+
+func transportFailureClass(ctx context.Context, err error) string {
+	kind := exchangeRequestErrorKind(ctx, err)
+	if kind == "timeout" || kind == "context_canceled" {
+		return kind
+	}
+	var verification *tls.CertificateVerificationError
+	var unknown x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	var record tls.RecordHeaderError
+	if errors.As(err, &verification) || errors.As(err, &unknown) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &record) {
+		return "tls"
+	}
+	return "connection"
 }
 
 func durationDefault(value, fallback time.Duration) time.Duration {

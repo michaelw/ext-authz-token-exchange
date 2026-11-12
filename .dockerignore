@@ -25,6 +25,11 @@ Thumbs.db
 Dockerfile*
 docker-compose*.yml
 /.devspace/
+**/.terraform/
+**/*.tfstate*
+/.playwright-cli/
+/output/
+/internal/apigeepb/*.pb.go
 devspace.yaml
 tmp/
 

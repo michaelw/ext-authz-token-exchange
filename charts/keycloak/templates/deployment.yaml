@@ -20,7 +20,7 @@
 ) }}
 {{- $_ := set $values "resources" .Values.keycloak.resources }}
 {{- $_ := set $values "deploymentAnnotations" (dict "reloader.stakater.com/auto" "true") }}
-{{- $_ := set $values "podAnnotations" (dict "ext-authz-token-exchange.magneticflux.net/realm-revision" (.Release.Revision | toString)) }}
+{{- $_ := set $values "podAnnotations" (dict "ext-authz-token-exchange.magneticflux.net/realm-revision" (include (print $.Template.BasePath "/realm-configmap.yaml") . | sha256sum)) }}
 {{- $_ := set $values "volumeMounts" (dict "realm-import" (dict "mountPath" "/opt/keycloak/data/import" "readOnly" true)) }}
 {{- $_ := set $values "volumes" (dict "realm-import" (dict "configMap" (dict "name" (include "keycloak.realmConfigMapName" .)))) }}
 {{- include "common.itsumi.deployments.tpl" (merge (dict "Values" $values) (omit . "Values")) }}

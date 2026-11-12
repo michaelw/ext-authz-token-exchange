@@ -215,7 +215,7 @@ func (s *ConfigMapStore) upsertNamespace(ctx context.Context, obj any) {
 		return
 	}
 	if err := s.addNamespace(ctx, ns.Name); err != nil {
-		log.Printf("failed to watch policy ConfigMaps in namespace %s: %v", ns.Name, err)
+		log.Printf("failed to watch policy ConfigMaps in namespace %s: failure_class=watch_unavailable", ns.Name)
 	}
 }
 

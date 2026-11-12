@@ -1,0 +1,7 @@
+<TargetEndpoint name="default">
+  <HTTPTargetConnection>
+    <LoadBalancer><Server name="txe-backend"/></LoadBalancer>
+    <Path>/</Path>
+    <Properties><Property name="request.streaming.enabled">true</Property></Properties>
+  </HTTPTargetConnection>
+</TargetEndpoint>

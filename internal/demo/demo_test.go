@@ -1,9 +1,36 @@
 package demo
 
 import (
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestHTTPClientUsesExplicitCA(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	defer upstream.Close()
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstream.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewHTTPClient(Options{}).Get(upstream.URL); err == nil {
+		t.Fatal("untrusted certificate was accepted")
+	}
+	opts := Options{CACertFile: path}
+	response, err := NewHTTPClient(opts).Get(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	curl := Curl(opts, Scenario{Request: Request{Path: "/"}})
+	if !strings.Contains(curl, "--cacert") || strings.Contains(curl, "-sk") {
+		t.Fatalf("curl must validate the configured CA: %s", curl)
+	}
+}
 
 func TestScenarioTemplateRendersDemoContext(t *testing.T) {
 	opts := Options{NamespacePrefix: "team", BaseURL: "https://demo.example.test"}

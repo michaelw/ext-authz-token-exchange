@@ -14,6 +14,7 @@ import (
 	envoy_type_v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"github.com/michaelw/ext-authz-token-exchange/internal/config"
 	"github.com/michaelw/ext-authz-token-exchange/internal/policy"
+	"github.com/michaelw/ext-authz-token-exchange/internal/telemetry"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -23,12 +24,12 @@ const ExtProcProcessMethod = "/envoy.service.ext_proc.v3.ExternalProcessor/Proce
 type ExtProcGRPCServer struct {
 	envoy_service_ext_proc_v3.UnimplementedExternalProcessorServer
 
-	authz *AuthzGRPCServer
+	evaluator *requestEvaluator
 }
 
 // NewExtProcGRPCServer creates a gRPC external processing server.
 func NewExtProcGRPCServer(cfg config.RuntimeConfig, store policy.Store, exchanger tokenExchanger) *ExtProcGRPCServer {
-	return &ExtProcGRPCServer{authz: NewAuthzGRPCServer(cfg, store, exchanger)}
+	return &ExtProcGRPCServer{evaluator: newRequestEvaluator(cfg, store, exchanger)}
 }
 
 // ExtProcLoggingMethods returns gRPC logging rules for the external processor.
@@ -49,9 +50,9 @@ func summarizeExtProcRequest(message any) string {
 	}
 	values := extProcHeaders(req.GetRequestHeaders().GetHeaders())
 	return fmt.Sprintf(" | %s | %s://%s%s",
-		logField(extProcMethod(req, values)),
-		logField(extProcScheme(req, values)),
-		logField(extProcHost(req, values)),
+		safeHTTPMethod(extProcMethod(req, values)),
+		"[redacted]",
+		"[redacted]",
 		logPath(extProcPath(req, values)))
 }
 
@@ -88,6 +89,7 @@ func (s *ExtProcGRPCServer) Process(stream envoy_service_ext_proc_v3.ExternalPro
 			resp = s.evaluateRequestHeaders(stream.Context(), req)
 		}
 		if resp == nil {
+			logProtocolWarning(s.evaluator.cfg.LogFormat, "ext_proc", "missing_processing_message", "WARN: missing ext-proc processing message")
 			continue
 		}
 		if err := stream.Send(resp); err != nil {
@@ -98,7 +100,8 @@ func (s *ExtProcGRPCServer) Process(stream envoy_service_ext_proc_v3.ExternalPro
 
 func (s *ExtProcGRPCServer) evaluateRequestHeaders(ctx context.Context, req *envoy_service_ext_proc_v3.ProcessingRequest) *envoy_service_ext_proc_v3.ProcessingResponse {
 	values := extProcHeaders(req.GetRequestHeaders().GetHeaders())
-	evaluation := s.authz.evaluateHTTPWithMetrics(ctx, httpEvaluationRequest{
+	evaluation := s.evaluator.evaluateHTTPWithMetrics(telemetry.RequestContext(ctx, values), httpEvaluationRequest{
+		Adapter: "ext_proc",
 		Method:  extProcMethod(req, values),
 		Scheme:  extProcScheme(req, values),
 		Host:    extProcHost(req, values),

@@ -1,0 +1,18 @@
+suite: Apigee does not install another gateway processor
+templates: [templates/*.yaml]
+set:
+  gatewayProvider: apigee
+  apigee.enabled: true
+  apigee.audience: https://callout.example.test
+  apigee.allowedSubjects: "123456789"
+  apigee.tlsSecret: callout-tls
+tests:
+  - it: excludes gateway routing and Envoy authorization resources from every rendered document
+    documentSelector: {path: kind, matchMany: true, skipEmptyTemplates: true}
+    asserts:
+      - notEqual: {path: kind, value: Gateway}
+      - notEqual: {path: kind, value: HTTPRoute}
+      - notEqual: {path: kind, value: ReferenceGrant}
+      - notEqual: {path: kind, value: EnvoyFilter}
+      - notEqual: {path: kind, value: AuthorizationPolicy}
+      - notEqual: {path: kind, value: GCPTrafficExtension}

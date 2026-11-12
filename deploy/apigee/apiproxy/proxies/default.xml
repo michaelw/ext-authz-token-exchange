@@ -1,0 +1,21 @@
+<ProxyEndpoint name="default">
+  <DefaultFaultRule name="SanitizeUnexpectedFailure">
+    <Step><Name>AM-ServerError</Name><Condition>txe.decision = null or txe.decision != "deny"</Condition></Step>
+    <AlwaysEnforce>true</AlwaysEnforce>
+  </DefaultFaultRule>
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step><Name>AM-Initialize</Name></Step>
+      <Step><Name>EC-TokenExchange</Name></Step>
+      <Step><Name>RF-DenyChallenge</Name><Condition>txe.decision = "deny" and txe.www_authenticate != ""</Condition></Step>
+      <Step><Name>RF-Deny</Name><Condition>txe.decision = "deny"</Condition></Step>
+      <Step><Name>RF-InvalidDecision</Name><Condition>txe.decision != "allow"</Condition></Step>
+    </Request>
+    <Response/>
+  </PreFlow>
+  <HTTPProxyConnection>
+    <BasePath>/</BasePath>
+    <Properties><Property name="request.streaming.enabled">true</Property></Properties>
+  </HTTPProxyConnection>
+  <RouteRule name="default"><TargetEndpoint>default</TargetEndpoint></RouteRule>
+</ProxyEndpoint>

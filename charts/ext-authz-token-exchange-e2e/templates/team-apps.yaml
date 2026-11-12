@@ -1,4 +1,10 @@
 {{- if .Values.teamApp.enabled }}
+{{- if and .Values.teamApp.exposure.pscNatSubnet (ne (len .Values.teams) 1) }}
+{{- fail "Use one demo team per PSC NAT subnet" }}
+{{- end }}
+{{- if and .Values.teamApp.exposure.pscNatSubnet (not .Values.teamApp.exposure.pscConsumerProjects) }}
+{{- fail "teamApp.exposure.pscConsumerProjects is required" }}
+{{- end }}
 {{- range $team := .Values.teams }}
 {{- $namespace := include "ext-authz-token-exchange-e2e.teamNamespace" (dict "Values" $.Values "color" $team.color "namespace" $team.namespace) }}
 apiVersion: apps/v1
@@ -23,6 +29,17 @@ spec:
       containers:
         - name: httpbin
           image: {{ $.Values.teamApp.image | quote }}
+          {{- if $.Values.teamApp.tlsSecret }}
+          env:
+            - name: HTTPS_CERT_FILE
+              value: /etc/httpbin-tls/tls.crt
+            - name: HTTPS_KEY_FILE
+              value: /etc/httpbin-tls/tls.key
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/httpbin-tls
+              readOnly: true
+          {{- end }}
           imagePullPolicy: {{ $.Values.teamApp.imagePullPolicy | quote }}
           ports:
             - name: http
@@ -31,26 +48,84 @@ spec:
             httpGet:
               path: /status/204
               port: http
+              {{- if $.Values.teamApp.tlsSecret }}
+              scheme: HTTPS
+              {{- end }}
           resources:
 {{ toYaml $.Values.teamApp.resources | indent 12 }}
+      {{- if $.Values.teamApp.tlsSecret }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ $.Values.teamApp.tlsSecret | quote }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ $.Values.teamApp.name | quote }}
   namespace: {{ $namespace | quote }}
+  {{- if $.Values.teamApp.exposure.private }}
+  annotations:
+    networking.gke.io/load-balancer-type: Internal
+  {{- end }}
   labels:
 {{ include "ext-authz-token-exchange-e2e.labels" $ | indent 4 }}
     app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
 spec:
+  type: {{ $.Values.teamApp.exposure.type }}
+  {{- with $.Values.teamApp.exposure.address }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
   selector:
     app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
   ports:
     - name: http
       port: {{ $.Values.teamApp.port }}
       targetPort: http
-      appProtocol: http
+      appProtocol: {{ ternary "https" "http" (not (empty $.Values.teamApp.tlsSecret)) }}
 ---
+{{- if $.Values.teamApp.exposure.pscNatSubnet }}
+{{- if not $.Values.teamApp.tlsSecret }}
+{{- fail "httpbin PSC requires teamApp.tlsSecret" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.teamApp.name }}-private
+  namespace: {{ $namespace | quote }}
+  annotations:
+    networking.gke.io/load-balancer-type: Internal
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: {{ $.Values.teamApp.name | quote }}
+  ports:
+    - name: https
+      port: {{ $.Values.teamApp.port }}
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: networking.gke.io/v1
+kind: ServiceAttachment
+metadata:
+  name: {{ $.Values.teamApp.name | quote }}
+  namespace: {{ $namespace | quote }}
+spec:
+  connectionPreference: ACCEPT_MANUAL
+  natSubnets: [{{ $.Values.teamApp.exposure.pscNatSubnet | quote }}]
+  consumerAllowList:
+    {{- range $.Values.teamApp.exposure.pscConsumerProjects }}
+    - project: {{ . | quote }}
+      connectionLimit: 10
+    {{- end }}
+  proxyProtocol: false
+  resourceRef:
+    kind: Service
+    name: {{ printf "%s-private" $.Values.teamApp.name | quote }}
+---
+{{- end }}
+{{- if ne $.Values.gatewayProvider "apigee" }}
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
@@ -68,5 +143,6 @@ spec:
       kind: Service
       name: {{ $.Values.teamApp.name | quote }}
 ---
+{{- end }}
 {{- end }}
 {{- end }}

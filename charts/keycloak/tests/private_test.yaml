@@ -1,0 +1,33 @@
+suite: private Keycloak issuer
+templates: [templates/*.yaml]
+set:
+  fullnameOverride: keycloak
+  gateway.enabled: false
+  namespace: unit-system
+  pluginNamespace: unit-plugin
+tests:
+  - it: keeps the issuer Service cluster-internal
+    template: templates/service.yaml
+    asserts:
+      - isKind: {of: Service}
+      - equal: {path: spec.type, value: ClusterIP}
+      - contains:
+          path: spec.ports
+          content: {name: http, port: 8080, targetPort: http}
+          any: true
+  - it: excludes all external gateway and Envoy processing resources
+    documentSelector: {path: kind, matchMany: true, skipEmptyTemplates: true}
+    asserts:
+      - notEqual: {path: kind, value: Gateway}
+      - notEqual: {path: kind, value: HTTPRoute}
+      - notEqual: {path: kind, value: ReferenceGrant}
+      - notEqual: {path: kind, value: EnvoyFilter}
+      - notEqual: {path: kind, value: AuthorizationPolicy}
+      - notEqual: {path: kind, value: GCPTrafficExtension}
+  - it: can still explicitly render a gateway route for other development modes
+    template: templates/httproute.yaml
+    set:
+      gateway.enabled: true
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: HTTPRoute}

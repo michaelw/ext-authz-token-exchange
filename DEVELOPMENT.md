@@ -1,12 +1,20 @@
 # Development Guide
 
+For existing paid gateways and operational settings, see [Operations](docs/operations.md).
+For switching gateway integrations, see [Gateway Migration](docs/gateway-migration.md).
+
 This guide is the repository-root quickstart for building, testing, and running
 `ext-authz-token-exchange`. For deeper background, see `docs/development.md`,
 `docs/devspace.md`, `docs/implementation.md`, and `test/e2e/README.md`.
 
 ## Prerequisites
 
-- Go matching the version declared in `go.mod`.
+For one-command GKE Gateway or managed Apigee setup, see
+[Gateway Development Setup](docs/gateway-setup.md). The root DevSpace commands
+select the provider and retain its non-secret settings. The older standalone
+Apigee configuration is a compatibility import of the root workflow.
+
+- Docker for the shared pinned Go/protobuf/Helm toolchain; host Go is optional.
 - DevSpace for Kubernetes development workflows.
 - Docker or another container builder supported by DevSpace.
 - A local Kubernetes cluster when running DevSpace deployments or e2e tests.
@@ -16,6 +24,34 @@ This guide is the repository-root quickstart for building, testing, and running
 Do not install project-specific tools globally unless the repository
 documentation explicitly asks for it. Prefer the DevSpace setup commands and
 containerized development flow.
+
+## Shared Toolchain
+
+Build once, then run checks from a shell in the same tooling image as CI:
+
+```sh
+docker build --target toolchain -t txe-toolchain:local .
+mkdir -p .devspace/toolchain-cache
+docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD:/workspace" -v "$PWD/.devspace/toolchain-cache:/go-cache" \
+  -w /workspace txe-toolchain:local bash
+```
+
+The Go/Helm commands below run in that shell or the DevSpace development
+container. Go 1.27.3, protoc 35.0, protoc-gen-go 1.36.12,
+protoc-gen-go-grpc 1.6.0, Helm 4.1.1, and helm-unittest 1.2.1 are pinned in the
+Dockerfile. Runtime images do not contain those tools. Kind smoke checks use the
+same Go/protobuf toolchain with their existing Helm 3.18.3 and Kubernetes pins.
+The shared toolchain also pins DevSpace 6.3.15 and Terraform 1.15.5 for offline
+profile and infrastructure validation. The development image installs Air and
+Delve at build time. `setup` now selects the environment; the former tool-install
+command remains available as `setup-tools` inside development containers.
+
+Only the upstream protobuf schema and handwritten generation directives are
+tracked. `go generate ./...` works without generated bindings; run it before Go
+checks. Production Docker builds and DevSpace iteration do this automatically.
+Host-only development requires those same tools on a caller-controlled PATH;
+do not install project-specific generators globally on the host.
 
 ## Repository Layout
 
@@ -36,6 +72,7 @@ From the repository root:
 
 ```sh
 go mod download
+go generate ./...
 go build ./cmd/...
 ```
 
@@ -121,6 +158,11 @@ devspace run coverage
   endpoint.
 
 ## End-to-End Testing
+
+Managed Apigee uses a separate, opt-in workflow. See
+[Apigee development](docs/apigee.md) for trial provisioning, ExternalCallout,
+synthetic fixtures, private connectivity, and externally managed clusters.
+Normal tests and CI do not provision GCP resources.
 
 The e2e suite expects starter-pack httpbin/routes and this repo's deployed demo
 stack. For the common `with-test` flow:
@@ -233,6 +275,21 @@ update the release PR, changelog, `.release-please-manifest.json`, and the
 production chart `version` and `appVersion`. The service images and chart share
 one version for now; split plugin and chart versions only after chart-only
 releases need their own compatibility policy.
+
+The next feature release targets 0.7.0. Review the
+[release notes and logging migration checklist](docs/release-0.7.0.md) before
+merging its release PR. Preserve implementation/release commit separation.
+Release Please is configured to use pre-1.0 minor increments for features and
+breaking changes, rather than promoting these changes to 1.0 or a patch release.
+
+PR CI runs the Go unit suite once with coverage, plus separate race/static checks.
+The required `Go tests` status reflects that coverage execution without repeating
+tests. The required `Go build` status now builds production/fixture containers,
+not a duplicate standalone Go build. Helm/Python checks execute directly in the
+shared tooling image. PR cancellation applies only to superseded PR runs.
+Docker cache writes are scoped to PR/main; release builds do not read PR scopes.
+When reviewing CI changes, check required status names against branch protection.
+Do not remove the existing smoke matrix or introduce GCP/Apigee credentials in CI.
 
 Merge commits are disabled for this repository. Use squash or rebase merges so
 Release Please sees one conventional commit message for each change. GitHub

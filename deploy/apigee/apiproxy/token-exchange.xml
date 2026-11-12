@@ -1,0 +1,6 @@
+<APIProxy name="token-exchange">
+  <DisplayName>Token Exchange</DisplayName>
+  <Description>ExternalCallout adapter for the shared token exchange engine</Description>
+  <ProxyEndpoints><ProxyEndpoint>default</ProxyEndpoint></ProxyEndpoints>
+  <TargetEndpoints><TargetEndpoint>default</TargetEndpoint></TargetEndpoints>
+</APIProxy>

@@ -1,0 +1,60 @@
+suite: private Apigee callout publishing
+templates:
+  - templates/apigee-service.yaml
+set:
+  fullnameOverride: txe
+  gatewayProvider: apigee
+  apigee.enabled: true
+  apigee.psc.enabled: true
+  apigee.psc.natSubnet: callout-nat
+  apigee.psc.consumerProjects: [example-apigee-tenant]
+tests:
+  - it: publishes only the private callout Service through an allow-listed attachment
+    documentSelector: {path: kind, value: ServiceAttachment}
+    asserts:
+      - equal:
+          path: apiVersion
+          value: networking.gke.io/v1
+      - equal:
+          path: spec
+          value:
+            connectionPreference: ACCEPT_MANUAL
+            natSubnets: [callout-nat]
+            consumerAllowList: [{project: example-apigee-tenant, connectionLimit: 10}]
+            proxyProtocol: false
+            resourceRef: {kind: Service, name: txe-apigee-private}
+  - it: uses an internal TCP load balancer with the dedicated TLS port
+    documentSelector: {path: metadata.name, value: txe-apigee-private}
+    asserts:
+      - isKind: {of: Service}
+      - equal:
+          path: metadata.annotations["networking.gke.io/load-balancer-type"]
+          value: Internal
+      - equal: {path: spec.type, value: LoadBalancer}
+      - equal:
+          path: spec.ports
+          value: [{name: apigee-grpc, port: 443, targetPort: apigee-grpc, protocol: TCP}]
+  - it: emits only the ordinary listener Service when PSC is off
+    set:
+      apigee.psc.enabled: false
+    asserts:
+      - hasDocuments: {count: 1}
+      - isKind: {of: Service}
+      - equal: {path: spec.type, value: ClusterIP}
+  - it: emits no callout resources when Apigee is disabled
+    set:
+      apigee.enabled: false
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: rejects PSC without a consumer allow-list
+    set:
+      apigee.psc.consumerProjects: []
+    asserts:
+      - failedTemplate:
+          errorMessage: apigee.psc.consumerProjects must allow the Apigee project
+  - it: rejects PSC without a NAT subnet
+    set:
+      apigee.psc.natSubnet: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: apigee.psc.natSubnet is required

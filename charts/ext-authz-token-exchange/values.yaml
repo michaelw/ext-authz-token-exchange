@@ -7,7 +7,31 @@ image:
 
 gatewayProvider: local-istio
 
+apigee:
+  enabled: false
+  port: 3003
+  tlsSecret: ""
+  audience: ""
+  allowedSubjects: ""
+  inspectMessages: false
+  service:
+    # ClusterIP for externally managed ingress, or LoadBalancer for the demo.
+    type: ClusterIP
+    address: ""
+    private: false
+  psc:
+    enabled: false
+    natSubnet: ""
+    consumerProjects: []
+
 extensionMode: ext_authz
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
 
 deployments:
   default:
@@ -207,6 +231,8 @@ env:
   # TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
   # TOKEN_EXCHANGE_GRANT_TYPE: urn:ietf:params:oauth:grant-type:token-exchange
   # TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "false"
+  # JSON is the default; explicitly select text for legacy log consumers.
+  # TOKEN_EXCHANGE_LOG_FORMAT: "json"
   # TOKEN_EXCHANGE_REQUIRE_ISSUED_TOKEN_TYPE: "true"
   # TOKEN_EXCHANGE_SUBJECT_TOKEN_TYPE: urn:ietf:params:oauth:token-type:access_token
   # OTEL_TRACES_EXPORTER: otlp

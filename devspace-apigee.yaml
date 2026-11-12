@@ -1,0 +1,15 @@
+# Compatibility entry point. Provider selection and deployments live in devspace.yaml.
+version: v2beta1
+imports:
+  - path: ./devspace.yaml
+commands:
+  dashboard:
+    command: devspace run demo-dashboard "$@"
+  e2e:
+    command: devspace run test-e2e "$@"
+  deploy-service:
+    command: devspace run-pipeline plugin-only
+  deploy-demo:
+    command: devspace deploy
+  deploy-proxy:
+    command: python3 scripts/gateway.py proxy "$@"

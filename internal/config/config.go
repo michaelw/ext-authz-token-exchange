@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/michaelw/ext-authz-token-exchange/internal/logging"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -49,6 +50,7 @@ type RuntimeConfig struct {
 	AllowHTTPTokenEndpoint             bool
 	ErrorPassthrough                   bool
 	InsecureLogTokens                  bool
+	LogFormat                          string
 	LogHealthChecks                    bool
 	RequireIssuedTokenType             bool
 	ExpectedIssuedTokenType            string
@@ -101,6 +103,7 @@ func LoadFromEnv() (RuntimeConfig, error) {
 		AllowHTTPTokenEndpoint:             envBool("TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT", false),
 		ErrorPassthrough:                   envBool("TOKEN_EXCHANGE_ERROR_PASSTHROUGH", false),
 		InsecureLogTokens:                  envBool("TOKEN_EXCHANGE_INSECURE_LOG_TOKENS", false),
+		LogFormat:                          envDefault("TOKEN_EXCHANGE_LOG_FORMAT", logging.DefaultFormat),
 		LogHealthChecks:                    envBool("GRPC_LOG_HEALTH_CHECKS", true),
 		RequireIssuedTokenType:             envBool("TOKEN_EXCHANGE_REQUIRE_ISSUED_TOKEN_TYPE", true),
 		ExpectedIssuedTokenType:            envDefault("TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE", DefaultIssuedTokenType),
@@ -131,6 +134,9 @@ func LoadFromEnv() (RuntimeConfig, error) {
 // Validate checks for missing secrets and unsupported protocol options.
 func (c RuntimeConfig) Validate() error {
 	var problems []string
+	if c.LogFormat != "" && c.LogFormat != "text" && c.LogFormat != "json" {
+		problems = append(problems, "TOKEN_EXCHANGE_LOG_FORMAT must be text or json")
+	}
 	switch c.TokenEndpointAuthMethod {
 	case AuthMethodClientSecretBasic, AuthMethodClientSecretPost:
 	default:

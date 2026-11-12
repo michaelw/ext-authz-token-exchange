@@ -209,6 +209,7 @@ policies cannot introduce arbitrary token endpoint URLs.
 | `TOKEN_EXCHANGE_EXPECTED_ISSUED_TOKEN_TYPE` | `urn:ietf:params:oauth:token-type:access_token` | Conditional | Expected issued token type when issued token type validation is enabled. |
 | `TOKEN_EXCHANGE_BEARER_REALM` | `ext-authz-token-exchange` | No | Realm used in `WWW-Authenticate: Bearer` challenges. |
 | `TOKEN_EXCHANGE_INSECURE_LOG_TOKENS` | `false` | No | Logs subject and exchanged tokens. Demo/debug only; do not enable in production. |
+| `TOKEN_EXCHANGE_LOG_FORMAT` | `json` | No | Uniform structured adapter events by default; explicitly select `text` for the legacy Envoy layout. See [logging](logging.md). |
 
 Successful token endpoint responses must include `access_token`, must have
 `token_type` equal to `Bearer` case-insensitively, and must have the expected
@@ -507,9 +508,9 @@ fails closed if the external authorization service is unavailable or times out.
 
 The e2e chart configures a local fake token endpoint, demo namespaces, namespace
 labels, policy ConfigMaps, and demo-only runtime overrides. In particular, it
-sets `GRPC_LOG_HEALTH_CHECKS=false`,
-`TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT=true`, and
-`TOKEN_EXCHANGE_INSECURE_LOG_TOKENS=true` for local testing. Do not copy those
+sets `GRPC_LOG_HEALTH_CHECKS=false` and
+`TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT=true` for local testing. Token logging
+is off unless explicitly enabled for synthetic debugging. Do not copy demo
 settings into production. The fake token endpoint has no built-in fallback
 routes; the e2e chart must render a ConfigMap from `fakeTokenEndpoint.routes`
 and set `FAKE_TOKEN_ENDPOINT_CONFIG`.

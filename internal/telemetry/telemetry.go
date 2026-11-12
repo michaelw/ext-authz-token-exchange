@@ -16,6 +16,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const defaultServiceName = "ext-authz-token-exchange"
@@ -31,6 +32,15 @@ func Propagators() propagation.TextMapPropagator {
 // ExtractHTTPHeaders extracts trace context from Envoy HTTP request headers.
 func ExtractHTTPHeaders(ctx context.Context, headers map[string]string) context.Context {
 	return Propagators().Extract(ctx, headerCarrier(headers))
+}
+
+// RequestContext retains an active transport/application span; HTTP headers are
+// the fallback when the gateway supplied no transport context.
+func RequestContext(ctx context.Context, headers map[string]string) context.Context {
+	if trace.SpanContextFromContext(ctx).IsValid() {
+		return ctx
+	}
+	return ExtractHTTPHeaders(ctx, headers)
 }
 
 // Init configures global OpenTelemetry propagation and, when OTLP export is

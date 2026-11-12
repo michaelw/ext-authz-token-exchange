@@ -1,5 +1,6 @@
 version: v2beta1
 name: ext-authz-token-exchange
+dependencies: {}
 
 require:
   commands:
@@ -31,7 +32,7 @@ vars:
   GKE_GATEWAY_NAMESPACE:
     value: gke-gateway
   GKE_GATEWAY_NAME:
-    value: gateway
+    command: python3 scripts/gateway.py value --key gateway_name --default gateway
   GKE_GATEWAY_SECTION_NAME:
     value: https
   GKE_EXTERNAL_SCHEME:
@@ -87,26 +88,49 @@ vars:
     value: "ext-authz-token-exchange"
   FAKE_TOKEN_ENDPOINT_IMAGE_NAME:
     value: "ext-authz-token-exchange-fake-token-endpoint"
-  IMAGE_TAG: $(git describe --always --dirty="-dirty-${DEVSPACE_TIMESTAMP}")
+  IMAGE_TAG:
+    command: python3 scripts/gateway.py image-tag
   DEV_TAG:
-    value: "dev-${DEVSPACE_USER}-${DEVSPACE_TIMESTAMP}"
+    value: "${IMAGE_TAG}-${DEVSPACE_USER}"
   PROD_TAG:
     value: "latest" # XXX versioning scheme for production images
+  APIGEE_NAMESPACE:
+    command: python3 scripts/gateway.py value --key plugin_namespace --default txe-apigee
+  GKE_MANAGE_GATEWAY:
+    command: python3 scripts/gateway.py value --key manage_gateway --default false
+  KEYCLOAK_ENABLED:
+    command: python3 scripts/gateway.py value --key keycloak_enabled --default false
+  GATEWAY_SETUP_PROVIDER:
+    command: python3 scripts/gateway.py value --key gateway --default none
+  APIGEE_RELEASE:
+    command: python3 scripts/gateway.py value --key plugin_release --default txe-apigee
+  APIGEE_SYSTEM_NAMESPACE:
+    command: python3 scripts/gateway.py value --key system_namespace --default txe-apigee-system
+  APIGEE_PLUGIN_VALUES:
+    command: python3 scripts/gateway.py value --key plugin_values --default .devspace/apigee-plugin-values.json
+  APIGEE_DEMO_VALUES:
+    command: python3 scripts/gateway.py value --key demo_values --default .devspace/apigee-demo-values.json
+  APIGEE_KEYCLOAK_VALUES:
+    command: python3 scripts/gateway.py value --key keycloak_values --default .devspace/apigee-keycloak-values.json
+  APIGEE_DEMO_RELEASE:
+    command: python3 scripts/gateway.py value --key demo_release --default txe-apigee-demo
+  APIGEE_KEYCLOAK_RELEASE:
+    command: python3 scripts/gateway.py value --key keycloak_release --default txe-apigee-keycloak
+  APIGEE_FIXTURES_DISABLED:
+    command: python3 scripts/gateway.py value --key fixtures_disabled --default true
+  APIGEE_KEYCLOAK_DISABLED:
+    command: python3 scripts/gateway.py value --key keycloak_disabled --default true
 profiles:
   - name: with-infra
-    merge:
-      dependencies:
-        infra:
-          git: https://github.com/michaelw/devspace-starter-pack
-          profiles:
-            - with-test
+    patches:
+      - op: replace
+        path: dependencies
+        value: $(python3 scripts/gateway.py dependency --selected "${GATEWAY_SETUP_PROVIDER}")
   - name: with-infra-smoke
-    merge:
-      dependencies:
-        infra:
-          path: ${SMOKE_INFRA_PATH}
-          profiles:
-            - with-test
+    patches:
+      - op: replace
+        path: dependencies
+        value: $(python3 scripts/gateway.py dependency --selected "${GATEWAY_SETUP_PROVIDER}" --local-path "${SMOKE_INFRA_PATH}")
   - name: with-test
     activation:
       - vars:
@@ -121,6 +145,7 @@ profiles:
                 enabled: false
               gkeAuthz:
                 gateway:
+                  name: ${GKE_GATEWAY_NAME}
                   namespace: ${GATEWAY_NAMESPACE}
                 host: httpbin.${DEPLOYMENT_DOMAIN}
                 callout:
@@ -130,14 +155,16 @@ profiles:
                         - gateway-ext-authz.${GATEWAY_NAMESPACE}.svc.cluster.local
               gkeExtProc:
                 host: httpbin.${DEPLOYMENT_DOMAIN}
+                gateway:
+                  name: ${GKE_GATEWAY_NAME}
               grafanaDashboard:
                 enabled: true
                 providerCluster: outbound|3001||gateway-ext-authz.istio-ingress.svc.cluster.local
               env:
                 TOKEN_EXCHANGE_ALLOW_HTTP_TOKEN_ENDPOINT: "true"
                 TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
-                # INSECURE DEMO-ONLY TOKEN LOGGING: DO NOT COPY THIS VALUE INTO PRODUCTION.
-                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "true"
+                # Enable explicitly only when debugging synthetic test tokens.
+                TOKEN_EXCHANGE_INSECURE_LOG_TOKENS: "false"
               oauth:
                 createSecret: true
                 secretName: ext-authz-token-exchange-fake-issuer-oauth
@@ -170,6 +197,17 @@ profiles:
               host: httpbin.${DEPLOYMENT_DOMAIN}
               namespacePrefix: service
               systemNamespace: ext-authz-token-exchange-e2e
+              teamApp:
+                gatewayNamespace: ${GATEWAY_NAMESPACE}
+              platformRoutes:
+                gatewayNamespace: ${GATEWAY_NAMESPACE}
+                gatewayName: ${GKE_GATEWAY_NAME}
+              demoRoute:
+                gatewayNamespace: ${GATEWAY_NAMESPACE}
+                gatewayName: ${GKE_GATEWAY_NAME}
+              inferencePool:
+                gatewayNamespace: ${GATEWAY_NAMESPACE}
+                gatewayName: ${GKE_GATEWAY_NAME}
               policy:
                 httpbinResourceBase: https://httpbin.${DEPLOYMENT_DOMAIN}
               fakeTokenEndpoint:
@@ -185,6 +223,9 @@ profiles:
           source ./scripts/devspace-pipeline.sh
           devspace_pipeline_deploy
   - name: with-keycloak
+    activation:
+      - vars:
+          KEYCLOAK_ENABLED: "true"
     merge:
       deployments:
         ext-authz-token-exchange:
@@ -273,6 +314,10 @@ profiles:
         value: ${GATEWAY_NAMESPACE}
       - op: add
         path: images.prod.buildKit.args
+        value:
+          - --platform=linux/amd64
+      - op: add
+        path: images.dev.buildKit.args
         value:
           - --platform=linux/amd64
       - op: add
@@ -519,6 +564,191 @@ profiles:
         value: |-
           source ./scripts/devspace-pipeline.sh
           devspace_pipeline_deploy_gke_app
+  - name: managed-gke-gateway
+    activation:
+      - vars:
+          GATEWAY_PROVIDER: gke-gateway
+          GKE_MANAGE_GATEWAY: "true"
+    merge:
+      deployments:
+        gateway-integration:
+          namespace: ${GATEWAY_NAMESPACE}
+          helm:
+            releaseName: txe-gateway-integration
+            chart:
+              name: ./charts/gateway-development
+            values:
+              host: httpbin.${DEPLOYMENT_DOMAIN}
+              name: ${GKE_GATEWAY_NAME}
+            upgradeArgs: ["--wait", "--timeout=600s"]
+  - name: apigee
+    activation:
+      - vars:
+          GATEWAY_PROVIDER: apigee
+    replace:
+      dependencies: {}
+      deployments:
+        ext-authz-token-exchange:
+          namespace: ${APIGEE_NAMESPACE}
+          updateImageTags: false
+          helm:
+            releaseName: ${APIGEE_RELEASE}
+            chart:
+              name: ./charts/ext-authz-token-exchange
+            valuesFiles: ["${APIGEE_PLUGIN_VALUES}"]
+            values:
+              image:
+                repository: ${runtime.images.prod.image}
+                tag: ${runtime.images.prod.tag}
+              env:
+                TOKEN_EXCHANGE_BEARER_REALM: ext-authz-token-exchange-e2e
+            upgradeArgs: ["--wait", "--timeout=600s"]
+        ext-authz-token-exchange-e2e:
+          namespace: ${APIGEE_SYSTEM_NAMESPACE}
+          updateImageTags: false
+          helm:
+            releaseName: ${APIGEE_DEMO_RELEASE}
+            chart:
+              name: ./charts/ext-authz-token-exchange-e2e
+            valuesFiles: ["${APIGEE_DEMO_VALUES}"]
+            values:
+              fakeTokenEndpoint:
+                image: ${runtime.images.fake-token-endpoint.image}:${runtime.images.fake-token-endpoint.tag}
+            upgradeArgs: ["--wait", "--timeout=600s"]
+        keycloak:
+          namespace: ${APIGEE_SYSTEM_NAMESPACE}
+          helm:
+            releaseName: ${APIGEE_KEYCLOAK_RELEASE}
+            chart:
+              name: ./charts/keycloak
+            valuesFiles: ["${APIGEE_KEYCLOAK_VALUES}"]
+            upgradeArgs: ["--wait", "--timeout=600s"]
+    patches:
+      - op: replace
+        path: pipelines.deploy.run
+        value: |-
+          python3 scripts/gateway.py preflight
+          ensure_pull_secrets --all
+          build_images prod fake-token-endpoint
+          python3 scripts/gateway.py fixtures
+          if [ "${APIGEE_KEYCLOAK_DISABLED}" = false ]; then
+            create_deployments keycloak
+          fi
+          if [ "${APIGEE_FIXTURES_DISABLED}" = false ]; then
+            create_deployments ext-authz-token-exchange-e2e
+          fi
+          create_deployments ext-authz-token-exchange
+          python3 scripts/gateway.py proxy
+      - op: replace
+        path: pipelines.dev.run
+        value: |-
+          python3 scripts/gateway.py preflight
+          ensure_pull_secrets --all
+          build_images dev
+          start_dev --all --set terminal.enabled=false --set logs.enabled=true
+      - op: remove
+        path: dev.ext-authz-token-exchange.imageSelector
+      - op: add
+        path: dev.ext-authz-token-exchange.labelSelector
+        value:
+          app.kubernetes.io/instance: ${APIGEE_RELEASE}
+          app.kubernetes.io/name: ext-authz-token-exchange
+      - op: add
+        path: dev.ext-authz-token-exchange.namespace
+        value: ${APIGEE_NAMESPACE}
+      - op: replace
+        path: dev.ext-authz-token-exchange.persistPaths
+        value: []
+      - op: replace
+        path: dev.ext-authz-token-exchange.resources
+        value:
+          requests:
+            cpu: "1"
+            memory: 4Gi
+            ephemeral-storage: 4Gi
+          limits:
+            cpu: "1"
+            memory: 4Gi
+            ephemeral-storage: 4Gi
+      - op: replace
+        path: dev.ext-authz-token-exchange.env
+        value:
+          - name: GOMAXPROCS
+            value: "2"
+          - name: GOFLAGS
+            value: -p=2
+          - name: GOPATH
+            value: /tmp/go
+          - name: GOCACHE
+            value: /tmp/go-cache
+          - name: GOMODCACHE
+            value: /tmp/go-mod
+      - op: add
+        path: dev.ext-authz-token-exchange.sync[0].disableDownload
+        value: true
+      - op: remove
+        path: dev.ext-authz-token-exchange.sync[1]
+      - op: replace
+        path: dev.ext-authz-token-exchange.command
+        value: ["/entrypoint.sh"]
+      - op: replace
+        path: dev.ext-authz-token-exchange.patches
+        value:
+          - op: remove
+            path: spec.containers[*].livenessProbe
+          - op: replace
+            path: spec.containers[*].securityContext.readOnlyRootFilesystem
+            value: false
+          - op: replace
+            path: spec.containers[*].securityContext.runAsUser
+            value: 1000
+          - op: replace
+            path: spec.containers[*].resources
+            value:
+              requests:
+                cpu: "1"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+              limits:
+                cpu: "1"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+      - op: replace
+        path: images.dev.skipPush
+        value: false
+      - op: replace
+        path: pipelines.purge.run
+        value: |-
+          stop_dev --all
+          echo 'Stopped development. Use explicit cleanup commands to remove owned resources.'
+
+  - name: apigee-without-fixtures
+    activation:
+      - vars:
+          GATEWAY_PROVIDER: apigee
+          APIGEE_FIXTURES_DISABLED: "true"
+    patches:
+      - op: remove
+        path: deployments.ext-authz-token-exchange-e2e
+      - op: remove
+        path: deployments.keycloak
+  - name: apigee-without-keycloak
+    activation:
+      - vars:
+          GATEWAY_PROVIDER: apigee
+          APIGEE_FIXTURES_DISABLED: "false"
+          APIGEE_KEYCLOAK_DISABLED: "true"
+    patches:
+      - op: remove
+        path: deployments.keycloak
+
+  - name: configured-gateway
+    activation:
+      - vars:
+          GATEWAY_SETUP_PROVIDER: (apigee|gke-gateway)
+    replace:
+      dependencies: {}
+
 # Images to build and push
 images:
   # Development image - not pushed to production registry
@@ -584,7 +814,7 @@ deployments:
 dev:
   ext-authz-token-exchange:
     imageSelector: ${REGISTRY}/${IMAGE_NAME}
-    devImage: ${DEV_REGISTRY}/${IMAGE_NAME}-dev
+    devImage: ${runtime.images.dev.image}:${runtime.images.dev.tag}
 
     env: []
 
@@ -603,6 +833,7 @@ dev:
     # Sync local files to container
     sync:
       - path: ./
+        excludePaths: [".git", ".devspace", "bin", "output", ".playwright-cli", "infra/**/.terraform", "infra/**/*.tfstate*", "node_modules"]
         startContainer: true
       - path: "${DEVSPACE_USER_HOME}/.gitconfig:${CONTAINER_USER_HOME}/.gitconfig"
         file: true
@@ -637,6 +868,30 @@ dev:
       inject: true
 
 pipelines:
+  remove-owned-applications:
+    run: |-
+      python3 scripts/gateway.py cleanup-check
+      helm --kube-context "${DEVSPACE_CONTEXT}" -n "${APIGEE_SYSTEM_NAMESPACE}" uninstall "${APIGEE_KEYCLOAK_RELEASE}" --ignore-not-found --wait --timeout 10m
+      helm --kube-context "${DEVSPACE_CONTEXT}" -n "${APIGEE_SYSTEM_NAMESPACE}" uninstall "${APIGEE_DEMO_RELEASE}" --ignore-not-found --wait --timeout 10m
+      helm --kube-context "${DEVSPACE_CONTEXT}" -n "${APIGEE_NAMESPACE}" uninstall "${APIGEE_RELEASE}" --ignore-not-found --wait --timeout 10m
+  plugin-only:
+    run: |-
+      python3 scripts/gateway.py preflight
+      create_deployments ext-authz-token-exchange
+
+  cleanup-fixtures:
+    run: |-
+      python3 scripts/gateway.py cleanup-check
+      if [ "${GATEWAY_PROVIDER}" = apigee ]; then
+        helm --kube-context "${DEVSPACE_CONTEXT}" -n "${APIGEE_SYSTEM_NAMESPACE}" uninstall "${APIGEE_KEYCLOAK_RELEASE}" --ignore-not-found --wait --timeout 10m
+        helm --kube-context "${DEVSPACE_CONTEXT}" -n "${APIGEE_SYSTEM_NAMESPACE}" uninstall "${APIGEE_DEMO_RELEASE}" --ignore-not-found --wait --timeout 10m
+      else
+        purge_deployments keycloak ext-authz-token-exchange-e2e
+      fi
+  purge:
+    run: |-
+      stop_dev --all
+      purge_deployments --all
   # Pipeline for development
   dev:
     flags:
@@ -678,12 +933,63 @@ commands:
   #   deploy:
   #     Commands related to deploying the service to Kubernetes
   setup:
-    description: "Setup the development environment"
+    description: "Set up the selected gateway and infrastructure"
     section: build
+    command: python3 scripts/gateway.py setup "$@"
+
+  setup-tools:
+    description: "Install debugger and reload tools inside the development container"
     command: |
-      echo "I: target=setup"
       go install github.com/go-delve/delve/cmd/dlv@v1.26.3
       go install github.com/air-verse/air@v1.65.1
+
+  preflight:
+    command: python3 scripts/gateway.py preflight "$@"
+
+  diagnostics:
+    command: python3 scripts/gateway.py diagnostics "$@"
+
+  renew-certificates:
+    command: python3 scripts/gateway.py renew-certificates "$@"
+
+  repeatability:
+    command: python3 scripts/gateway.py repeatability "$@"
+
+  cleanup-fixtures:
+    command: devspace run-pipeline cleanup-fixtures
+
+  undeploy-proxy:
+    command: python3 scripts/gateway.py undeploy-proxy "$@"
+
+  rollback-proxy:
+    command: python3 scripts/gateway.py rollback "$@"
+
+  delete-proxy-resources:
+    command: python3 scripts/gateway.py delete-proxy-resources "$@"
+
+  destroy-infrastructure:
+    command: python3 scripts/gateway.py destroy-infrastructure "$@"
+
+  destroy-environment:
+    command: python3 scripts/gateway.py destroy-environment "$@"
+
+  log-format:
+    command: python3 scripts/gateway.py log-format "$@"
+
+  inspect-on:
+    command: python3 scripts/gateway.py inspect-on "$@"
+
+  inspect-off:
+    command: python3 scripts/gateway.py inspect-off "$@"
+
+  test-logging:
+    command: python3 scripts/gateway.py test-logging "$@"
+
+  debug:
+    command: python3 scripts/gateway.py debug "$@"
+
+  stop:
+    command: devspace reset pods
 
   generate:
     description: "Generate required code and download dependencies"
@@ -691,6 +997,7 @@ commands:
     command: |
       echo "I: target=generate"
       go mod download
+      go generate ./...
 
   compile:
     description: "Compile the code base"
@@ -698,6 +1005,7 @@ commands:
     command: |
       echo "I: target=compile"
       go mod download
+      go generate ./...
       go build -v ./cmd/...
 
   build:
@@ -706,6 +1014,7 @@ commands:
     command: |
       echo "I: target=build"
       go mod download
+      go generate ./...
       go build ./cmd/...
 
   test:
@@ -714,7 +1023,7 @@ commands:
     command: |
       echo "I: target=test"
       go mod download
-      go build ./cmd/...
+      go generate ./...
       go test -v ./...
 
   coverage:
@@ -722,6 +1031,7 @@ commands:
     section: build
     command: |
       echo "I: target=coverage"
+      go generate ./...
       go test -coverprofile=coverage.out ./...
 
   actionlint:
@@ -749,6 +1059,7 @@ commands:
       helm lint charts/ext-authz-token-exchange
       helm lint charts/ext-authz-token-exchange-e2e
       helm lint charts/keycloak
+      helm unittest --strict charts/ext-authz-token-exchange charts/ext-authz-token-exchange-e2e charts/keycloak
       helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
         --namespace ext-authz-token-exchange \
         > /tmp/ext-authz-token-exchange-rendered.yaml
@@ -766,21 +1077,21 @@ commands:
       echo "I: target=lint"
       pre-commit run --all-files
       go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-      echo "I: target=test"
-      go mod download
-      go build ./cmd/...
-      go test -v ./...
       echo "I: target=coverage"
-      go test -coverprofile=coverage.out ./...
-      echo "I: target=build"
       go mod download
-      go build ./cmd/...
+      go generate ./...
+      go test -coverprofile=coverage.out ./...
+      CGO_ENABLED=1 go test -race ./...
+      go vet ./...
+      node --test cmd/demo-dashboard/token_refresh_test.cjs
+      python3 -m unittest discover -s scripts -p '*_test.py'
       echo "I: target=helm-verify"
       helm dependency build charts/ext-authz-token-exchange
       helm dependency build charts/keycloak
       helm lint charts/ext-authz-token-exchange
       helm lint charts/ext-authz-token-exchange-e2e
       helm lint charts/keycloak
+      helm unittest --strict charts/ext-authz-token-exchange charts/ext-authz-token-exchange-e2e charts/keycloak
       helm template ext-authz-token-exchange charts/ext-authz-token-exchange \
         --namespace ext-authz-token-exchange \
         > /tmp/ext-authz-token-exchange-rendered.yaml
@@ -795,6 +1106,10 @@ commands:
     section: build
     command: |
       echo "I: target=smoke"
+      if [ "$GATEWAY_PROVIDER" = apigee ]; then
+        python3 scripts/gateway.py smoke "$@"
+        exit $?
+      fi
       if printf '%s' "${DEVSPACE_PROFILES:-}" | grep -q 'gke-platform'; then
         source ./scripts/devspace-pipeline.sh
         export_gke_command_environment
@@ -809,6 +1124,10 @@ commands:
     section: build
     command: |
       echo "I: target=test-e2e"
+      if [ "$GATEWAY_PROVIDER" = apigee ]; then
+        python3 scripts/gateway.py test-e2e "$@"
+        exit $?
+      fi
       LABEL_FILTER_ARGS=""
       case " $* " in
         *"--label-filter"*) ;;
@@ -818,48 +1137,11 @@ commands:
         E2E_NAMESPACE="${GATEWAY_NAMESPACE}"
         export E2E_NAMESPACE
       fi
-      KEYCLOAK_PORT_FORWARD_PID=""
-      if [ -z "${E2E_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" = "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
-        E2E_KEYCLOAK_BASE_URL="https://keycloak.$DEPLOYMENT_DOMAIN"
-        E2E_KEYCLOAK_ISSUER="${E2E_KEYCLOAK_ISSUER:-${E2E_KEYCLOAK_BASE_URL}/realms/token-exchange-e2e}"
-        export E2E_KEYCLOAK_BASE_URL E2E_KEYCLOAK_ISSUER
-        echo "I: using Keycloak route at ${E2E_KEYCLOAK_BASE_URL}"
-      fi
-      if [ -z "${E2E_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" != "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
-        for port in 18080 18081 18082 18083 18084 18085 18086 18087 18088 18089; do
-          if ! nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
-            KEYCLOAK_PORT="$port"
-            break
-          fi
-        done
-        if [ -z "${KEYCLOAK_PORT:-}" ]; then
-          echo "E: no free local Keycloak port found in 18080-18089" >&2
-          exit 1
-        fi
-        KEYCLOAK_PORT_FORWARD_LOG="/tmp/ext-authz-token-exchange-keycloak-port-forward.log"
-        kubectl -n ext-authz-token-exchange-e2e port-forward --address 127.0.0.1 svc/keycloak "${KEYCLOAK_PORT}:8080" >"$KEYCLOAK_PORT_FORWARD_LOG" 2>&1 &
-        KEYCLOAK_PORT_FORWARD_PID="$!"
-        trap 'if [ -n "${KEYCLOAK_PORT_FORWARD_PID:-}" ]; then kill "$KEYCLOAK_PORT_FORWARD_PID" >/dev/null 2>&1 || true; fi' EXIT
-        KEYCLOAK_READY=false
-        for _ in $(seq 1 60); do
-          if curl -fsS "http://127.0.0.1:${KEYCLOAK_PORT}/realms/token-exchange-e2e" >/dev/null 2>&1; then
-            KEYCLOAK_READY=true
-            break
-          fi
-          sleep 1
-        done
-        if [ "$KEYCLOAK_READY" != "true" ]; then
-          echo "E: Keycloak port-forward did not become ready; log follows:" >&2
-          cat "$KEYCLOAK_PORT_FORWARD_LOG" >&2
-          exit 1
-        fi
-        E2E_KEYCLOAK_BASE_URL="http://127.0.0.1:${KEYCLOAK_PORT}"
-        E2E_KEYCLOAK_ISSUER="${E2E_KEYCLOAK_ISSUER:-https://keycloak.$DEPLOYMENT_DOMAIN/realms/token-exchange-e2e}"
-        export E2E_KEYCLOAK_BASE_URL E2E_KEYCLOAK_ISSUER
-      fi
       E2E_BASE_URL="${E2E_BASE_URL:-https://httpbin.$DEPLOYMENT_DOMAIN}" \
+      E2E_KEYCLOAK_BASE_URL="${E2E_KEYCLOAK_BASE_URL:-https://keycloak.$DEPLOYMENT_DOMAIN}" \
+      E2E_KEYCLOAK_ISSUER="${E2E_KEYCLOAK_ISSUER:-https://keycloak.$DEPLOYMENT_DOMAIN/realms/token-exchange-e2e}" \
       E2E_SKIP_INSTALL="${E2E_SKIP_INSTALL:-true}" \
-      go run github.com/onsi/ginkgo/v2/ginkgo -r $LABEL_FILTER_ARGS "$@" ./test/e2e
+      python3 scripts/developer.py e2e $LABEL_FILTER_ARGS "$@"
 
   gke-smoke:
     description: "Deploy the GKE test stack and run Kubernetes e2e smoke tests"
@@ -895,39 +1177,6 @@ commands:
         DEMO_PLUGIN_NAMESPACE="ext-authz-token-exchange"
         if [ "$GATEWAY_PROVIDER" = "gke-gateway" ]; then
           DEMO_PLUGIN_NAMESPACE="$GATEWAY_NAMESPACE"
-        fi
-        KEYCLOAK_PORT_FORWARD_PID=""
-        if [ -z "${DEMO_KEYCLOAK_BASE_URL:-}" ] && [ "${DEVSPACE_CONTEXT#gke_}" != "$DEVSPACE_CONTEXT" ] && kubectl -n ext-authz-token-exchange-e2e get svc keycloak >/dev/null 2>&1; then
-          for port in 18080 18081 18082 18083 18084 18085 18086 18087 18088 18089; do
-            if ! nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
-              KEYCLOAK_PORT="$port"
-              break
-            fi
-          done
-          if [ -z "${KEYCLOAK_PORT:-}" ]; then
-            echo "E: no free local Keycloak port found in 18080-18089" >&2
-            exit 1
-          fi
-          KEYCLOAK_PORT_FORWARD_LOG="/tmp/ext-authz-token-exchange-demo-keycloak-port-forward.log"
-          kubectl -n ext-authz-token-exchange-e2e port-forward --address 127.0.0.1 svc/keycloak "${KEYCLOAK_PORT}:8080" >"$KEYCLOAK_PORT_FORWARD_LOG" 2>&1 &
-          KEYCLOAK_PORT_FORWARD_PID="$!"
-          trap 'if [ -n "${KEYCLOAK_PORT_FORWARD_PID:-}" ]; then kill "$KEYCLOAK_PORT_FORWARD_PID" >/dev/null 2>&1 || true; fi' EXIT
-          KEYCLOAK_READY=false
-          for _ in $(seq 1 60); do
-            if curl -fsS "http://127.0.0.1:${KEYCLOAK_PORT}/realms/token-exchange-e2e" >/dev/null 2>&1; then
-              KEYCLOAK_READY=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$KEYCLOAK_READY" != "true" ]; then
-            echo "E: Keycloak port-forward did not become ready; log follows:" >&2
-            cat "$KEYCLOAK_PORT_FORWARD_LOG" >&2
-            exit 1
-          fi
-          DEMO_KEYCLOAK_BASE_URL="http://127.0.0.1:${KEYCLOAK_PORT}"
-          export DEMO_KEYCLOAK_BASE_URL
-          echo "I: using local Keycloak port-forward at ${DEMO_KEYCLOAK_BASE_URL}"
         fi
       fi
       DEMO_BASE_URL="${DEMO_BASE_URL:-https://httpbin.$DEPLOYMENT_DOMAIN}" \

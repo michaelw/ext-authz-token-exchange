@@ -1,0 +1,11 @@
+suite: realm-driven rollout
+templates:
+  - templates/deployment.yaml
+  - templates/realm-configmap.yaml
+tests:
+  - it: uses a configuration checksum rather than the Helm release revision
+    template: templates/deployment.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["ext-authz-token-exchange.magneticflux.net/realm-revision"]
+          pattern: ^[a-f0-9]{64}$

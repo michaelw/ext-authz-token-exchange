@@ -1,9 +1,27 @@
 # Compatibility Notes
 
+## 0.7.0 Authentication Challenge Limits
+
+All adapters preserve accepted `WWW-Authenticate` field values in order, including
+quoted commas and multiple schemes. Denial output is limited to 32 field values
+and 8 KiB combined bytes, including comma-space joining separators. Invalid HTTP
+header bytes or an exceeded limit produce sanitized `500 server_error` without
+upstream challenges (`TXE-3005`), including in OAuth error passthrough mode. This
+is defensive validation at the configured token-endpoint boundary, not evidence
+that joining valid challenges is exploitable. Values are never split or truncated.
+
 This project intentionally tightened several protocol and configuration details
 while moving from the original token-exchange plan to the RFC-aligned design.
 
 ## Configuration Changes
+
+### Managed Apigee
+
+The optional Apigee listener uses a separate protobuf protocol and requires TLS
+and a Google-issued gateway identity token. It shares policy and issuer schemas
+with Envoy; it does not accept Envoy ext-proc streams. Apigee renders denials from
+explicit decision variables. Multiple `WWW-Authenticate` challenges use their
+HTTP-equivalent comma-separated form. See [Apigee setup](docs/apigee.md).
 
 For the current operator-facing configuration and behavior reference, see
 `docs/configuration.md`.
@@ -171,3 +189,12 @@ values schemas for deployment-time feedback, and `docs/policy.schema.json` can
 be used by editors or CI for app-owned ConfigMaps. Kubernetes cannot deeply
 validate the YAML string stored in `ConfigMap.data["config.yaml"]`; the running
 service remains the authoritative runtime validator for arbitrary ConfigMaps.
+
+## Logging Compatibility for 0.7.0
+
+JSON is the default in 0.7.0. Select `TOKEN_EXCHANGE_LOG_FORMAT=text` explicitly
+for the released Envoy layout. Token/health-check controls keep their defaults.
+Decision diagnostics are additive. Request locations are redacted and raw errors are
+replaced with safe diagnostics in both formats. Token debugging remains an
+explicit opt-in and now also supports Apigee. See [logging migration](docs/logging.md)
+and the [0.7.0 release notes draft](docs/release-0.7.0.md).

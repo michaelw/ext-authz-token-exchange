@@ -1,0 +1,45 @@
+suite: optional production scaling
+templates:
+  - templates/hpa.yaml
+  - templates/deployment.yaml
+  - templates/pdb.yaml
+tests:
+  - it: keeps autoscaling and disruption protection opt-in
+    template: templates/hpa.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: targets the plugin deployment with explicit scaling behavior
+    template: templates/hpa.yaml
+    set:
+      fullnameOverride: txe
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 10
+        targetCPUUtilizationPercentage: 65
+        behavior:
+          scaleDown:
+            stabilizationWindowSeconds: 300
+    asserts:
+      - equal: {path: spec.scaleTargetRef.name, value: txe}
+      - equal: {path: spec.minReplicas, value: 2}
+      - equal: {path: spec.maxReplicas, value: 10}
+      - equal: {path: "spec.metrics[0].resource.target.averageUtilization", value: 65}
+      - equal: {path: spec.behavior.scaleDown.stabilizationWindowSeconds, value: 300}
+  - it: leaves replicas to the autoscaler even for GKE Gateway
+    template: templates/deployment.yaml
+    set:
+      gatewayProvider: gke-gateway
+      autoscaling.enabled: true
+    asserts:
+      - notExists: {path: spec.replicas}
+  - it: selects only plugin pods for optional disruption protection
+    template: templates/pdb.yaml
+    set:
+      fullnameOverride: txe
+      podDisruptionBudget.enabled: true
+    asserts:
+      - equal: {path: spec.maxUnavailable, value: 1}
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/name"]
+          value: ext-authz-token-exchange

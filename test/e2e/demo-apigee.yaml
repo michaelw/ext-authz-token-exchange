@@ -1,0 +1,24 @@
+# Fixture selection and policy locations, not gateway-specific expectations.
+include:
+  - yellow-success
+  - missing-bearer
+  - cors-preflight
+  - options-missing-bearer
+  - options-bearer
+  - unmatched
+  - explicit-deny
+  - invalid-grant
+  - keycloak-audience
+  - keycloak-resource
+  - keycloak-expired-subject-token
+  - keycloak-unsigned-subject-token
+  - keycloak-truncated-signature
+  - keycloak-untrusted-issuer
+  - keycloak-invalid-audience
+  - keycloak-invalid-scope
+policyRefs:
+  explicit-deny: "{{ .NamespacePrefix }}-yellow/denied-policy"
+  invalid-grant: "{{ .NamespacePrefix }}-yellow/error-invalid-grant-policy"
+  keycloak-audience: "{{ .NamespacePrefix }}-yellow/keycloak-audience-policy"
+requestHeaders:
+  X-Txe-Debug: synthetic

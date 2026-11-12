@@ -1,0 +1,4 @@
+<AssignMessage name="AM-ServerError">
+  <Set><StatusCode>500</StatusCode><Payload contentType="application/json">{"error":"server_error"}</Payload></Set>
+  <AssignTo createNew="false"/>
+</AssignMessage>
