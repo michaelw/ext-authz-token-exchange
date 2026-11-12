@@ -34,6 +34,8 @@ tests:
     asserts:
       - notExists: {path: spec.replicas}
   - it: selects only plugin pods for optional disruption protection
+    release:
+      name: txe-production
     template: templates/pdb.yaml
     set:
       fullnameOverride: txe
@@ -43,3 +45,6 @@ tests:
       - equal:
           path: spec.selector.matchLabels["app.kubernetes.io/name"]
           value: ext-authz-token-exchange
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/instance"]
+          value: txe-production

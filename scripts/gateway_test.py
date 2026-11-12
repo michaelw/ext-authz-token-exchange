@@ -3,6 +3,8 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +14,12 @@ spec.loader.exec_module(gateway)
 
 
 class GatewayTests(unittest.TestCase):
+    def test_dependency_forwards_disabled_host_integration(self):
+        rendered = subprocess.check_output([sys.executable, str(Path(__file__).with_name("gateway.py")), "dependency", "--selected", "none", "--local-path", "example-starter", "--host-integration", "false"], text=True)
+        dependency = json.loads(rendered)["infra"]
+        self.assertEqual(dependency["vars"]["HOST_INTEGRATION"], "false")
+        self.assertEqual(dependency["path"], "example-starter")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

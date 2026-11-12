@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
 import apigee_certificates as renewal
 
@@ -39,6 +39,9 @@ class RenewalTests(unittest.TestCase):
         for role in ("callout", "backend"):
             self.next[role]["certificate"] = "old-and-new-trust"
         self.state = {"project":"example", "original":self.c, "next":self.next, "ca":"new-trust", "files":self.files, "stage":"prepared"}
+        self.ca = self.root / "ca.pem"
+        self.ca.write_text("new trust")
+        self.state["ca"] = str(self.ca)
         self.config = self.root / ".devspace/apigee.json"
         renewal.gateway.persist(self.config, self.c)
 
@@ -65,6 +68,7 @@ class RenewalTests(unittest.TestCase):
              patch.object(renewal.apigee, "deploy", side_effect=targets), \
              patch.object(renewal.apigee_demo, "secrets", side_effect=secrets), \
              patch.object(renewal.apigee_infra, "ingress"), \
+             patch.object(renewal, "wait_ingress"), \
              patch.object(renewal.apigee, "smoke", side_effect=RuntimeError("probe failure") if fail else None):
             if fail:
                 with self.assertRaisesRegex(RuntimeError, "probe failure"):
@@ -74,9 +78,9 @@ class RenewalTests(unittest.TestCase):
         return active["trust"]
 
     def test_new_serving_material_follows_overlap_trust(self):
-        self.assertEqual(self.exercise(), "new-trust")
+        self.assertEqual(self.exercise(), str(self.ca))
         self.assertEqual(self.state["stage"], "ready")
-        self.assertEqual(json.loads(self.config.read_text())["callout"]["certificate"], "new-trust")
+        self.assertEqual(json.loads(self.config.read_text())["callout"]["certificate"], str(self.ca))
         self.assertTrue(all(Path(item["backup"]).exists() for item in self.files))
         self.assertEqual((self.root / "journal.json").stat().st_mode & 0o777, 0o600)
 
@@ -89,7 +93,7 @@ class RenewalTests(unittest.TestCase):
     def test_interrupted_serving_stage_reconciles_safely(self):
         self.state["stage"] = "serving-updated"
         renewal.publish_files(self.state)
-        self.assertEqual(self.exercise(), "new-trust")
+        self.assertEqual(self.exercise(), str(self.ca))
         self.assertEqual(self.state["stage"], "ready")
 
     def test_missing_namespace_ownership_stops_before_deployment_mutation(self):

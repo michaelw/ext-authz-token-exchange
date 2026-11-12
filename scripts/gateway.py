@@ -531,6 +531,7 @@ def main():
     parser.add_argument("--default", default="")
     parser.add_argument("--selected", choices=["none", "apigee", "gke-gateway"], default="none")
     parser.add_argument("--local-path")
+    parser.add_argument("--host-integration", choices=["true", "false"])
     args, extra = parser.parse_known_args()
     if extra and extra[0] == "--":
         extra.pop(0)
@@ -541,7 +542,8 @@ def main():
         print(image_tag())
     elif args.command == "dependency":
         source = {"path": args.local_path} if args.local_path else {"git": "https://github.com/michaelw/devspace-starter-pack"}
-        print(json.dumps({} if args.selected != "none" else {"infra": {**source, "profiles": ["with-test"]}}))
+        variables = {"HOST_INTEGRATION": args.host_integration} if args.host_integration is not None else {}
+        print(json.dumps({} if args.selected != "none" else {"infra": {**source, "profiles": ["with-test"], "vars": variables}}))
     elif args.command == "setup":
         if not args.gateway or not args.infrastructure or extra:
             parser.error("setup requires --gateway and --infrastructure; unknown arguments are not accepted")

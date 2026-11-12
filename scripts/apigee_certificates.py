@@ -65,6 +65,22 @@ def inspect_live(c):
     return result
 
 
+def wait_ingress(c, certificate):
+    expected = subprocess.check_output(["openssl", "x509", "-in", str(certificate), "-noout", "-fingerprint", "-sha256"], text=True).strip()
+    deadline = time.monotonic() + 600
+    hostname = urllib.parse.urlparse(c["ingress"]["url"]).hostname
+    while True:
+        try:
+            actual = inspect_endpoint(c["ingress"]["address"], 443, hostname, c["ingress"]["certificate"])
+            if expected in actual:
+                return
+        except (subprocess.SubprocessError, OSError):
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError("ingress certificate has not propagated; protected renewal state is retained")
+        time.sleep(5)
+
+
 def prepare(c, directory):
     directory.mkdir(parents=True, mode=0o700)
     os.chmod(directory, 0o700)
@@ -116,6 +132,12 @@ def publish_files(state, restore=False):
 def reconcile(c, journal, state):
     config_path = gateway.ROOT / gateway.load()["apigee_config"]
     client = apigee.Client(c)
+    # Client trust must also overlap while global ingress configuration propagates.
+    bundle = journal.parent / "ingress-overlap.pem"
+    backup = next(item["backup"] for item in state["files"] if item["path"] == state["original"]["ingress"]["server_certificate"])
+    bundle.write_bytes(Path(backup).read_bytes() + b"\n" + Path(state["ca"]).read_bytes())
+    bundle.chmod(0o600)
+    state["next"]["ingress"]["certificate"] = str(bundle)
     try:
         # Reconcile each stage on resume: earlier API responses can be lost.
         apigee.deploy(client, state["next"])
@@ -127,8 +149,10 @@ def reconcile(c, journal, state):
         state["stage"] = "serving-updated"
         gateway.persist(journal, state)
         apigee_infra.ingress(gateway.load())
+        wait_ingress(state["next"], state["next"]["ingress"]["server_certificate"])
         apigee.smoke(state["next"])
         final = copy.deepcopy(state["next"])
+        final["ingress"]["certificate"] = state["ca"]
         for role in ("callout", "backend"):
             final[role]["certificate"] = state["ca"]
         apigee.deploy(client, final)
@@ -143,10 +167,14 @@ def reconcile(c, journal, state):
         # Restore overlap trust before old serving material, then old-only trust.
         apigee.deploy(client, state["next"])
         publish_files(state, restore=True)
-        gateway.persist(config_path, state["original"])
+        restore = copy.deepcopy(state["original"])
+        restore["ingress"]["certificate"] = str(bundle)
+        gateway.persist(config_path, restore)
         apigee_demo.secrets(state["original"])
         apigee_infra.ingress(gateway.load())
+        wait_ingress(restore, restore["ingress"]["server_certificate"])
         apigee.deploy(client, state["original"])
+        gateway.persist(config_path, state["original"])
         state["stage"] = "rolled-back"
         gateway.persist(journal, state)
         raise

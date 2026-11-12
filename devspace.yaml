@@ -125,12 +125,12 @@ profiles:
     patches:
       - op: replace
         path: dependencies
-        value: $(python3 scripts/gateway.py dependency --selected "${GATEWAY_SETUP_PROVIDER}")
+        value: $(python3 scripts/gateway.py dependency --selected "${GATEWAY_SETUP_PROVIDER}" --host-integration "${HOST_INTEGRATION}")
   - name: with-infra-smoke
     patches:
       - op: replace
         path: dependencies
-        value: $(python3 scripts/gateway.py dependency --selected "${GATEWAY_SETUP_PROVIDER}" --local-path "${SMOKE_INFRA_PATH}")
+        value: $(python3 scripts/gateway.py dependency --selected "${GATEWAY_SETUP_PROVIDER}" --local-path "${SMOKE_INFRA_PATH}" --host-integration "${HOST_INTEGRATION}")
   - name: with-test
     activation:
       - vars:

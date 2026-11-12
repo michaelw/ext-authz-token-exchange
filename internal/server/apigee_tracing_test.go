@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	pb "github.com/michaelw/ext-authz-token-exchange/internal/apigeepb"
@@ -57,6 +58,9 @@ func TestApigeeTraceContinuity(t *testing.T) {
 			}
 			spans := recorder.Ended()
 			if !tc.sampled {
+				if len(endpointParent) != 55 || !strings.HasPrefix(endpointParent, "00-"+tc.traceID+"-") || !strings.HasSuffix(endpointParent, "-00") {
+					t.Fatal("lost unsampled outbound propagation")
+				}
 				if len(spans) != 0 {
 					t.Fatal("ignored unsampled parent")
 				}

@@ -38,7 +38,7 @@ docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/tmp \
 ```
 
 The Go/Helm commands below run in that shell or the DevSpace development
-container. Go 1.27.3, protoc 35.0, protoc-gen-go 1.36.12,
+container. Go 1.27.4, protoc 35.0, protoc-gen-go 1.36.12,
 protoc-gen-go-grpc 1.6.0, Helm 4.1.1, and helm-unittest 1.2.1 are pinned in the
 Dockerfile. Runtime images do not contain those tools. Kind smoke checks use the
 same Go/protobuf toolchain with their existing Helm 3.18.3 and Kubernetes pins.

@@ -43,7 +43,7 @@
 {{- $_ := set $env "GRPC_TLS_KEY_FILE" (printf "%s/tls.key" (.Values.gkeAuthz.callout.tls.mountPath | default "/etc/ext-authz-token-exchange/tls")) }}
 {{- $_ := set $values "env" $env }}
 {{- $ports := deepCopy (.Values.ports | default dict) }}
-{{- $_ := set $ports "grpc-authz-tls" (dict "containerPort" (.Values.gkeAuthz.callout.tls.port | default 3000)) }}
+{{- $_ := set $ports "grpc-authz-tls" (dict "enabled" true "containerPort" (.Values.gkeAuthz.callout.tls.port | default 3000)) }}
 {{- $_ := set $values "ports" $ports }}
 {{- end }}
 {{- $volumeMounts := deepCopy (.Values.volumeMounts | default dict) }}
