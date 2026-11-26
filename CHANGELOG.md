@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.2...v0.6.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update kubernetes monorepo to v0.37.3 ([007f4c0](https://github.com/michaelw/ext-authz-token-exchange/commit/007f4c0fe0f864f297e24f1899d1450f59be5f80))
+
 ## [0.6.2](https://github.com/michaelw/ext-authz-token-exchange/compare/v0.6.1...v0.6.2) (2026-11-04)
 
 
